@@ -17,6 +17,8 @@
     "jsx": "react-jsx",
 
     /* Linting */
+    "strict": true,
+    "paths": { "@/*": ["./src/*"] },
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "erasableSyntaxOnly": true,
