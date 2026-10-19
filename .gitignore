@@ -1,0 +1,26 @@
+# Python та кеш
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+
+# Віртуальні середовища
+venv/
+.venv/
+env/
+ENV/
+
+# Змінні середовища та секрети (найважливіше!)
+.env
+.env.local
+
+# Налаштування редакторів (VS Code)
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Системні файли ОС
+.DS_Store
+Thumbs.db
