@@ -1,5 +1,6 @@
-import { createBrowserRouter, Navigate } from 'react-router'
+import { createBrowserRouter } from 'react-router'
 import AdminPage from '@/pages/admin/AdminPage'
+import LandingPage from '@/pages/landing/LandingPage'
 import LoginPage from '@/pages/LoginPage'
 import NotFoundPage from '@/pages/NotFoundPage'
 import ParentPage from '@/pages/parent/ParentPage'
@@ -7,7 +8,7 @@ import StudentPage from '@/pages/student/StudentPage'
 import TeacherPage from '@/pages/teacher/TeacherPage'
 
 export const router = createBrowserRouter([
-  { path: '/', element: <Navigate to="/login" replace /> },
+  { path: '/', element: <LandingPage /> },
   { path: '/login', element: <LoginPage /> },
   { path: '/student', element: <StudentPage /> },
   { path: '/teacher', element: <TeacherPage /> },
