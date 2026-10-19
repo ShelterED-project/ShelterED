@@ -1,7 +1,9 @@
 from app.core.config import Settings
 
 
-def test_defaults():
+def test_defaults(monkeypatch):
+    # conftest.py виставляє тестові змінні оточення — для перевірки дефолтів прибираємо.
+    monkeypatch.delenv("ENVIRONMENT", raising=False)
     settings = Settings(_env_file=None)
     assert settings.profile == "cloud"
     assert settings.environment == "dev"

@@ -1,18 +1,20 @@
 import asyncio
 from logging.config import fileConfig
 
+from alembic import context
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from alembic import context
 from app.core.config import get_settings
 from app.models.base import Base
 
 config = context.config
 
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # disable_existing_loggers=False: інакше fileConfig вимикає вже створені логери
+    # застосунку (наприклад, коли міграції запускаються з тестів).
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 # Сюди Alembic дивиться під час autogenerate. Моделі мають бути імпортовані
 # (через app.models), щоб потрапити в metadata.

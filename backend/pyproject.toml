@@ -38,3 +38,7 @@ line-length = 100
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
+
+[tool.ruff.lint.isort]
+# Папка backend/alembic/ (міграції) — не пакет alembic.
+known-third-party = ["alembic"]

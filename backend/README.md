@@ -65,3 +65,18 @@ celery -A app.workers.celery_app worker -Q default,push,sync -l info --pool=solo
 `--pool=solo` потрібен лише на Windows (там Celery не підтримує стандартний prefork-пул); у Docker і на Linux цей прапорець не потрібен.
 
 Черги: `default` — загальні, `push` — Web Push, `sync` — обробка подій синхронізації. Задачі підтверджуються після виконання (`acks_late`), тому кожна задача має бути ідемпотентною. Перевірка: `python -c "from app.workers.system import ping; print(ping.delay().get(timeout=10))"` → `pong`.
+
+## Тести
+
+Тести з БД ходять у окрему PostgreSQL 17 у Docker (порт 5433, дані в tmpfs), **ніколи не в Neon**: `tests/conftest.py` підміняє `DATABASE_URL` до імпорту застосунку.
+
+```
+docker compose -f docker-compose.dev.yml up -d --wait test-db
+pytest
+ruff check . && ruff format --check .
+```
+
+- Міграції накочуються один раз за запуск (`migrated_db`).
+- Фікстура `db_session` відкриває транзакцію й відкочує її після тесту — навіть `commit()` у коді, що тестується, не залишає слідів.
+- Async-тести позначаються `pytestmark = pytest.mark.anyio`.
+- Інший адрес БД (наприклад, сервіс у CI): змінна `TEST_DATABASE_URL`.

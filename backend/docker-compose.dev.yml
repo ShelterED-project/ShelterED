@@ -10,3 +10,21 @@ services:
       interval: 5s
       timeout: 3s
       retries: 5
+
+  # Тестова БД для pytest. Та сама major-версія, що й у Neon. Дані в tmpfs —
+  # швидко й нічого не лишається після зупинки контейнера.
+  test-db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: sheltered
+      POSTGRES_PASSWORD: sheltered
+      POSTGRES_DB: sheltered_test
+    ports:
+      - "5433:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "sheltered", "-d", "sheltered_test"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
