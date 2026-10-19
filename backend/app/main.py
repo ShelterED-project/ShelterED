@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import health
 from app.core.config import APP_VERSION, get_settings
@@ -17,6 +18,15 @@ def create_app() -> FastAPI:
         responses={422: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
     )
     register_error_handlers(app)
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.cors_origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+        expose_headers=["X-Request-ID", "ETag"],
+    )
+    # Додана останньою — виконується першою, тож request ID є і в CORS-відповідях.
     app.add_middleware(RequestIdMiddleware)
     app.include_router(health.router)
     return app
