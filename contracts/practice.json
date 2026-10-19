@@ -1,0 +1,20 @@
+{
+  "action": "practice",
+  "grade": 6,
+  "subject": "math",
+  "topic": "Пропорції та відсотки",
+  "topic_id": "math_6_proportions_03",
+  "message": "Дай мені одну практичну задачу середнього рівня складності на обчислення відсотків від числа.",
+  "style": "interactive",
+  "level": "2",
+  "hints_used": 0,
+  "task": null,
+  "profile": {
+    "mastery": [
+      {
+        "topic_id": "math_6_proportions_03",
+        "mastery": 0.55
+      }
+    ]
+  }
+}

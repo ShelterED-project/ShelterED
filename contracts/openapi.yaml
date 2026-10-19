@@ -1,0 +1,246 @@
+openapi: 3.1.0
+info:
+  title: FastAPI
+  version: 0.1.0
+paths:
+  /health:
+    get:
+      summary: Health
+      operationId: health_health_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+  /ai/v1/chat:
+    post:
+      summary: Chat
+      operationId: chat_ai_v1_chat_post
+      parameters:
+      - name: x-internal-key
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: X-Internal-Key
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+components:
+  schemas:
+    ChatRequest:
+      properties:
+        action:
+          type: string
+          title: Action
+          default: explain
+        grade:
+          type: integer
+          maximum: 11.0
+          minimum: 1.0
+          title: Grade
+          default: 5
+        subject:
+          type: string
+          title: Subject
+          default: math
+        topic:
+          type: string
+          title: Topic
+          default: Fractions
+        topic_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Topic Id
+        message:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Message
+          default: Поясни як рахувати дроби
+        style:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Style
+          default: 'detailed '
+        level:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Level
+          default: '1'
+        task:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Task
+        hints_used:
+          anyOf:
+          - type: integer
+            maximum: 3.0
+            minimum: 0.0
+          - type: 'null'
+          title: Hints Used
+          default: 0
+        history:
+          anyOf:
+          - items:
+              additionalProperties:
+                type: string
+              type: object
+            type: array
+          - type: 'null'
+          title: History
+        profile:
+          anyOf:
+          - $ref: '#/components/schemas/UserProfile'
+          - type: 'null'
+      type: object
+      title: ChatRequest
+    ChatResponse:
+      properties:
+        reply:
+          type: string
+          title: Reply
+        intent:
+          $ref: '#/components/schemas/IntentEnum'
+        topic_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Topic Id
+        task:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Task
+        hints_used:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Hints Used
+        check_result:
+          anyOf:
+          - $ref: '#/components/schemas/CheckResult'
+          - type: 'null'
+      type: object
+      required:
+      - reply
+      - intent
+      title: ChatResponse
+    CheckResult:
+      properties:
+        correct:
+          type: boolean
+          title: Correct
+        score:
+          type: number
+          maximum: 1.0
+          minimum: 0.0
+          title: Score
+        error_type:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Error Type
+        method:
+          type: string
+          title: Method
+      type: object
+      required:
+      - correct
+      - score
+      - method
+      title: CheckResult
+    HTTPValidationError:
+      properties:
+        detail:
+          items:
+            $ref: '#/components/schemas/ValidationError'
+          type: array
+          title: Detail
+      type: object
+      title: HTTPValidationError
+    IntentEnum:
+      type: string
+      enum:
+      - explain
+      - practice
+      - check
+      title: IntentEnum
+    MasteryItem:
+      properties:
+        topic_id:
+          type: string
+          title: Topic Id
+        mastery:
+          type: number
+          maximum: 1.0
+          minimum: 0.0
+          title: Mastery
+      type: object
+      required:
+      - topic_id
+      - mastery
+      title: MasteryItem
+    UserProfile:
+      properties:
+        mastery:
+          anyOf:
+          - items:
+              $ref: '#/components/schemas/MasteryItem'
+            type: array
+            maxItems: 10
+          - type: 'null'
+          title: Mastery
+      type: object
+      title: UserProfile
+    ValidationError:
+      properties:
+        loc:
+          items:
+            anyOf:
+            - type: string
+            - type: integer
+          type: array
+          title: Location
+        msg:
+          type: string
+          title: Message
+        type:
+          type: string
+          title: Error Type
+        input:
+          title: Input
+        ctx:
+          type: object
+          title: Context
+      type: object
+      required:
+      - loc
+      - msg
+      - type
+      title: ValidationError

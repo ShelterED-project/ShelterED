@@ -1,0 +1,20 @@
+{
+  "action": "explain",
+  "grade": 5,
+  "subject": "math",
+  "topic": "Додавання дробів з різними знаменниками",
+  "topic_id": "math_5_fractions_01",
+  "message": "Поясни простими словами, як додавати дроби з різними знаменниками, і наведи один простий приклад.",
+  "style": "detailed",
+  "level": "1",
+  "hints_used": 0,
+  "task": null,
+  "profile": {
+    "mastery": [
+      {
+        "topic_id": "math_5_fractions_01",
+        "mastery": 0.4
+      }
+    ]
+  }
+}

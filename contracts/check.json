@@ -1,0 +1,23 @@
+{
+  "action": "check",
+  "grade": 8,
+  "subject": "physics",
+  "topic": "Закон Ома",
+  "topic_id": "phys_8_ohm_02",
+  "message": "Я розв'язав так: I = U / R = 12 / 4 = 3 Ампери.",
+  "style": "concise",
+  "level": "2",
+  "hints_used": 1,
+  "task": {
+    "question": "Знайдіть силу струму в провіднику з опором 4 Ом, якщо напруга на його клемах дорівнює 12 В.",
+    "expected_answer": "3 А"
+  },
+  "profile": {
+    "mastery": [
+      {
+        "topic_id": "phys_8_ohm_02",
+        "mastery": 0.7
+      }
+    ]
+  }
+}
