@@ -1,12 +1,24 @@
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import health
 from app.core.config import APP_VERSION, get_settings
+from app.core.db import get_engine
 from app.core.errors import register_error_handlers
 from app.core.logging import setup_logging
 from app.core.request_id import RequestIdMiddleware
 from app.schemas.errors import ErrorResponse
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    yield
+    # Закриваємо пул з'єднань, якщо його встигли створити.
+    if get_engine.cache_info().currsize:
+        await get_engine().dispose()
 
 
 def create_app() -> FastAPI:
@@ -15,6 +27,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title=settings.app_name,
         version=APP_VERSION,
+        lifespan=lifespan,
         responses={422: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
     )
     register_error_handlers(app)
