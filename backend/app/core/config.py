@@ -1,7 +1,11 @@
 from functools import lru_cache
+from importlib.metadata import version
 from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Єдине джерело версії — pyproject.toml (пакет встановлено через pip install -e).
+APP_VERSION = version("sheltered-backend")
 
 
 class Settings(BaseSettings):
