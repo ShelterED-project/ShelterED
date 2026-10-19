@@ -33,6 +33,11 @@ class Settings(BaseSettings):
     db_pool_size: int = 5
     db_max_overflow: int = 5
 
+    # Redis у Docker на 6380: 6379 на машині розробника займає нативний Redis.
+    # БД 0 — брокер черг Celery, БД 1 — результати задач.
+    redis_url: str = "redis://localhost:6380/0"
+    redis_result_url: str = "redis://localhost:6380/1"
+
 
 @lru_cache
 def get_settings() -> Settings:

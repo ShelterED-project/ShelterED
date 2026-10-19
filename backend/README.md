@@ -52,3 +52,16 @@ alembic upgrade head      # міграції застосовуються на �
 alembic check             # моделі не мають змін без міграції
 alembic downgrade base    # міграції відкочуються
 ```
+
+## Фонові задачі (Celery + Redis)
+
+Redis для розробки піднімається в Docker на порту **6380** (6379 часто зайнятий локальним Redis):
+
+```
+docker compose -f docker-compose.dev.yml up -d redis
+celery -A app.workers.celery_app worker -Q default,push,sync -l info --pool=solo
+```
+
+`--pool=solo` потрібен лише на Windows (там Celery не підтримує стандартний prefork-пул); у Docker і на Linux цей прапорець не потрібен.
+
+Черги: `default` — загальні, `push` — Web Push, `sync` — обробка подій синхронізації. Задачі підтверджуються після виконання (`acks_late`), тому кожна задача має бути ідемпотентною. Перевірка: `python -c "from app.workers.system import ping; print(ping.delay().get(timeout=10))"` → `pong`.
