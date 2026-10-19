@@ -13,6 +13,9 @@ dependencies = [
     "pydantic-settings==2.16.0",
     "sqlalchemy[asyncio]==2.1.5",
     "asyncpg==0.32.0",
+    "alembic==1.20.0",
+    # База часових поясів для zoneinfo: на Windows її немає (UTC, Europe/Kyiv).
+    "tzdata==2026.5",
 ]
 
 [project.optional-dependencies]

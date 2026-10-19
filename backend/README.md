@@ -31,3 +31,24 @@ app/
 Пізніше додаються `push` (Web Push, B8) і `tutor` (проксі до AI-сервісу, B13).
 
 Залежності між шарами йдуть в один бік: `api → services → models`. Роутер не звертається до БД напряму, а сервіс нічого не знає про HTTP.
+
+## Міграції (Alembic)
+
+Усі зміни схеми — лише через міграції. Alembic підключається через `DATABASE_URL_DIRECT` (для Neon — direct endpoint, не `-pooler`).
+
+```
+alembic upgrade head                              # застосувати всі міграції
+alembic revision --autogenerate -m "<опис>"        # нова міграція з різниці моделей і БД
+alembic downgrade -1                              # відкотити останню
+alembic current                                   # на якій ревізії зараз БД
+```
+
+Нові файли міграцій автоматично проходять `ruff check --fix` і `ruff format`.
+
+Для CI (запускати з `backend/` після підняття тестової БД):
+
+```
+alembic upgrade head      # міграції застосовуються на чистій БД
+alembic check             # моделі не мають змін без міграції
+alembic downgrade base    # міграції відкочуються
+```
