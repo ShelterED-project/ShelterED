@@ -1,7 +1,7 @@
 import { createBrowserRouter } from 'react-router'
 import AdminPage from '@/pages/admin/AdminPage'
 import LandingPage from '@/pages/landing/LandingPage'
-import LoginPage from '@/pages/LoginPage'
+import LoginPage from '@/pages/login/LoginPage'
 import NotFoundPage from '@/pages/NotFoundPage'
 import ParentPage from '@/pages/parent/ParentPage'
 import RegisterPage from '@/pages/register/RegisterPage'

@@ -1,5 +1,7 @@
 import type { InputHTMLAttributes, ReactNode, SelectHTMLAttributes } from 'react'
-import { useId } from 'react'
+import { useId, useState } from 'react'
+import iconEye from '@/assets/auth/icon-eye.svg'
+import iconLock from '@/assets/auth/icon-lock.svg'
 
 type ShellProps = {
   label: string
@@ -59,6 +61,36 @@ export function TextField({
         />
       )}
     </FieldShell>
+  )
+}
+
+export function PasswordField({
+  label = 'Пароль',
+  hint,
+  error,
+  ...input
+}: Pick<CommonProps, 'hint' | 'error'> & { label?: string } & Omit<InputHTMLAttributes<HTMLInputElement>, 'type'>) {
+  const [visible, setVisible] = useState(false)
+  return (
+    <TextField
+      label={label}
+      icon={iconLock}
+      type={visible ? 'text' : 'password'}
+      hint={hint}
+      error={error}
+      trailing={
+        <button
+          type="button"
+          onClick={() => setVisible((v) => !v)}
+          aria-label={visible ? 'Сховати пароль' : 'Показати пароль'}
+          aria-pressed={visible}
+          className="absolute top-1/2 right-2 flex size-9 -translate-y-1/2 items-center justify-center rounded-lg hover:bg-surface-2 focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:outline-none"
+        >
+          <img src={iconEye} alt="" width={18} height={18} />
+        </button>
+      }
+      {...input}
+    />
   )
 }
 
