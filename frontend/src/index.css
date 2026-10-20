@@ -1,4 +1,29 @@
+@import "@fontsource/dela-gothic-one/400.css";
+@import "@fontsource/golos-text/400.css";
+@import "@fontsource/golos-text/500.css";
+@import "@fontsource/golos-text/600.css";
+@import "@fontsource/golos-text/700.css";
+@import "@fontsource/caveat/600.css";
 @import "tailwindcss";
+
+@theme {
+  --font-heading: "Dela Gothic One", system-ui, sans-serif;
+  --font-sans: "Golos Text", system-ui, sans-serif;
+  --font-mole: "Caveat", cursive;
+
+  --color-oil: #17120d;
+  --color-surface: #211a13;
+  --color-surface-2: #2a2118;
+  --color-line-soft: #33291f;
+  --color-line: #3a2f24;
+  --color-line-strong: #4a3d30;
+  --color-accent: #f2b25c;
+  --color-accent-soft: #3a2b1a;
+  --color-parchment: #f3e9da;
+  --color-muted: #cdbfa9;
+  --color-dim: #a8977f;
+  --color-danger: #f2a0a8;
+}
 
 :root {
   color-scheme: dark;
@@ -6,6 +31,18 @@
 
 body {
   margin: 0;
-  background-color: #0f172a;
-  color: #e2e8f0;
+  background-color: var(--color-oil);
+  color: var(--color-parchment);
+  font-family: var(--font-sans);
+}
+
+html {
+  scroll-behavior: smooth;
+  scroll-padding-top: 5rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
 }
