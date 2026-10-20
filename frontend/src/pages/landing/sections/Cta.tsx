@@ -16,7 +16,7 @@ export default function Cta() {
             Підключення займає кілька хвилин: вчитель створює клас, учні входять за кодом.
           </p>
         </div>
-        <Button to="/login" variant="primary" className="h-14 px-7">
+        <Button to="/register" variant="primary" className="h-14 px-7">
           Зареєструвати школу
         </Button>
       </div>
