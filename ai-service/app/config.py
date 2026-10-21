@@ -1,13 +1,13 @@
 from pydantic_settings import BaseSettings,SettingsConfigDict
 
 class Settings(BaseSettings):
-    AI_KEY: str = "ollama"
-    LLM_BASE_URL: str = 'http://localhost:11434/v1'
-    MODELS: str = "deepseek-r1"
+    AI_KEY: str 
+    LLM_BASE_URL: str
+    MODELS: str 
 
-    INTERNAL_KEY: str = "super-secret-internal-key"
+    INTERNAL_KEY: str
 
-    MOCK_LLM: bool = False
+    MOCK_LLM: bool
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
