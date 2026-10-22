@@ -1,6 +1,5 @@
-import { useState } from 'react'
 import iconClock from '@/assets/parent/clock-sm.svg'
-import { markStatus } from '@/features/roll-call/rollCall'
+import { useRollCall } from '@/features/roll-call/useRollCall'
 import type { RollCallStatus } from '@/features/roll-call/types'
 import { checkIn } from '../content'
 
@@ -10,12 +9,7 @@ const STATUS_LABELS: Record<RollCallStatus, string> = {
 }
 
 export default function CheckIn() {
-  const [lastStatus, setLastStatus] = useState<RollCallStatus | null>(null)
-
-  const mark = async (status: RollCallStatus) => {
-    await markStatus(status)
-    setLastStatus(status)
-  }
+  const { lastStatus, mark } = useRollCall()
 
   return (
     <section className="flex flex-col gap-3 rounded-[22px] border border-line bg-surface p-5 xl:p-6">
@@ -32,7 +26,7 @@ export default function CheckIn() {
       <button
         type="button"
         onClick={() => mark('safe')}
-        className="h-12 rounded-[10px] border border-line-strong text-[15px] font-semibold text-parchment hover:bg-surface-2 focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:outline-none"
+        className="h-14 rounded-[10px] border border-line-strong text-base font-semibold text-parchment hover:bg-surface-2 focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:outline-none"
       >
         {checkIn.safe}
       </button>
