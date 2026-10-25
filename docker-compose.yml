@@ -1,0 +1,11 @@
+services:
+  ai-service:
+    build:
+      context: ./ai-service
+    image: sheltered/ai-service:latest
+    container_name: sheltered-ai
+    env_file: .env
+    ports:
+      - "127.0.0.1:8000:8000"
+    restart: unless-stopped
+    mem_limit: 512m

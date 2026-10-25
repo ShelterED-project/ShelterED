@@ -21,7 +21,7 @@ def chat(req: ChatRequest, x_internal_key: str | None = Header(default=None)):
         raise HTTPException(status_code=422, detail={"code": "task_required"})
 
     if settings.MOCK_LLM:
-        reply_text = "AI engineer зараз вивчає Delphi 🧠⚡напиши йому за зняття заглушки" 
+        reply_text = "DevOps engineer зараз вивчає Delphi 🧠⚡напиши йому за зняття заглушки" 
     else:
         reply_text = generate_ai_response(req.message)
     
