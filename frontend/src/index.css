@@ -23,6 +23,9 @@
   --color-muted: #cdbfa9;
   --color-dim: #a8977f;
   --color-danger: #f2a0a8;
+  --color-sidebar: #1d1712;
+  --color-safe: #8fd3c3;
+  --color-sos: #c62828;
 }
 
 :root {
