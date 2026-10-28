@@ -37,6 +37,8 @@ jobs:
           flake8 backend/ --max-line-length=120 --exclude=venv,__pycache__
 
       - name: Запуск автоматичних тестів pytest
+        env:
+          PYTHONPATH: backend
         run: |
           pytest backend/tests/
 
