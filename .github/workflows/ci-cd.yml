@@ -27,6 +27,11 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r backend/requirements.txt
+          if [ -f "backend/pyproject.toml" ] || [ -f "backend/setup.py" ]; then
+            pip install -e backend/
+          elif [ -f "pyproject.toml" ] || [ -f "setup.py" ]; then
+            pip install -e .
+          fi
 
       - name: Запуск лінтера Ruff
         run: |
