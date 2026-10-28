@@ -1,7 +1,9 @@
 from fastapi.testclient import TestClient
+
 from app.main import app
 
 client = TestClient(app)
+
 
 def test_root_endpoint():
     response = client.get("/")
@@ -9,6 +11,7 @@ def test_root_endpoint():
     data = response.json()
     assert data["status"] == "online"
     assert "ShelterED Backend" in data["message"]
+
 
 def test_health_endpoint():
     response = client.get("/health")
