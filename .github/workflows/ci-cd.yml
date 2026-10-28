@@ -13,6 +13,21 @@ permissions:
 jobs:
   backend-checks:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: sheltered
+          POSTGRES_PASSWORD: sheltered
+          POSTGRES_DB: sheltered_test
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U sheltered -d sheltered_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
       - name: Checkout коду
         uses: actions/checkout@v4
