@@ -69,6 +69,10 @@ jobs:
       - name: Checkout коду
         uses: actions/checkout@v4
 
+      - name: Підготовка назви репозиторію в нижньому регістрі
+        run: |
+          echo "IMAGE_PREFIX=ghcr.io/$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+
       - name: Логін у GitHub Container Registry (GHCR)
         uses: docker/login-action@v3
         with:
@@ -85,7 +89,7 @@ jobs:
           context: ./backend
           file: ./backend/Dockerfile
           push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-          tags: ghcr.io/${{ github.repository }}/backend:latest
+          tags: ${{ env.IMAGE_PREFIX }}/backend:latest
 
       - name: Build and Push Frontend
         uses: docker/build-push-action@v5
@@ -93,4 +97,4 @@ jobs:
           context: ./frontend
           file: ./frontend/Dockerfile
           push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-          tags: ghcr.io/${{ github.repository }}/frontend:latest
+          tags: ${{ env.IMAGE_PREFIX }}/frontend:latest
