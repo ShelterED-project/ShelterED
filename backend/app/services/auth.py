@@ -191,8 +191,10 @@ async def student_join(
     settings: Settings,
     user_agent: str | None = None,
 ) -> TokenResponse:
+    # FOR UPDATE: входи в один клас ідуть по черзі, тож два одночасні перші входи
+    # з тим самим ім'ям (подвійне натискання, повтор запиту) не створять двох учнів.
     klass = await session.scalar(
-        select(SchoolClass).where(SchoolClass.join_code == join_code.strip())
+        select(SchoolClass).where(SchoolClass.join_code == join_code.strip()).with_for_update()
     )
     if klass is None or (klass.join_code_expires_at and klass.join_code_expires_at <= _now()):
         raise AppError("INVALID_JOIN_CODE", "Invalid or expired class code", status_code=400)
