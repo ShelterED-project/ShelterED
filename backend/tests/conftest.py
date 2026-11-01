@@ -12,14 +12,31 @@ os.environ["DATABASE_URL_DIRECT"] = TEST_DATABASE_URL
 os.environ["DATABASE_SSL"] = "false"
 os.environ["JWT_SECRET"] = "test-secret-not-for-production-0123456789"
 
+import uuid  # noqa: E402
 from collections.abc import AsyncIterator  # noqa: E402
+from functools import lru_cache  # noqa: E402
 from pathlib import Path  # noqa: E402
+from types import SimpleNamespace  # noqa: E402
 
 import pytest  # noqa: E402
 from alembic import command  # noqa: E402
 from alembic.config import Config  # noqa: E402
+from fastapi import FastAPI  # noqa: E402
+from httpx import ASGITransport, AsyncClient  # noqa: E402
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine  # noqa: E402
 from sqlalchemy.pool import NullPool  # noqa: E402
+
+from app.core.config import get_settings  # noqa: E402
+from app.core.db import get_session  # noqa: E402
+from app.core.security import create_access_token, hash_secret  # noqa: E402
+from app.main import create_app  # noqa: E402
+from app.models.school import (  # noqa: E402
+    ClassMembership,
+    ParentChild,
+    School,
+    SchoolClass,
+    User,
+)
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent
 
@@ -58,3 +75,136 @@ async def db_session(migrated_db: str) -> AsyncIterator[AsyncSession]:
             await session.close()
             await transaction.rollback()
     await engine.dispose()
+
+
+# ---------- користувачі й HTTP-клієнт для тестів авторизації ----------
+
+PASSWORD = "correct-horse-battery"
+PIN = "1234"
+
+
+@lru_cache
+def _password_hash() -> str:
+    return hash_secret(PASSWORD)
+
+
+@lru_cache
+def _pin_hash() -> str:
+    return hash_secret(PIN)
+
+
+class Factory:
+    """Створює школи, класи й користувачів у поточній тестовій транзакції."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
+
+    async def school(self, name: str = "Школа 1") -> School:
+        school = School(name=name, region_code="kyiv")
+        self.session.add(school)
+        await self.session.flush()
+        return school
+
+    async def klass(self, school: School, name: str = "7-А", *, expires=None) -> SchoolClass:
+        klass = SchoolClass(
+            school_id=school.id,
+            name=name,
+            grade=7,
+            academic_year="2026/2027",
+            join_code=uuid.uuid4().hex[:8].upper(),
+            join_code_expires_at=expires,
+        )
+        self.session.add(klass)
+        await self.session.flush()
+        return klass
+
+    async def adult(self, role: str, school: School | None, name: str = "Олена") -> User:
+        user = User(
+            role=role,
+            display_name=name,
+            school_id=None if role == "parent" else school.id,
+            email=f"{uuid.uuid4().hex[:10]}@example.com",
+            password_hash=_password_hash(),
+        )
+        self.session.add(user)
+        await self.session.flush()
+        return user
+
+    async def teacher(self, school: School, klass: SchoolClass | None = None) -> User:
+        teacher = await self.adult("teacher", school)
+        if klass:
+            self.session.add(
+                ClassMembership(class_id=klass.id, user_id=teacher.id, member_role="teacher")
+            )
+            await self.session.flush()
+        return teacher
+
+    async def student(self, klass: SchoolClass, name: str = "Іван", last: str = "Петренко") -> User:
+        student = User(
+            role="student",
+            display_name=name,
+            last_name=last,
+            school_id=klass.school_id,
+            pin_hash=_pin_hash(),
+        )
+        self.session.add(student)
+        await self.session.flush()
+        self.session.add(
+            ClassMembership(class_id=klass.id, user_id=student.id, member_role="student")
+        )
+        await self.session.flush()
+        return student
+
+    async def parent_of(self, student: User) -> User:
+        parent = await self.adult("parent", None, "Марія")
+        self.session.add(ParentChild(parent_id=parent.id, child_id=student.id))
+        await self.session.flush()
+        return parent
+
+
+@pytest.fixture
+def factory(db_session: AsyncSession) -> Factory:
+    return Factory(db_session)
+
+
+@pytest.fixture
+async def world(factory: Factory) -> SimpleNamespace:
+    """Школа з двома класами, друга школа з одним; по користувачу кожної ролі."""
+    w = SimpleNamespace()
+    w.school = await factory.school()
+    w.other_school = await factory.school("Школа 2")
+    w.class_a = await factory.klass(w.school, "7-А")
+    w.class_b = await factory.klass(w.school, "7-Б")
+    w.class_c = await factory.klass(w.other_school, "7-В")
+    w.admin = await factory.adult("admin", w.school)
+    w.other_admin = await factory.adult("admin", w.other_school)
+    w.teacher_a = await factory.teacher(w.school, w.class_a)
+    w.teacher_b = await factory.teacher(w.school, w.class_b)
+    w.student_a = await factory.student(w.class_a, "Іван", "Петренко")
+    w.student_b = await factory.student(w.class_b, "Марко", "Коваль")
+    w.student_c = await factory.student(w.class_c, "Оксана", "Бойко")
+    w.parent_a = await factory.parent_of(w.student_a)
+    w.parent_free = await factory.adult("parent", None, "Без дитини")
+    return w
+
+
+def auth_header(user: User) -> dict[str, str]:
+    """Access-токен, випущений напряму (без HTTP-входу)."""
+    return {"Authorization": f"Bearer {create_access_token(user.id, user.role, get_settings())}"}
+
+
+@pytest.fixture
+def app(db_session: AsyncSession) -> FastAPI:
+    application = create_app()
+
+    async def override_session() -> AsyncIterator[AsyncSession]:
+        yield db_session
+
+    application.dependency_overrides[get_session] = override_session
+    return application
+
+
+@pytest.fixture
+async def client(app: FastAPI) -> AsyncIterator[AsyncClient]:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        yield c

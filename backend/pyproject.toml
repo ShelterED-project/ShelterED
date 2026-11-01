@@ -44,3 +44,7 @@ select = ["E", "F", "I", "UP", "B"]
 [tool.ruff.lint.isort]
 # Папка backend/alembic/ (міграції) — не пакет alembic.
 known-third-party = ["alembic"]
+
+[tool.ruff.lint.per-file-ignores]
+# У тестах рядки з URL і перевірками статусів зручніше тримати в один рядок.
+"tests/*" = ["E501"]

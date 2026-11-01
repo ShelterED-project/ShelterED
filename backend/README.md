@@ -32,6 +32,25 @@ app/
 
 Залежності між шарами йдуть в один бік: `api → services → models`. Роутер не звертається до БД напряму, а сервіс нічого не знає про HTTP.
 
+## Авторизація
+
+Потрібна змінна `JWT_SECRET` (без значення за замовчуванням, див. `.env.example`; без неї не стартують ні API, ні Alembic). Access-токен — JWT HS256, 15 хв; refresh — випадковий рядок (у БД лише хеш), 30 днів, з ротацією: повторне використання вже обробленого токена відкликає всі токени цього входу.
+
+- **Дорослі** (вчитель, батьки, адмін; акаунти створює лише адміністрація): OAuth 2.0 Authorization Code + PKCE (S256). `POST /auth/authorize` (email, пароль, `code_challenge`) → `code` (60 с, одноразовий); `POST /auth/token` (`grant_type=authorization_code` + `code_verifier`, або `refresh_token`; JSON чи form) → токени; `POST /auth/logout`; `GET /auth/me`.
+- **Учень**: `POST /auth/student/join` — код класу, імʼя, прізвище, PIN (4–6 цифр). Нового учня створює, наявного (збіг імені й прізвища в класі без урахування регістру) пускає за PIN. Вчитель класу чи адмін скидає PIN: `POST /classes/{class_id}/students/{student_id}/pin-reset`.
+- **Батьки**: вчитель чи адмін видає код `POST /students/{id}/parent-link-codes` (7 днів), батьки вводять його в `POST /parent/link`.
+- Адмін створює вчителів, батьків, адмінів: `POST /admin/users`.
+- Блокування акаунтів немає (діти могли б блокувати однокласників); захист від підбору паролів і PIN — rate limiting запитів в епіку безпеки.
+- Залежності доступу: `app/api/deps.py` (`get_current_user`, `require_roles`, `get_accessible_class`, `get_accessible_student`).
+
+Перший адмін школи (школа має вже існувати в БД):
+
+```
+python -m app.cli create-admin --email admin@school.ua --name Імʼя --school-id <uuid>
+```
+
+Пароль запитується в терміналі; для скриптів є `--password`.
+
 ## Міграції (Alembic)
 
 Усі зміни схеми — лише через міграції. Alembic підключається через `DATABASE_URL_DIRECT` (для Neon — direct endpoint, не `-pooler`).
