@@ -83,7 +83,7 @@ erDiagram
 | name | text NOT NULL | «7-А» |
 | grade | smallint CHECK 1..11 | |
 | academic_year | text NOT NULL | «2026/2027» |
-| join_code | text UNIQUE NOT NULL | код класу для входу учнів (B3.3, B5.1); зберігається нормалізованим: верхній регістр, без пробілів і `-` (`normalize_link_code`), на вході нормалізується так само |
+| join_code | text UNIQUE NOT NULL | код класу для входу учнів (B3.3, B5.1); зберігається нормалізованим: лише `A-Z0-9` (`normalize_link_code`, CHECK `ck_school_class_join_code_format`), на вході нормалізується так само |
 | join_code_expires_at | timestamptz NULL | щоб старий код можна було відкликати; обмежує лише створення нових учнів, наявні входять і після нього |
 
 UNIQUE (`school_id`, `academic_year`, `name`).
@@ -99,6 +99,8 @@ UNIQUE (`school_id`, `academic_year`, `name`).
 | email | citext UNIQUE NULL | лише вчитель / батьки / адміністрація; в учня завжди NULL |
 | password_hash | text NULL | NULL для учня (вхід за кодом класу) |
 | pin_hash | text NULL | PIN учня (argon2); NULL після скидання вчителем. Лише для `student` |
+| name_key | text NULL, індекс | нормалізовані імʼя+прізвище учня для пошуку в класі; у дорослих NULL |
+| token_version | integer NOT NULL default 0 | епоха облікових даних: скидання PIN збільшує; access-токен несе `ver`, refresh-токен зберігає версію |
 | is_active | boolean default true | |
 | last_seen_at | timestamptz NULL | |
 
@@ -391,11 +393,13 @@ UNIQUE (`lesson_id`, `part`, `position`).
 |---|---|---|
 | id | uuid PK | |
 | user_id | uuid FK → app_user ON DELETE CASCADE | |
-| family_id | uuid NOT NULL | спільний для всіх токенів одного входу; індекс `ix_refresh_token_family_id` |
+| family_id | uuid NOT NULL | спільний для всіх токенів одного входу; індекс `ix_refresh_token_family_id`; також `ix_refresh_token_user_id` |
 | token_hash | text UNIQUE NOT NULL | |
 | expires_at | timestamptz NOT NULL | 30 днів |
-| revoked_at | timestamptz NULL | ротація, вихід або виявлене повторне використання |
-| replaced_by_id | uuid FK → refresh_token NULL | токен, який видали замість цього |
+| rotated_at | timestamptz NULL | токен ротовано (звичайна заміна); дає право на повтор у межах вікна |
+| revoked_at | timestamptz NULL | вихід, скидання PIN або відкликана родина; такий токен не працює ніколи |
+| replaced_by_id | uuid FK → refresh_token NULL | найновіший токен, виданий замість цього (при повторі переставляється) |
+| token_version | integer NOT NULL default 0 | `app_user.token_version` на момент видачі |
 | created_at | timestamptz default now() | |
 | user_agent | text NULL | без IP-адреси |
 
@@ -445,3 +449,6 @@ UNIQUE (`lesson_id`, `part`, `position`).
 8. **Видалення даних учня** — ✅ повне видалення, `ON DELETE CASCADE` від користувача до його даних.
 9. **`region_code`** — ✅ звичайний `text`.
 10. **Предмети** — ✅ `subject.school_id = NULL` означає загальний довідник.
+
+
+> `alert_event`: унікальний індекс `uq_alert_event_source_external_school` частковий, тому ідемпотентна вставка має бути `on_conflict_do_nothing(index_elements=[...], index_where=text("external_id IS NOT NULL"))`, а не `constraint=`.

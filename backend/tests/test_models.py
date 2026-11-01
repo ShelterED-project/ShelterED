@@ -2,11 +2,13 @@ import datetime as dt
 import uuid
 
 import pytest
+from conftest import Factory
 from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.security import new_link_code
 from app.models.alerts import AlertEvent
 from app.models.lessons import Lesson, Module, Subject, Test
 from app.models.rollcall import RollCallSession, RollCallStatus
@@ -20,15 +22,13 @@ NOW = dt.datetime(2026, 11, 1, 10, 0, tzinfo=dt.UTC)
 
 async def make_graph(session: AsyncSession) -> dict:
     """Школа, клас, вчитель, учень, урок з модулем і тестом."""
-    school = School(name="Школа 1", region_code="kyiv")
-    session.add(school)
-    await session.flush()
+    school = await Factory(session).school()
     klass = SchoolClass(
         school_id=school.id,
         name="7-А",
         grade=7,
         academic_year="2026/2027",
-        join_code=uuid.uuid4().hex[:8].upper(),
+        join_code=new_link_code(),
     )
     teacher = User(role="teacher", display_name="Олена", school_id=school.id, email="t@example.com")
     student = User(role="student", display_name="Іван", last_name="Петренко", school_id=school.id)

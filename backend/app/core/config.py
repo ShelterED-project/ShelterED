@@ -37,9 +37,9 @@ class Settings(BaseSettings):
     jwt_secret: SecretStr
     access_token_ttl_min: int = 15
     refresh_token_ttl_days: int = 30
-    # Вікно, у якому повторне пред'явлення щойно ротованого refresh-токена вважається повтором
-    # через втрачену відповідь (обрив мережі), а не крадіжкою.
-    refresh_reuse_grace_seconds: int = 60
+    # Вікно, у якому повторне пред'явлення ротованого refresh-токена вважається повтором
+    # через втрачену відповідь (обрив мережі, дві вкладки), а не крадіжкою.
+    refresh_reuse_grace_seconds: int = 300
     auth_code_ttl_s: int = 60
     parent_link_code_ttl_days: int = 7
     # Дозволені client_id для OAuth 2.0 PKCE (PWA).
