@@ -1,4 +1,8 @@
+from pathlib import Path
+
 import pytest
+from alembic.config import Config
+from alembic.script import ScriptDirectory
 from sqlalchemy import text
 
 pytestmark = pytest.mark.anyio
@@ -6,7 +10,9 @@ pytestmark = pytest.mark.anyio
 
 async def test_migrations_applied(db_session):
     version = await db_session.scalar(text("SELECT version_num FROM alembic_version"))
-    assert version == "a557c94df097"
+    alembic_ini = Path(__file__).resolve().parents[1] / "alembic.ini"
+    head = ScriptDirectory.from_config(Config(str(alembic_ini))).get_current_head()
+    assert version == head
 
 
 async def test_changes_are_rolled_back_part_1(db_session):
