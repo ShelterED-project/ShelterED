@@ -10,6 +10,7 @@ os.environ["ENVIRONMENT"] = "test"
 os.environ["DATABASE_URL"] = TEST_DATABASE_URL
 os.environ["DATABASE_URL_DIRECT"] = TEST_DATABASE_URL
 os.environ["DATABASE_SSL"] = "false"
+os.environ["JWT_SECRET"] = "test-secret-not-for-production-0123456789"
 
 from collections.abc import AsyncIterator  # noqa: E402
 from pathlib import Path  # noqa: E402

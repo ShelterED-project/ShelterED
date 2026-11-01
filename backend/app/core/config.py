@@ -33,6 +33,15 @@ class Settings(BaseSettings):
     db_pool_size: int = 5
     db_max_overflow: int = 5
 
+    # Секрет підпису JWT: обов'язковий, значення за замовчуванням немає.
+    jwt_secret: SecretStr
+    access_token_ttl_min: int = 15
+    refresh_token_ttl_days: int = 30
+    auth_code_ttl_s: int = 60
+    parent_link_code_ttl_days: int = 7
+    # Дозволені client_id для OAuth 2.0 PKCE (PWA).
+    oauth_client_ids: list[str] = ["sheltered-pwa"]
+
     # Redis у Docker на 6380: 6379 на машині розробника займає нативний Redis.
     # БД 0 — брокер черг Celery, БД 1 — результати задач.
     redis_url: str = "redis://localhost:6380/0"
