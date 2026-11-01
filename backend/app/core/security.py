@@ -5,6 +5,7 @@ import secrets
 import uuid
 
 import jwt
+from anyio import to_thread
 from pwdlib import PasswordHash
 
 from app.core.config import Settings
@@ -34,6 +35,15 @@ def verify_secret(value: str, hashed: str | None) -> bool:
     return _hasher.verify(value, hashed)
 
 
+async def hash_secret_async(value: str) -> str:
+    """argon2 рахується десятки мс: виносимо з event loop у потік."""
+    return await to_thread.run_sync(hash_secret, value)
+
+
+async def verify_secret_async(value: str, hashed: str | None) -> bool:
+    return await to_thread.run_sync(verify_secret, value, hashed)
+
+
 def hash_token(token: str) -> str:
     """SHA-256 для токенів і кодів з високою ентропією: у БД лише хеш."""
     return hashlib.sha256(token.encode()).hexdigest()
@@ -48,6 +58,10 @@ def new_link_code() -> str:
 
 
 def normalize_link_code(code: str) -> str:
+    """Канонічна форма коду, який диктують вручну (код класу, код прив'язки батьків).
+
+    Усі такі коди зберігаються й шукаються саме в цій формі: верхній регістр, без пробілів і `-`.
+    """
     return code.strip().upper().replace("-", "").replace(" ", "")
 
 

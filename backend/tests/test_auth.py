@@ -2,6 +2,7 @@ import base64
 import datetime as dt
 import hashlib
 import secrets
+import uuid
 
 import jwt
 import pytest
@@ -11,8 +12,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
+from app.core.errors import AppError
 from app.core.security import hash_token
 from app.models.auth import AuthCode, RefreshToken
+from app.models.school import User
+from app.services.auth import create_account
 
 pytestmark = pytest.mark.anyio
 
@@ -227,9 +231,20 @@ async def test_refresh_rotation(client: AsyncClient, world, db_session: AsyncSes
     assert me.status_code == 200
 
 
-async def test_reused_refresh_token_revokes_family(client: AsyncClient, world) -> None:
+async def age_revocation(db_session: AsyncSession, raw: str, seconds: int = 120) -> None:
+    """Зсуває момент ротації назад: виводить токен за межі вікна повтору."""
+    row = await db_session.scalar(
+        select(RefreshToken).where(RefreshToken.token_hash == hash_token(raw))
+    )
+    row.revoked_at = dt.datetime.now(dt.UTC) - dt.timedelta(seconds=seconds)
+
+
+async def test_reused_refresh_token_revokes_family(
+    client: AsyncClient, world, db_session: AsyncSession
+) -> None:
     first = await login(client, world.teacher_a.email)
     second = (await refresh(client, first["refresh_token"])).json()
+    await age_revocation(db_session, first["refresh_token"])
     # Зловмисник (або старий клієнт) пред'являє вже ротований токен.
     reuse = await refresh(client, first["refresh_token"])
     assert reuse.status_code == 400
@@ -238,10 +253,13 @@ async def test_reused_refresh_token_revokes_family(client: AsyncClient, world) -
     assert (await refresh(client, second["refresh_token"])).status_code == 400
 
 
-async def test_revocation_does_not_touch_other_families(client: AsyncClient, world) -> None:
+async def test_revocation_does_not_touch_other_families(
+    client: AsyncClient, world, db_session: AsyncSession
+) -> None:
     a = await login(client, world.teacher_a.email)
     b = await login(client, world.teacher_a.email)
     await refresh(client, a["refresh_token"])
+    await age_revocation(db_session, a["refresh_token"])
     await refresh(client, a["refresh_token"])  # reuse -> родина a відкликана
     assert (await refresh(client, b["refresh_token"])).status_code == 200
 
@@ -457,3 +475,136 @@ async def test_pin_reset_student_must_be_in_class(client: AsyncClient, world) ->
     resp = await client.post(url, headers=auth_header(world.teacher_a))
     assert resp.status_code == 404
     assert world.student_b.pin_hash is not None
+
+
+# ---------- додаткові перевірки ----------
+
+
+async def _row(db_session: AsyncSession, raw: str) -> RefreshToken:
+    return await db_session.scalar(
+        select(RefreshToken).where(RefreshToken.token_hash == hash_token(raw))
+    )
+
+
+async def test_refresh_retry_within_grace_keeps_family(
+    client: AsyncClient, world, db_session: AsyncSession
+) -> None:
+    first = await login(client, world.teacher_a.email)
+    lost = (await refresh(client, first["refresh_token"])).json()  # відповідь «загубилась»
+    retry = await refresh(client, first["refresh_token"])
+    assert retry.status_code == 200
+    fresh = retry.json()
+    # Токен із загубленої відповіді відкликано, новий працює, родина жива.
+    assert (await _row(db_session, lost["refresh_token"])).revoked_at is not None
+    assert (await _row(db_session, fresh["refresh_token"])).revoked_at is None
+    again = await refresh(client, fresh["refresh_token"])
+    assert again.status_code == 200
+    rows = (await db_session.scalars(select(RefreshToken))).all()
+    assert len({r.family_id for r in rows}) == 1
+
+
+async def test_refresh_retry_after_grace_revokes_family(
+    client: AsyncClient, world, db_session: AsyncSession
+) -> None:
+    first = await login(client, world.teacher_a.email)
+    second = (await refresh(client, first["refresh_token"])).json()
+    row = await _row(db_session, first["refresh_token"])
+    row.revoked_at = dt.datetime.now(dt.UTC) - dt.timedelta(seconds=120)
+    reuse = await refresh(client, first["refresh_token"])
+    assert reuse.status_code == 400
+    assert (await refresh(client, second["refresh_token"])).status_code == 400
+
+
+async def test_refresh_retry_after_successor_used_revokes_family(
+    client: AsyncClient, world
+) -> None:
+    first = await login(client, world.teacher_a.email)
+    second = (await refresh(client, first["refresh_token"])).json()
+    third = (await refresh(client, second["refresh_token"])).json()
+    # Наступник уже використано, тож це не повтор, а повторне використання.
+    assert (await refresh(client, first["refresh_token"])).status_code == 400
+    assert (await refresh(client, third["refresh_token"])).status_code == 400
+
+
+async def test_student_name_normalization(
+    client: AsyncClient, world, db_session: AsyncSession
+) -> None:
+    first = await client.post(
+        "/auth/student/join", json=join_body(world.class_a, "Дар’я", "Мельник  Коваль")
+    )
+    assert first.status_code == 200
+    for name, last in (("дар`я", " МЕЛЬНИК коваль"), ("ДАРʼЯ", "мельник\tКоваль")):
+        again = await client.post("/auth/student/join", json=join_body(world.class_a, name, last))
+        assert again.status_code == 200, name
+        assert await me_id(client, again.json()) == await me_id(client, first.json())
+    user = await db_session.get(User, uuid.UUID(await me_id(client, first.json())))
+    assert (user.display_name, user.last_name) == ("Дар'я", "Мельник Коваль")
+
+
+async def test_student_swapped_names_do_not_match(client: AsyncClient, world) -> None:
+    first = await client.post(
+        "/auth/student/join", json=join_body(world.class_a, "Іван", "Мельник")
+    )
+    swapped = await client.post(
+        "/auth/student/join", json=join_body(world.class_a, "Мельник", "Іван", pin="6543")
+    )
+    assert await me_id(client, swapped.json()) != await me_id(client, first.json())
+
+
+async def test_expired_code_still_allows_existing_student(
+    client: AsyncClient, world, factory
+) -> None:
+    expired = await factory.klass(
+        world.school, "8-А", expires=dt.datetime.now(dt.UTC) - dt.timedelta(days=1)
+    )
+    await factory.student(expired, "Ольга", "Шевчук")
+    ok = await client.post("/auth/student/join", json=join_body(expired, "Ольга", "Шевчук"))
+    assert ok.status_code == 200
+    bad_pin = await client.post(
+        "/auth/student/join", json=join_body(expired, "Ольга", "Шевчук", pin="9999")
+    )
+    assert bad_pin.status_code == 401
+    new = await client.post("/auth/student/join", json=join_body(expired, "Нова", "Учениця"))
+    assert new.status_code == 400
+    assert new.json()["error"]["code"] == "INVALID_JOIN_CODE"
+
+
+async def test_join_code_is_normalized(client: AsyncClient, world, factory) -> None:
+    klass = await factory.klass(world.school, "9-А")
+    klass.join_code = "ABCD1234"
+    body = {**join_body(klass), "join_code": " abcd-12 34 "}
+    assert (await client.post("/auth/student/join", json=body)).status_code == 200
+
+
+async def test_pin_reset_revokes_all_refresh_families(
+    client: AsyncClient, world, db_session: AsyncSession
+) -> None:
+    body = join_body(world.class_a, "Іван", "Петренко")
+    a = (await client.post("/auth/student/join", json=body)).json()
+    b = (await client.post("/auth/student/join", json=body)).json()
+    url = f"/classes/{world.class_a.id}/students/{world.student_a.id}/pin-reset"
+    assert (await client.post(url, headers=auth_header(world.teacher_a))).status_code == 204
+    assert (await refresh(client, a["refresh_token"])).status_code == 400
+    assert (await refresh(client, b["refresh_token"])).status_code == 400
+
+
+async def test_create_account_email_race_gives_409(
+    world, db_session: AsyncSession, monkeypatch
+) -> None:
+    async def not_found(*args, **kwargs):
+        return None
+
+    # Пропускаємо попередню перевірку: імітуємо паралельний запит.
+    monkeypatch.setattr(db_session, "scalar", not_found)
+    with pytest.raises(AppError) as exc:
+        await create_account(
+            db_session,
+            role="teacher",
+            email=world.teacher_a.email,
+            display_name="Дубль",
+            last_name=None,
+            password="long-enough-password",
+            school_id=world.school.id,
+        )
+    assert exc.value.code == "EMAIL_TAKEN"
+    assert exc.value.status_code == 409
