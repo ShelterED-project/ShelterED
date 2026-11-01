@@ -6,7 +6,7 @@ pytestmark = pytest.mark.anyio
 
 async def test_migrations_applied(db_session):
     version = await db_session.scalar(text("SELECT version_num FROM alembic_version"))
-    assert version == "52e9b26bd4f0"
+    assert version == "a557c94df097"
 
 
 async def test_changes_are_rolled_back_part_1(db_session):
