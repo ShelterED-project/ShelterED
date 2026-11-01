@@ -62,6 +62,8 @@ class User(TimestampMixin, Base):
             "role <> 'student' OR (email IS NULL AND password_hash IS NULL)",
             name="student_no_credentials",
         ),
+        # PIN є лише в учнів.
+        CheckConstraint("role = 'student' OR pin_hash IS NULL", name="pin_only_student"),
     )
 
     id: Mapped[uuid.UUID] = uuid_pk()
@@ -72,6 +74,8 @@ class User(TimestampMixin, Base):
     school_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("school.id"))
     email: Mapped[str | None] = mapped_column(CITEXT, unique=True)
     password_hash: Mapped[str | None]
+    # PIN учня (argon2); NULL після скидання вчителем: наступний вхід задає новий.
+    pin_hash: Mapped[str | None]
     is_active: Mapped[bool] = mapped_column(server_default=text("true"))
     last_seen_at: Mapped[dt.datetime | None]
 
