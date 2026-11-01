@@ -93,14 +93,16 @@ UNIQUE (`school_id`, `academic_year`, `name`).
 |---|---|---|
 | id | uuid PK | |
 | role | text CHECK IN (`student`, `teacher`, `parent`, `admin`) | одна роль на акаунт ❓3; роль психолога — відкрите питання плану |
-| display_name | text NOT NULL, ≤ 50 | для учня — лише ім'я, яке вводить сам ❓2 |
+| display_name | text NOT NULL, ≤ 50 | ім'я; для учня — те, яке вводить сам ❓2 |
+| last_name | text NULL, ≤ 50 | прізвище; у БД допускаємо NULL (вчитель / адміністрація можуть не вказувати), для учня його вимагає API ❓2 |
 | school_id | uuid FK → school NULL | NULL для батьків |
 | email | citext UNIQUE NULL | лише вчитель / батьки / адміністрація; в учня завжди NULL |
 | password_hash | text NULL | NULL для учня (вхід за кодом класу) |
+| pin_hash | text NULL | PIN учня (argon2); NULL після скидання вчителем. Лише для `student` |
 | is_active | boolean default true | |
 | last_seen_at | timestamptz NULL | |
 
-CHECK: `role <> 'student' OR (email IS NULL AND password_hash IS NULL)`.
+CHECK: `role <> 'student' OR (email IS NULL AND password_hash IS NULL)`; `role = 'student' OR pin_hash IS NULL`.
 
 ### `class_membership`
 | Поле | Тип | Примітка |
@@ -119,7 +121,7 @@ CHECK: `role <> 'student' OR (email IS NULL AND password_hash IS NULL)`.
 | child_id | uuid FK → app_user ON DELETE CASCADE | |
 | linked_at | timestamptz default now() | |
 
-Індекс: `ix_parent_child_child_id`. Одноразові коди прив'язки — таблиця в B3.3, не тут.
+Індекс: `ix_parent_child_child_id`. Одноразові коди прив'язки — таблиця `parent_link_code` (розділ «Авторизація» нижче).
 
 ---
 
@@ -380,22 +382,66 @@ UNIQUE (`lesson_id`, `part`, `position`).
 
 ---
 
+## Авторизація (B3)
+
+Токени й коди зберігаються лише як SHA-256 хеш.
+
+### `refresh_token`
+| Поле | Тип | Примітка |
+|---|---|---|
+| id | uuid PK | |
+| user_id | uuid FK → app_user ON DELETE CASCADE | |
+| family_id | uuid NOT NULL | спільний для всіх токенів одного входу; індекс `ix_refresh_token_family_id` |
+| token_hash | text UNIQUE NOT NULL | |
+| expires_at | timestamptz NOT NULL | 30 днів |
+| revoked_at | timestamptz NULL | ротація, вихід або виявлене повторне використання |
+| replaced_by_id | uuid FK → refresh_token NULL | токен, який видали замість цього |
+| created_at | timestamptz default now() | |
+| user_agent | text NULL | без IP-адреси |
+
+### `auth_code`
+Код авторизації OAuth 2.0 PKCE.
+| Поле | Тип | Примітка |
+|---|---|---|
+| id | uuid PK | |
+| code_hash | text UNIQUE NOT NULL | |
+| user_id | uuid FK → app_user ON DELETE CASCADE | |
+| code_challenge | text NOT NULL | S256 |
+| client_id | text NOT NULL | |
+| redirect_uri | text NULL | |
+| expires_at | timestamptz NOT NULL | 60 с |
+| used_at | timestamptz NULL | одноразовий |
+
+### `parent_link_code`
+| Поле | Тип | Примітка |
+|---|---|---|
+| id | uuid PK | |
+| code_hash | text UNIQUE NOT NULL | |
+| child_id | uuid FK → app_user ON DELETE CASCADE | |
+| created_by | uuid FK → app_user ON DELETE SET NULL | вчитель або адмін |
+| expires_at | timestamptz NOT NULL | 7 днів |
+| used_at | timestamptz NULL | одноразовий |
+| used_by | uuid FK → app_user ON DELETE SET NULL | батьки, які ввели код |
+
+---
+
 ## Поза B2 (з'явиться у своїх епіках)
 
-- Одноразові коди прив'язки батьків, refresh-токени — B3.
 - Ключ пристрою для підпису QR — B10.2 (можливо, разом із таблицею `device` ❓7).
 - Відповіді опитування «як ти зараз?» і журнал доступу до них — B13.4 / B15.4, окремо від решти даних.
 - Агрегати (прогрес класу, мапа знань) — B9.6 / B14.
 
-## ❓ Рішення, які потрібні
+## Рішення (раніше ❓)
 
-1. **UUID v7 чи v4.** План вимагає v7 (сортується за часом → швидші індекси, зручний порядок подій). Фронтенд зараз генерує v4 (`frontend/src/shared/lib/uuid.ts`). У Python 3.13 немає `uuid7()` — на сервері знадобиться бібліотека. Сервер у будь-якому разі приймає будь-який валідний UUID. Погодити з Максимом.
-2. **Дані учня.** Пропозиція: лише `display_name` (ім'я, як учень назвався при вході за кодом класу), без прізвища. Чи потрібне вчителю прізвище для журналу?
-3. **Одна роль на акаунт.** Вчитель, який є й батьком, матиме два акаунти. Альтернатива — таблиця ролей (складніші перевірки доступу).
-4. **Урок ↔ клас.** Урок не належить класу, а призначається на слот у конкретну дату (`lesson_assignment`). Альтернатива — `lesson.class_id` (простіше, але урок не перевикористати в паралельному класі).
-5. **Ключ відповідей у пакеті** — відкрите питання плану; на схему не впливає (ключ зберігається в `question` у будь-якому разі), лише на збірку пакета.
-6. **«Немає відповіді» в перекличці** — не зберігаємо рядок (рахується як відсутність статусу) чи створюємо рядки `no_response` для всіх учнів при відкритті сесії.
-7. **Пристрої.** Поки `device_id` — просто uuid без окремої таблиці. Таблиця `device` знадобиться для ключа QR (B10.2) і, можливо, для push.
-8. **Видалення даних учня (B15.5).** Повне видалення (`ON DELETE CASCADE`, як у чернетці) чи анонімізація зі збереженням агрегатів класу.
-9. **Формат `region_code`** — залежить від того, яке API тривог обере Роман.
-10. **Предмети** — спільний довідник чи свої для кожної школи.
+Усі питання закрито 01.11.2026.
+
+1. **UUID** — ✅ сервер приймає будь-який валідний клієнтський UUID як є. Для рядків, які створює сервер, `uuid4`; v7 — коли погодимо бібліотеку.
+2. **Дані учня** — ✅ ім'я та прізвище учня (`display_name`, `last_name`), без email і телефону.
+3. **Одна роль на акаунт** — ✅ `app_user.role` з `CHECK`; вчитель-батько матиме два акаунти.
+4. **Урок ↔ клас** — ✅ лише через розклад на дату (`lesson_assignment`), без `lesson.class_id`.
+5. **Ключ відповідей** — ✅ лишається в `question`; чи йде в пакет — питання збірки пакета, не схеми.
+6. **«Немає відповіді» в перекличці** — ✅ рядка немає, статусу `no_response` не існує.
+7. **Пристрої** — ✅ `device_id` — звичайний uuid, таблиці `device` поки немає.
+8. **Видалення даних учня** — ✅ повне видалення, `ON DELETE CASCADE` від користувача до його даних.
+9. **`region_code`** — ✅ звичайний `text`.
+10. **Предмети** — ✅ `subject.school_id = NULL` означає загальний довідник.
