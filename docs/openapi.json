@@ -6,12 +6,13 @@
           "display_name": {
             "maxLength": 50,
             "minLength": 1,
+            "pattern": "^[^\\x00-\\x1f]+$",
             "title": "Display Name",
             "type": "string"
           },
           "email": {
             "maxLength": 254,
-            "pattern": "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$",
+            "pattern": "^[^@\\s\\x00-\\x1f]+@[^@\\s\\x00-\\x1f]+\\.[^@\\s\\x00-\\x1f]+$",
             "title": "Email",
             "type": "string"
           },
@@ -20,6 +21,7 @@
               {
                 "maxLength": 50,
                 "minLength": 1,
+                "pattern": "^[^\\x00-\\x1f]+$",
                 "type": "string"
               },
               {
@@ -61,8 +63,7 @@
             "type": "string"
           },
           "code_challenge": {
-            "maxLength": 128,
-            "minLength": 43,
+            "pattern": "^[A-Za-z0-9_-]{43,128}$",
             "title": "Code Challenge",
             "type": "string"
           },
@@ -73,11 +74,12 @@
           },
           "email": {
             "maxLength": 254,
-            "pattern": "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$",
+            "pattern": "^[^@\\s\\x00-\\x1f]+@[^@\\s\\x00-\\x1f]+\\.[^@\\s\\x00-\\x1f]+$",
             "title": "Email",
             "type": "string"
           },
           "password": {
+            "maxLength": 128,
             "title": "Password",
             "type": "string"
           },
@@ -245,22 +247,26 @@
           "display_name": {
             "maxLength": 50,
             "minLength": 1,
+            "pattern": "^[^\\x00-\\x1f]+$",
             "title": "Display Name",
             "type": "string"
           },
           "join_code": {
+            "maxLength": 64,
+            "pattern": "^[^\\x00-\\x1f]+$",
             "title": "Join Code",
             "type": "string"
           },
           "last_name": {
             "maxLength": 50,
             "minLength": 1,
+            "pattern": "^[^\\x00-\\x1f]+$",
             "title": "Last Name",
             "type": "string"
           },
           "pin": {
             "description": "4–6 цифр",
-            "pattern": "^\\d{4,6}$",
+            "pattern": "^[0-9]{4,6}$",
             "title": "Pin",
             "type": "string"
           }
@@ -665,7 +671,7 @@
     },
     "/auth/student/join": {
       "post": {
-        "description": "Вхід учня: код класу + імʼя + прізвище + PIN (4–6 цифр).\n\nЯкщо учня з таким імʼям у класі ще немає — його створюють, інакше перевіряють PIN.",
+        "description": "Вхід учня: код класу + імʼя + прізвище + PIN (4–6 цифр).\n\nЯкщо учня з таким імʼям у класі ще немає — його створюють, інакше перевіряють PIN.\nКод класу нормалізується (лише A-Z і 0-9; кириличні двійники латиниці замінюються).\nПрострочений код пускає лише наявних учнів із вірним PIN; для невідомого імені й хибного PIN\nвідповідь однакова: 401 `INVALID_CREDENTIALS`.",
         "operationId": "student_join_auth_student_join_post",
         "parameters": [
           {
@@ -755,7 +761,7 @@
     },
     "/auth/token": {
       "post": {
-        "description": "Обмін `code` + `code_verifier` на токени або ротація `refresh_token` (RFC 6749).\n\nТіло: JSON або `application/x-www-form-urlencoded`. Повторне використання вже\nротованого refresh-токена відкликає всі токени цього входу.",
+        "description": "Обмін `code` + `code_verifier` на токени або ротація `refresh_token` (RFC 6749).\n\nТіло: JSON або `application/x-www-form-urlencoded`. Refresh-токен ротується; повтор уже\nротованого токена протягом `REFRESH_REUSE_GRACE_SECONDS` (300 с) вважається втраченою\nвідповіддю або другою вкладкою, якщо виданий з нього токен ще не використано: видається\nнова пара в тій самій родині. Інакше (пізній повтор, використаний наступник) відкликаються\nвсі токени цього входу. Відкликані токени (вихід, скидання PIN) завжди дають `INVALID_GRANT`.",
         "operationId": "token_auth_token_post",
         "parameters": [
           {
@@ -806,6 +812,7 @@
                   "code_verifier": {
                     "anyOf": [
                       {
+                        "pattern": "^[A-Za-z0-9._~-]{43,128}$",
                         "type": "string"
                       },
                       {
@@ -881,6 +888,7 @@
                   "code_verifier": {
                     "anyOf": [
                       {
+                        "pattern": "^[A-Za-z0-9._~-]{43,128}$",
                         "type": "string"
                       },
                       {
@@ -980,7 +988,7 @@
     },
     "/classes/{class_id}/students/{student_id}/pin-reset": {
       "post": {
-        "description": "Скидає PIN учня (вчитель цього класу або адмін школи): наступний вхід задасть новий.",
+        "description": "Скидає PIN учня (вчитель цього класу або адмін школи): наступний вхід задасть новий.\nУсі сесії учня (access- і refresh-токени) перестають діяти.",
         "operationId": "pin_reset_classes__class_id__students__student_id__pin_reset_post",
         "parameters": [
           {

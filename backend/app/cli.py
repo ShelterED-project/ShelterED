@@ -5,6 +5,7 @@
 
 import argparse
 import asyncio
+import copy
 import getpass
 import json
 import os
@@ -42,13 +43,18 @@ async def create_admin(
 OPENAPI_PATH = Path(__file__).resolve().parents[2] / "docs" / "openapi.json"
 
 
+OPENAPI_TITLE = "ShelterED API"
+
+
 def render_openapi() -> str:
     """Специфікація API у стабільному вигляді (відсортовані ключі), щоб diff був змістовним."""
     # Для генерації специфікації секрет не потрібен, але Settings вимагає його при імпорті.
     os.environ.setdefault("JWT_SECRET", "openapi-export-placeholder")
-    from app.main import create_app
+    from app.main import app
 
-    spec = create_app().openapi()
+    spec = copy.deepcopy(app.openapi())
+    # Назва залежить від APP_NAME, тож у файлі вона фіксована (специфікація не залежить від env).
+    spec["info"]["title"] = OPENAPI_TITLE
     return json.dumps(spec, indent=2, ensure_ascii=False, sort_keys=True) + "\n"
 
 

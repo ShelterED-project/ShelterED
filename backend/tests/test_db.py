@@ -36,8 +36,8 @@ async def test_uses_test_database(db_session):
 def test_openapi_file_is_up_to_date():
     from app.cli import OPENAPI_PATH, render_openapi
 
-    # Git на Windows може віддати CRLF.
-    committed = OPENAPI_PATH.read_bytes().decode("utf-8").replace("\r\n", "\n")
+    # read_text нормалізує CRLF, який Git на Windows може підставити.
+    committed = OPENAPI_PATH.read_text(encoding="utf-8")
     assert committed == render_openapi(), (
         "docs/openapi.json is stale: run `python -m app.cli export-openapi` and commit it"
     )
