@@ -7,6 +7,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.alerts import AlertEvent
 from app.models.lessons import Lesson, Module, Subject, Test
 from app.models.rollcall import RollCallSession, RollCallStatus
 from app.models.school import School, SchoolClass, User
@@ -27,7 +28,7 @@ async def make_graph(session: AsyncSession) -> dict:
         name="7-А",
         grade=7,
         academic_year="2026/2027",
-        join_code=uuid.uuid4().hex[:8],
+        join_code=uuid.uuid4().hex[:8].upper(),
     )
     teacher = User(role="teacher", display_name="Олена", school_id=school.id, email="t@example.com")
     student = User(role="student", display_name="Іван", last_name="Петренко", school_id=school.id)
@@ -177,3 +178,52 @@ async def test_deleting_student_cascades_personal_data(db_session: AsyncSession)
     for model in (Attempt, ModuleProgress, RollCallStatus, SyncEvent):
         count = await db_session.scalar(select(func.count()).select_from(model))
         assert count == 0, model.__name__
+
+
+async def test_clock_skew_fits_beyond_int32(db_session: AsyncSession) -> None:
+    g = await make_graph(db_session)
+    e = event(g["student"].id, "module_progress")
+    e.clock_skew_ms = 3_000_000_000  # ~35 діб; не влізає в integer
+    db_session.add(e)
+    await db_session.flush()
+    stored = await db_session.scalar(select(SyncEvent.clock_skew_ms))
+    assert stored == 3_000_000_000
+
+
+def alert(school_id: uuid.UUID | None, external_id: str | None = "a-1", source: str = "api"):
+    return AlertEvent(
+        region_code="kyiv",
+        school_id=school_id,
+        source=source,
+        external_id=external_id,
+        started_at=NOW,
+    )
+
+
+async def test_alert_duplicate_with_null_school_rejected(db_session: AsyncSession) -> None:
+    db_session.add(alert(None))
+    await db_session.flush()
+    db_session.add(alert(None))
+    with pytest.raises(IntegrityError, match="uq_alert_event_source_external_school"):
+        await db_session.flush()
+
+
+async def test_alert_duplicate_for_school_rejected_but_other_school_ok(
+    db_session: AsyncSession,
+) -> None:
+    school_a, school_b = School(name="A", region_code="kyiv"), School(name="B", region_code="kyiv")
+    db_session.add_all([school_a, school_b])
+    await db_session.flush()
+    db_session.add_all([alert(school_a.id), alert(school_b.id), alert(None)])
+    await db_session.flush()
+    db_session.add(alert(school_a.id))
+    with pytest.raises(IntegrityError, match="uq_alert_event_source_external_school"):
+        await db_session.flush()
+
+
+async def test_manual_alerts_without_external_id_may_repeat(db_session: AsyncSession) -> None:
+    school = School(name="A", region_code="kyiv")
+    db_session.add(school)
+    await db_session.flush()
+    db_session.add_all([alert(school.id, None, "manual"), alert(school.id, None, "manual")])
+    await db_session.flush()

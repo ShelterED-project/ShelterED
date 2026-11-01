@@ -83,8 +83,8 @@ erDiagram
 | name | text NOT NULL | «7-А» |
 | grade | smallint CHECK 1..11 | |
 | academic_year | text NOT NULL | «2026/2027» |
-| join_code | text UNIQUE NOT NULL | код класу для входу учнів (B3.3, B5.1) |
-| join_code_expires_at | timestamptz NULL | щоб старий код можна було відкликати |
+| join_code | text UNIQUE NOT NULL | код класу для входу учнів (B3.3, B5.1); зберігається нормалізованим: верхній регістр, без пробілів і `-` (`normalize_link_code`), на вході нормалізується так само |
+| join_code_expires_at | timestamptz NULL | щоб старий код можна було відкликати; обмежує лише створення нових учнів, наявні входять і після нього |
 
 UNIQUE (`school_id`, `academic_year`, `name`).
 
@@ -288,7 +288,7 @@ UNIQUE (`lesson_id`, `part`, `position`).
 | device_id | uuid NOT NULL | id пристрою, який створює клієнт ❓7 |
 | occurred_at | timestamptz NOT NULL | годинник пристрою |
 | received_at | timestamptz default now() | годинник сервера |
-| clock_skew_ms | integer NULL | зсув годинника пристрою з пакета (B9.4) |
+| clock_skew_ms | bigint NULL | зсув годинника пристрою з пакета (B9.4) |
 | is_suspicious | boolean default false | час у майбутньому / великий зсув — позначка, не блокування |
 | source | text CHECK IN (`online`, `qr`) default `online` | QR — B10 |
 | relayed_by | uuid FK → app_user NULL | вчитель, який передав QR-події (B10.3) |
@@ -336,7 +336,7 @@ UNIQUE (`lesson_id`, `part`, `position`).
 | school_id | uuid FK → school NULL | запис для кожної школи регіону (B7.2) |
 | class_id | uuid FK → school_class NULL | ручна тривога для класу (B7.3) |
 | source | text CHECK IN (`api`, `manual`) | |
-| external_id | text NULL | id події від AI-сервісу; UNIQUE (source, external_id, school_id) — повтори ігноруються (B7.1) |
+| external_id | text NULL | id події від AI-сервісу; унікальний індекс (source, external_id, school_id) NULLS NOT DISTINCT WHERE external_id IS NOT NULL — повтори ігноруються, NULL у school_id не обходить унікальність; ручні тривоги без external_id можуть повторюватися (B7.1) |
 | is_drill | boolean default false | тренувальна |
 | started_at | timestamptz NOT NULL | |
 | ended_at | timestamptz NULL | відбій |

@@ -4,11 +4,11 @@ from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     CheckConstraint,
     ForeignKey,
     Index,
-    Integer,
     Numeric,
     SmallInteger,
     func,
@@ -43,7 +43,7 @@ class SyncEvent(Base):
     device_id: Mapped[uuid.UUID]
     occurred_at: Mapped[dt.datetime]  # годинник пристрою
     received_at: Mapped[dt.datetime] = mapped_column(server_default=func.now())  # годинник сервера
-    clock_skew_ms: Mapped[int | None] = mapped_column(Integer)
+    clock_skew_ms: Mapped[int | None] = mapped_column(BigInteger)
     # Час у майбутньому / великий зсув: позначка, не блокування.
     is_suspicious: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     source: Mapped[str] = mapped_column(server_default="online")
