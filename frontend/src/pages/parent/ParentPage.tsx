@@ -16,7 +16,7 @@ import WeekChart from './sections/WeekChart'
 
 export default function ParentPage() {
   // TODO: дані дашборда поки однакові для обох дітей; розділити, коли зʼявиться API
-  const [childId, setChildId] = useState<ChildId>('olya')
+  const [childId, setChildId] = useState<ChildId>('child')
 
   return (
     <div className="flex min-h-screen">

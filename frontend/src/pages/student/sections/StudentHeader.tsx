@@ -1,10 +1,12 @@
 import iconShield from '@/assets/student/header-shield.svg'
+import { useCurrentUser } from '@/features/auth/useCurrentUser'
 import { pluralUk } from '@/shared/lib/plural'
 import LogoutButton from '@/features/auth/LogoutButton'
 import Brand from '@/shared/ui/Brand'
 import { greeting, shelterMode } from '../content'
 
 export default function StudentHeader({ pending }: { pending: number }) {
+  const user = useCurrentUser()
   const queue =
     pending === 0 ? 'черга порожня' : `${pending} ${pluralUk(pending, ['запис', 'записи', 'записів'])} в черзі`
 
@@ -15,7 +17,7 @@ export default function StudentHeader({ pending }: { pending: number }) {
       </div>
       <div className="hidden md:block">
         <h1 className="font-heading text-2xl leading-[30px] text-parchment xl:text-[28px] xl:leading-[35px]">
-          {greeting.title}
+          {greeting.hello}, {user?.display_name}!
         </h1>
         <p className="text-sm text-dim">{greeting.subtitle}</p>
       </div>

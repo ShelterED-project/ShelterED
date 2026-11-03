@@ -40,7 +40,7 @@ export default function ClassesCard({ className = '' }: { className?: string }) 
                         aria-valuenow={row.present}
                         className="h-2 min-w-20 flex-1 rounded-full bg-line-soft"
                       >
-                        <div className="h-2 rounded-full bg-accent" style={{ width: `${(row.present / row.total) * 100}%` }} />
+                        <div className="h-2 rounded-full bg-accent" style={{ width: `${row.total ? (row.present / row.total) * 100 : 0}%` }} />
                       </div>
                       <span className="text-sm whitespace-nowrap text-muted">
                         {row.present} / {row.total}
@@ -48,7 +48,7 @@ export default function ClassesCard({ className = '' }: { className?: string }) 
                     </div>
                   </td>
                   <td className={`hidden py-3.5 pl-3 text-sm whitespace-nowrap md:table-cell ${missing === 0 ? 'text-dim' : 'text-muted'}`}>
-                    {missing === 0 ? 'усі відмітились' : `${missing} не відмітились`}
+                    {row.total === 0 ? '—' : missing === 0 ? 'усі відмітились' : `${missing} не відмітились`}
                   </td>
                 </tr>
               )

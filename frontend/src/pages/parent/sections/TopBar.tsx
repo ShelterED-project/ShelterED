@@ -1,4 +1,5 @@
 import iconChevron from '@/assets/parent/chevron-down.svg'
+import { useCurrentUser } from '@/features/auth/useCurrentUser'
 import { children, greeting } from '../content'
 import type { ChildId } from '../content'
 import BellButton from './BellButton'
@@ -6,11 +7,12 @@ import BellButton from './BellButton'
 type Props = { childId: ChildId; onChange: (id: ChildId) => void }
 
 export default function TopBar({ childId, onChange }: Props) {
+  const user = useCurrentUser()
   const child = children.find((c) => c.id === childId) ?? children[0]
   return (
     <header className="sticky top-0 z-10 hidden h-20 items-center justify-between gap-4 border-b border-line-soft bg-oil/95 px-10 backdrop-blur-sm md:flex">
       <div>
-        <h1 className="font-heading text-[28px] leading-[35px] tracking-[-0.28px] text-parchment">{greeting.title}</h1>
+        <h1 className="font-heading text-[28px] leading-[35px] tracking-[-0.28px] text-parchment">{greeting.hello}, {user?.display_name}!</h1>
         <p className="text-sm text-dim">
           {greeting.date} · {child.name}
         </p>
