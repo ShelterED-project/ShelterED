@@ -47,6 +47,12 @@ export interface StudentJoinRequest {
   pin: string
 }
 
+export interface ParentLinkResponse {
+  child_id: string
+  display_name: string
+  last_name: string | null
+}
+
 /** Тіло помилки бекенда (backend/app/schemas/errors.py). */
 export interface ApiErrorBody {
   error: { code: string; message: string; details?: unknown }
