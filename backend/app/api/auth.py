@@ -106,8 +106,11 @@ async def token(
 ) -> TokenResponse:
     """Обмін `code` + `code_verifier` на токени або ротація `refresh_token` (RFC 6749).
 
-    Тіло: JSON або `application/x-www-form-urlencoded`. Повторне використання вже
-    ротованого refresh-токена відкликає всі токени цього входу.
+    Тіло: JSON або `application/x-www-form-urlencoded`. Refresh-токен ротується; повтор уже
+    ротованого токена протягом `REFRESH_REUSE_GRACE_SECONDS` (300 с) вважається втраченою
+    відповіддю або другою вкладкою, якщо виданий з нього токен ще не використано: видається
+    нова пара в тій самій родині. Інакше (пізній повтор, використаний наступник) відкликаються
+    всі токени цього входу. Відкликані токени (вихід, скидання PIN) завжди дають `INVALID_GRANT`.
     """
     body = await _read_token_request(request)
     if body.grant_type == "authorization_code":
@@ -153,6 +156,9 @@ async def student_join(
     """Вхід учня: код класу + імʼя + прізвище + PIN (4–6 цифр).
 
     Якщо учня з таким імʼям у класі ще немає — його створюють, інакше перевіряють PIN.
+    Код класу нормалізується (лише A-Z і 0-9; кириличні двійники латиниці замінюються).
+    Прострочений код пускає лише наявних учнів із вірним PIN; для невідомого імені й хибного PIN
+    відповідь однакова: 401 `INVALID_CREDENTIALS`.
     """
     return await service.student_join(
         session,
@@ -171,7 +177,8 @@ async def student_join(
     responses={**R401, **R403, **R404},
 )
 async def pin_reset(klass: StaffClass, student_id: uuid.UUID, session: Session) -> Response:
-    """Скидає PIN учня (вчитель цього класу або адмін школи): наступний вхід задасть новий."""
+    """Скидає PIN учня (вчитель цього класу або адмін школи): наступний вхід задасть новий.
+    Усі сесії учня (access- і refresh-токени) перестають діяти."""
     await service.reset_student_pin(session, klass, student_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 

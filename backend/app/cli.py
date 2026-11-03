@@ -1,10 +1,17 @@
-"""Адміністративні команди: python -m app.cli create-admin --email ... --name ... --school-id ..."""
+"""Адміністративні команди: python -m app.cli create-admin --email ... --name ... --school-id ...
+
+Також: python -m app.cli export-openapi (записує docs/openapi.json).
+"""
 
 import argparse
 import asyncio
+import copy
 import getpass
+import json
+import os
 import sys
 import uuid
+from pathlib import Path
 
 from pydantic import TypeAdapter, ValidationError
 
@@ -33,6 +40,24 @@ async def create_admin(
         return user.id
 
 
+OPENAPI_PATH = Path(__file__).resolve().parents[2] / "docs" / "openapi.json"
+
+
+OPENAPI_TITLE = "ShelterED API"
+
+
+def render_openapi() -> str:
+    """Специфікація API у стабільному вигляді (відсортовані ключі), щоб diff був змістовним."""
+    # Для генерації специфікації секрет не потрібен, але Settings вимагає його при імпорті.
+    os.environ.setdefault("JWT_SECRET", "openapi-export-placeholder")
+    from app.main import app
+
+    spec = copy.deepcopy(app.openapi())
+    # Назва залежить від APP_NAME, тож у файлі вона фіксована (специфікація не залежить від env).
+    spec["info"]["title"] = OPENAPI_TITLE
+    return json.dumps(spec, indent=2, ensure_ascii=False, sort_keys=True) + "\n"
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m app.cli")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -42,7 +67,13 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--last-name")
     p.add_argument("--school-id", required=True, type=uuid.UUID)
     p.add_argument("--password", help="Для скриптів; інакше буде запит")
+    sub.add_parser("export-openapi", help="Записати docs/openapi.json зі специфікації FastAPI")
     args = parser.parse_args(argv)
+
+    if args.command == "export-openapi":
+        OPENAPI_PATH.write_text(render_openapi(), encoding="utf-8", newline="\n")
+        print(f"Written: {OPENAPI_PATH}")
+        return 0
 
     password = args.password
     if password is None:

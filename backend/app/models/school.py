@@ -36,6 +36,7 @@ class SchoolClass(TimestampMixin, Base):
         UniqueConstraint(
             "school_id", "academic_year", "name", name="uq_school_class_school_year_name"
         ),
+        CheckConstraint("join_code ~ '^[A-Z0-9]+$'", name="join_code_format"),
     )
 
     id: Mapped[uuid.UUID] = uuid_pk()
@@ -43,7 +44,8 @@ class SchoolClass(TimestampMixin, Base):
     name: Mapped[str]
     grade: Mapped[int] = mapped_column(SmallInteger)
     academic_year: Mapped[str]
-    # Код класу для входу учнів; після join_code_expires_at недійсний.
+    # Код класу для входу учнів (нормалізований: лише A-Z0-9). Після join_code_expires_at
+    # він лише перестає створювати нових учнів; наявні учні входять і далі.
     join_code: Mapped[str] = mapped_column(unique=True)
     join_code_expires_at: Mapped[dt.datetime | None]
 
@@ -64,6 +66,8 @@ class User(TimestampMixin, Base):
         ),
         # PIN є лише в учнів.
         CheckConstraint("role = 'student' OR pin_hash IS NULL", name="pin_only_student"),
+        # Пошук учня в класі за ім'ям (join -> class_membership).
+        Index("ix_app_user_name_key", "name_key"),
     )
 
     id: Mapped[uuid.UUID] = uuid_pk()
@@ -76,6 +80,11 @@ class User(TimestampMixin, Base):
     password_hash: Mapped[str | None]
     # PIN учня (argon2); NULL після скидання вчителем: наступний вхід задає новий.
     pin_hash: Mapped[str | None]
+    # Нормалізоване імʼя+прізвище для пошуку учня (лише в учнів; у дорослих NULL).
+    name_key: Mapped[str | None]
+    # Епоха облікових даних: скидання PIN збільшує її, і всі видані токени (access `ver`,
+    # refresh) із меншою версією перестають діяти.
+    token_version: Mapped[int] = mapped_column(default=0, server_default=text("0"))
     is_active: Mapped[bool] = mapped_column(server_default=text("true"))
     last_seen_at: Mapped[dt.datetime | None]
 

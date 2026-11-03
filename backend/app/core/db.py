@@ -19,11 +19,13 @@ def get_engine() -> AsyncEngine:
     return create_async_engine(
         settings.database_url.get_secret_value(),
         # asyncpg не розуміє sslmode в URL, тому TLS передаємо напряму драйверу.
-        connect_args={"ssl": "require"} if settings.database_ssl else {},
+        connect_args={"ssl": True} if settings.database_ssl else {},
         pool_size=settings.db_pool_size,
         max_overflow=settings.db_max_overflow,
         # Neon засинає й рве простої з'єднання: перевіряємо з'єднання перед видачею
         # і не тримаємо його довше 5 хв.
+        # Параметри SQL (хеші PIN, імена) не потрапляють у тексти помилок і логи.
+        hide_parameters=True,
         pool_pre_ping=True,
         pool_recycle=300,
     )

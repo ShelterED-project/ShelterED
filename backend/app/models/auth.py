@@ -1,7 +1,7 @@
 import datetime as dt
 import uuid
 
-from sqlalchemy import ForeignKey, Index, func
+from sqlalchemy import ForeignKey, Index, func, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, uuid_pk
@@ -11,18 +11,26 @@ class RefreshToken(Base):
     """Refresh-токен: у БД лише SHA-256 хеш. Токени однієї ротації мають спільний family_id."""
 
     __tablename__ = "refresh_token"
-    __table_args__ = (Index("ix_refresh_token_family_id", "family_id"),)
+    __table_args__ = (
+        Index("ix_refresh_token_family_id", "family_id"),
+        Index("ix_refresh_token_user_id", "user_id"),
+    )
 
     id: Mapped[uuid.UUID] = uuid_pk()
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("app_user.id", ondelete="CASCADE"))
     family_id: Mapped[uuid.UUID]
     token_hash: Mapped[str] = mapped_column(unique=True)
     expires_at: Mapped[dt.datetime]
+    # Відкликано (вихід, скидання PIN, відкликання родини): токен більше ніколи не працює.
     revoked_at: Mapped[dt.datetime | None]
-    # Токен, яким цей замінено при ротації.
+    # Ротовано (звичайна заміна на новий токен); відрізняється від відкликання.
+    rotated_at: Mapped[dt.datetime | None]
+    # Найновіший токен, виданий замість цього (при повторі переставляється на новіший).
     replaced_by_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("refresh_token.id"))
     created_at: Mapped[dt.datetime] = mapped_column(server_default=func.now())
     user_agent: Mapped[str | None]
+    # Версія облікових даних користувача на момент видачі (див. User.token_version).
+    token_version: Mapped[int] = mapped_column(default=0, server_default=text("0"))
 
 
 class AuthCode(Base):
