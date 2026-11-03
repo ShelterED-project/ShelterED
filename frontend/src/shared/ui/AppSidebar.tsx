@@ -1,3 +1,4 @@
+import LogoutButton from '@/features/auth/LogoutButton'
 import Brand from './Brand'
 
 export type NavItem = { id: string; label: string; icon: string }
@@ -32,14 +33,17 @@ export default function AppSidebar({ items, activeId, user }: Props) {
         })}
       </nav>
 
-      <div className="mt-auto flex items-center justify-center gap-3 px-2 xl:justify-start">
-        <div className="flex size-10 shrink-0 items-center justify-center rounded-full border border-line bg-surface-2 text-sm font-bold text-parchment">
-          {user.initials}
+      <div className="mt-auto flex flex-col gap-3">
+        <div className="flex items-center justify-center gap-3 px-2 xl:justify-start">
+          <div className="flex size-10 shrink-0 items-center justify-center rounded-full border border-line bg-surface-2 text-sm font-bold text-parchment">
+            {user.initials}
+          </div>
+          <div className="hidden min-w-0 xl:block">
+            <p className="text-sm font-semibold text-parchment">{user.name}</p>
+            <p className="text-xs text-dim">{user.role}</p>
+          </div>
         </div>
-        <div className="hidden min-w-0 xl:block">
-          <p className="text-sm font-semibold text-parchment">{user.name}</p>
-          <p className="text-xs text-dim">{user.role}</p>
-        </div>
+        <LogoutButton className="h-11 rounded-[10px] px-3 hover:bg-surface xl:justify-start" />
       </div>
     </aside>
   )

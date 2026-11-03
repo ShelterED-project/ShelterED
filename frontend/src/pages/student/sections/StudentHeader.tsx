@@ -1,5 +1,6 @@
 import iconShield from '@/assets/student/header-shield.svg'
 import { pluralUk } from '@/shared/lib/plural'
+import LogoutButton from '@/features/auth/LogoutButton'
 import Brand from '@/shared/ui/Brand'
 import { greeting, shelterMode } from '../content'
 
@@ -33,6 +34,7 @@ export default function StudentHeader({ pending }: { pending: number }) {
         >
           <img src={iconShield} alt="" width={20} height={20} />
         </button>
+        <LogoutButton compact className="size-11 shrink-0 rounded-xl border border-line md:hidden" />
       </div>
     </header>
   )

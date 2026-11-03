@@ -1,4 +1,5 @@
 import { createBrowserRouter } from 'react-router'
+import RequireRole from '@/features/auth/RequireRole'
 import AdminPage from '@/pages/admin/AdminPage'
 import LandingPage from '@/pages/landing/LandingPage'
 import LoginPage from '@/pages/login/LoginPage'
@@ -17,11 +18,25 @@ export const router = createBrowserRouter([
       { path: '/', element: <LandingPage /> },
       { path: '/login', element: <LoginPage /> },
       { path: '/register', element: <RegisterPage /> },
-      { path: '/student', element: <StudentPage /> },
-      { path: '/shelter', element: <ShelterModePage /> },
-      { path: '/teacher', element: <TeacherPage /> },
-      { path: '/parent', element: <ParentPage /> },
-      { path: '/admin', element: <AdminPage /> },
+      {
+        element: <RequireRole roles={['student']} />,
+        children: [
+          { path: '/student', element: <StudentPage /> },
+          { path: '/shelter', element: <ShelterModePage /> },
+        ],
+      },
+      {
+        element: <RequireRole roles={['teacher']} />,
+        children: [{ path: '/teacher', element: <TeacherPage /> }],
+      },
+      {
+        element: <RequireRole roles={['parent']} />,
+        children: [{ path: '/parent', element: <ParentPage /> }],
+      },
+      {
+        element: <RequireRole roles={['admin']} />,
+        children: [{ path: '/admin', element: <AdminPage /> }],
+      },
       { path: '*', element: <NotFoundPage /> },
     ],
   },
