@@ -1,17 +1,25 @@
-// TODO: тимчасові моки. Коли зʼявиться API, замінити на RTK Query + локальне сховище
+import { todayLabel } from '@/shared/lib/date'
+
+// Моків немає: там, де мають бути дані з API, стоїть заглушка «Сюди: …» з описом, що саме додати.
+// Коли зʼявиться API, замінити на RTK Query + локальне сховище
 // (принцип 1: інтерфейс читає з локального сховища, а не з констант у коді).
-// Кількість записів у черзі не мок: її дає useOutboxCount.
+// Кількість записів у черзі не заглушка: її дає useOutboxCount.
 
-export const studentUser = { initials: 'ОК', name: 'Оля Ковальчук', role: 'Учениця · 7-Б' }
+// Ім'я учня беремо з сесії (useCurrentUser); клас дасть API.
+export const studentRole = 'Учень'
 
-export const greeting = { title: 'Привіт, Олю!', date: 'Вівторок, 14 жовтня', subtitle: 'Вівторок, 14 жовтня · 7-Б' }
+export const greeting = {
+  hello: 'Привіт',
+  date: todayLabel({ capitalize: true }),
+  subtitle: `${todayLabel({ capitalize: true })} · Сюди: клас`,
+}
 
 export const shelterMode = 'Режим укриття'
 
 export const lessonBanner = {
-  eyebrow: 'Тривога з 10:14 · урок продовжується',
-  title: 'Алгебра: лінійні рівняння',
-  text: '3 картки · 1 тест · ≈ 12 хв · підготувала Олена Коваль',
+  eyebrow: 'Сюди: тривога (час початку) і що з уроком',
+  title: 'Сюди: назва поточного уроку',
+  text: 'Сюди: кількість карток і тестів, тривалість, хто підготував',
   open: 'Відкрити урок',
   breathe: 'Подихати',
 }
@@ -20,29 +28,30 @@ export type RouteNodeKind = 'done' | 'todo' | 'current'
 export type RouteNodeId = 'natural' | 'fractions' | 'decimals' | 'percent'
 
 export const route = {
-  title: 'Твій маршрут: математика',
-  range: '5 клас → 7 клас',
+  title: 'Сюди: маршрут предмета',
+  range: 'Сюди: від якого класу до якого',
+  // Сюди: теми маршруту з бекенда; id і kind задають позицію й вигляд вузла на мапі.
   nodes: [
-    { id: 'natural', kind: 'done', label: 'Натуральні числа' },
-    { id: 'fractions', kind: 'done', label: 'Дроби' },
-    { id: 'decimals', kind: 'todo', label: 'Десяткові', badge: 'незвідано' },
-    { id: 'percent', kind: 'current', label: 'Відсотки · ти тут' },
+    { id: 'natural', kind: 'done', label: 'Сюди: тема 1' },
+    { id: 'fractions', kind: 'done', label: 'Сюди: тема 2' },
+    { id: 'decimals', kind: 'todo', label: 'Сюди: тема 3', badge: 'статус' },
+    { id: 'percent', kind: 'current', label: 'Сюди: поточна тема' },
   ] as { id: RouteNodeId; kind: RouteNodeKind; label: string; badge?: string }[],
-  moleSays: 'Спершу повернімось до «Десяткових» — це 2 короткі модулі.',
+  moleSays: 'Сюди: порада ШІ-репетитора, з чого почати.',
   go: 'Піти',
   breatheFirst: 'Спершу подихати',
 }
 
 export const checkIn = {
   title: 'Перекличка класу',
-  text: 'Відміться, щоб Олена Іванівна знала, що ти в безпеці.',
+  text: 'Відміться, щоб вчитель знав, що ти в безпеці.',
   shelter: 'Я в укритті',
   safe: 'Я в безпеці вдома',
   offlineNote: 'Без мережі — відправимо, щойно зʼявиться зв’язок',
   saved: 'Відмітку збережено',
 }
 
-export const sync = { package: 'Пакет на сьогодні: 42 МБ · збережено' }
+export const sync = { package: 'Сюди: розмір пакета на сьогодні і чи збережено' }
 
 export const calm = { title: 'Хвилинка спокою', text: 'Дихання з вогником · 2 хв' }
 
@@ -54,13 +63,8 @@ export const todayLessons: {
   hint: string
 } = {
   title: 'Уроки на сьогодні',
-  hint: 'усі збережено офлайн',
-  items: [
-    { subject: 'Алгебра', name: 'Лінійні рівняння', meta: '12 хв · 3 картки · тест', state: 'now' },
-    { subject: 'Українська мова', name: 'Прислівник: правопис', meta: '8 хв · картки', state: 'offline' },
-    { subject: 'Історія України', name: 'Київська Русь: князі', meta: '10 хв · відео з субтитрами', state: 'offline' },
-    { subject: 'Природознавство', name: 'Вода в природі', meta: '5 хв · картки', state: 'done' },
-  ],
+  hint: 'Сюди: чи все збережено офлайн',
+  items: [{ subject: 'Сюди: предмет', name: 'назва уроку', meta: 'тривалість · з чого складається', state: 'offline' }],
 }
 
 export type NavId = 'route' | 'lessons' | 'calm' | 'me' | 'settings'

@@ -1,14 +1,16 @@
+import { useCurrentUser } from '@/features/auth/useCurrentUser'
 import { children, greeting } from '../content'
 import type { ChildId } from '../content'
 
 type Props = { childId: ChildId; onChange: (id: ChildId) => void }
 
 export default function MobileGreeting({ childId, onChange }: Props) {
+  const user = useCurrentUser()
   return (
     <div className="md:hidden">
       <p className="text-sm text-dim">{greeting.date}</p>
       <h1 className="pb-[17px] font-heading text-[26px] leading-[32.5px] tracking-[-0.26px] text-parchment">
-        {greeting.title}
+        {greeting.hello}, {user?.display_name}!
       </h1>
       <fieldset>
         <legend className="sr-only">Дитина</legend>
