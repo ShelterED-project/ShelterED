@@ -47,6 +47,15 @@ export interface StudentJoinRequest {
   pin: string
 }
 
+export interface AdminCreateUserRequest {
+  email: string
+  display_name: string
+  last_name?: string
+  role: 'teacher' | 'parent' | 'admin'
+  /** Початковий пароль, 8–128 символів */
+  password: string
+}
+
 export interface ParentLinkResponse {
   child_id: string
   display_name: string

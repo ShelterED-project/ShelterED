@@ -2,7 +2,7 @@ import iconChevron from '@/assets/parent/chevron-down.svg'
 import iconPlus from '@/assets/admin/plus-16.svg'
 import { users } from '../content'
 
-export default function UsersCard({ className = '' }: { className?: string }) {
+export default function UsersCard({ className = '', onInvite }: { className?: string; onInvite: () => void }) {
   return (
     <section className={`flex flex-col gap-3 rounded-[22px] border border-line bg-surface p-5 xl:p-6 ${className}`}>
       <div className="flex items-center justify-between gap-3">
@@ -30,9 +30,9 @@ export default function UsersCard({ className = '' }: { className?: string }) {
           </li>
         ))}
       </ul>
-      {/* TODO: відкривати форму запрошення вчителя, коли зʼявиться відповідна сторінка */}
       <button
         type="button"
+        onClick={onInvite}
         className="flex items-center justify-center gap-2 rounded-[10px] border border-line-strong py-[10.5px] text-sm font-semibold text-parchment hover:bg-surface-2 focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:outline-none"
       >
         <img src={iconPlus} alt="" width={16} height={16} />
