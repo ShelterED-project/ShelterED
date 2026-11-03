@@ -2,6 +2,7 @@ import { baseApi } from '@/shared/api/baseApi'
 import type {
   AuthorizeRequest,
   AuthorizeResponse,
+  ParentLinkResponse,
   StudentJoinRequest,
   TokenRequest,
   TokenResponse,
@@ -26,6 +27,9 @@ export const authApi = baseApi.injectEndpoints({
     fetchMe: build.mutation<User, string>({
       query: (accessToken) => ({ url: '/auth/me', headers: { Authorization: `Bearer ${accessToken}` } }),
     }),
+    parentLink: build.mutation<ParentLinkResponse, { code: string }>({
+      query: (body) => ({ url: '/parent/link', method: 'POST', body }),
+    }),
     studentJoin: build.mutation<TokenResponse, StudentJoinRequest>({
       query: (body) => ({ url: '/auth/student/join', method: 'POST', body }),
     }),
@@ -38,5 +42,6 @@ export const {
   useLogoutMutation,
   useMeQuery,
   useFetchMeMutation,
+  useParentLinkMutation,
   useStudentJoinMutation,
 } = authApi
