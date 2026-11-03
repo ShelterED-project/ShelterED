@@ -14,7 +14,8 @@ const rawBaseQuery = fetchBaseQuery({
   baseUrl,
   prepareHeaders: (headers, { getState }) => {
     const session = (getState() as { auth: AuthState }).auth.session
-    if (session) headers.set('Authorization', `Bearer ${session.accessToken}`)
+    // Явний Authorization (напр. fetchMe під час входу) не перезаписуємо токеном старої сесії.
+    if (session && !headers.has('Authorization')) headers.set('Authorization', `Bearer ${session.accessToken}`)
     return headers
   },
 })
