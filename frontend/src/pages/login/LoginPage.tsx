@@ -4,10 +4,9 @@ import { Link } from 'react-router'
 import iconGoogle from '@/assets/auth/icon-google.svg'
 import iconKey from '@/assets/auth/icon-key.svg'
 import iconMail from '@/assets/auth/icon-mail.svg'
+import { useAdultLogin } from '@/features/auth/useAdultLogin'
 import AuthLayout from '@/shared/ui/AuthLayout'
 import { PasswordField, TextField } from '@/shared/ui/Field'
-import { loginRoles } from './content'
-import type { LoginRole } from './content'
 
 const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
@@ -15,22 +14,21 @@ const altButton =
   'flex h-12 items-center justify-center gap-3 rounded-[10px] border border-line-strong text-[15px] font-semibold text-parchment hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:outline-none'
 
 export default function LoginPage() {
-  const [role, setRole] = useState<LoginRole>('teacher')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [remember, setRemember] = useState(true)
   const [errors, setErrors] = useState<{ email?: string; password?: string }>({})
+  const { login, loading, error } = useAdultLogin()
 
-  function onSubmit(e: SubmitEvent<HTMLFormElement>) {
+  async function onSubmit(e: SubmitEvent<HTMLFormElement>) {
     e.preventDefault()
     const found: typeof errors = {}
     if (!emailRe.test(email.trim())) found.email = 'Введіть пошту у форматі name@school.edu.ua'
     if (!password) found.password = 'Введіть пароль'
     setErrors(found)
     if (Object.keys(found).length > 0) return
-    // TODO: API входу ще немає. Коли зʼявиться, відправляти через єдиний шар даних
-    // (RTK Query), а не fetch у компоненті. Прапорець «Запамʼятати для офлайн-входу» (remember)
-    // має керувати збереженням даних для входу без мережі.
+    // «Запамʼятати для офлайн-входу» керує збереженням сесії в IndexedDB.
+    await login(email.trim(), password, remember)
   }
 
   return (
@@ -44,28 +42,6 @@ export default function LoginPage() {
       </p>
 
       <form onSubmit={onSubmit} noValidate className="mt-6 flex flex-col gap-5">
-        <fieldset>
-          <legend className="sr-only">Роль</legend>
-          <div className="flex gap-1 rounded-xl border border-line bg-surface p-1">
-            {loginRoles.map((r) => (
-              <label
-                key={r.value}
-                className="flex h-10 flex-1 cursor-pointer items-center justify-center rounded-lg text-[13px] font-semibold text-muted has-checked:bg-surface-2 has-checked:text-accent has-checked:shadow-[inset_0_0_0_1px_var(--color-line-strong)] has-focus-visible:ring-2 has-focus-visible:ring-accent/40 md:text-sm"
-              >
-                <input
-                  type="radio"
-                  name="role"
-                  value={r.value}
-                  checked={role === r.value}
-                  onChange={() => setRole(r.value)}
-                  className="sr-only"
-                />
-                {r.label}
-              </label>
-            ))}
-          </div>
-        </fieldset>
-
         <TextField
           label="Електронна пошта"
           icon={iconMail}
@@ -100,11 +76,18 @@ export default function LoginPage() {
           </button>
         </div>
 
+        {error && (
+          <p role="alert" className="text-sm text-danger">
+            {error}
+          </p>
+        )}
+
         <button
           type="submit"
-          className="flex h-14 items-center justify-center rounded-[10px] bg-accent font-bold text-oil focus-visible:ring-2 focus-visible:ring-parchment focus-visible:outline-none"
+          disabled={loading}
+          className="flex h-14 items-center justify-center rounded-[10px] bg-accent font-bold text-oil focus-visible:ring-2 focus-visible:ring-parchment focus-visible:outline-none disabled:opacity-60"
         >
-          Увійти
+          {loading ? 'Входимо…' : 'Увійти'}
         </button>
       </form>
 
@@ -119,17 +102,14 @@ export default function LoginPage() {
           <img src={iconGoogle} alt="" width={20} height={20} />
           Увійти через Google
         </button>
-        <button type="button" className={altButton}>
+        <Link to="/register" className={altButton}>
           <img src={iconKey} alt="" width={18} height={18} />
           Я учень — увійти за кодом класу
-        </button>
+        </Link>
       </div>
 
       <p className="mt-6 text-sm text-muted">
-        Ще немає акаунта?{' '}
-        <Link to="/register" className="rounded font-semibold hover:text-parchment">
-          Зареєструватися
-        </Link>
+        Акаунти вчителів, батьків і адміністрації створює адміністрація школи.
       </p>
     </AuthLayout>
   )
