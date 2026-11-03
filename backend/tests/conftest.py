@@ -11,6 +11,14 @@ os.environ["DATABASE_URL"] = TEST_DATABASE_URL
 os.environ["DATABASE_URL_DIRECT"] = TEST_DATABASE_URL
 os.environ["DATABASE_SSL"] = "false"
 os.environ["JWT_SECRET"] = "test-secret-not-for-production-0123456789"
+# Настройки, від яких залежать результати тестів, не беремо з backend/.env розробника.
+os.environ["ACCESS_TOKEN_TTL_MIN"] = "15"
+os.environ["REFRESH_TOKEN_TTL_DAYS"] = "30"
+os.environ["REFRESH_REUSE_GRACE_SECONDS"] = "300"
+os.environ["AUTH_CODE_TTL_S"] = "60"
+os.environ["PARENT_LINK_CODE_TTL_DAYS"] = "7"
+os.environ["OAUTH_CLIENT_IDS"] = '["sheltered-pwa"]'
+os.environ["CORS_ORIGINS"] = '["http://localhost:5173"]'
 
 import uuid  # noqa: E402
 from collections.abc import AsyncIterator  # noqa: E402
@@ -28,7 +36,7 @@ from sqlalchemy.pool import NullPool  # noqa: E402
 
 from app.core.config import get_settings  # noqa: E402
 from app.core.db import get_session  # noqa: E402
-from app.core.security import create_access_token, hash_secret  # noqa: E402
+from app.core.security import create_access_token, hash_secret, new_link_code  # noqa: E402
 from app.main import create_app  # noqa: E402
 from app.models.school import (  # noqa: E402
     ClassMembership,
@@ -37,6 +45,7 @@ from app.models.school import (  # noqa: E402
     SchoolClass,
     User,
 )
+from app.services.auth import name_key  # noqa: E402
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent
 
@@ -111,7 +120,7 @@ class Factory:
             name=name,
             grade=7,
             academic_year="2026/2027",
-            join_code=uuid.uuid4().hex[:8].upper(),
+            join_code=new_link_code(),
             join_code_expires_at=expires,
         )
         self.session.add(klass)
@@ -144,6 +153,7 @@ class Factory:
             role="student",
             display_name=name,
             last_name=last,
+            name_key=name_key(name, last),
             school_id=klass.school_id,
             pin_hash=_pin_hash(),
         )
@@ -190,7 +200,8 @@ async def world(factory: Factory) -> SimpleNamespace:
 
 def auth_header(user: User) -> dict[str, str]:
     """Access-токен, випущений напряму (без HTTP-входу)."""
-    return {"Authorization": f"Bearer {create_access_token(user.id, user.role, get_settings())}"}
+    token = create_access_token(user.id, user.role, get_settings(), user.token_version)
+    return {"Authorization": f"Bearer {token}"}
 
 
 @pytest.fixture

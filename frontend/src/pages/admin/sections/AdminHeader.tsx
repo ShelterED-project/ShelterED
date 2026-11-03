@@ -1,10 +1,11 @@
 import iconSettings from '@/assets/student/header-shield.svg'
 import iconPlus from '@/assets/admin/plus-dark.svg'
 import iconSearch from '@/assets/admin/search.svg'
+import LogoutButton from '@/features/auth/LogoutButton'
 import Brand from '@/shared/ui/Brand'
 import { school } from '../content'
 
-export default function AdminHeader() {
+export default function AdminHeader({ onAddUser }: { onAddUser: () => void }) {
   return (
     <header className="sticky top-0 z-10 flex h-16 items-center justify-between gap-3 border-b border-line-soft bg-oil/95 px-5 backdrop-blur-sm md:px-8 xl:h-20 xl:px-10">
       <div className="md:hidden">
@@ -35,9 +36,9 @@ export default function AdminHeader() {
             className="h-12 w-full rounded-[10px] border border-line bg-surface pr-3 pl-10 text-sm text-parchment placeholder:text-dim focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:outline-none"
           />
         </div>
-        {/* TODO: відкривати форму додавання користувача, коли зʼявиться відповідна сторінка */}
         <button
           type="button"
+          onClick={onAddUser}
           aria-label="Додати користувача"
           className="flex h-11 items-center justify-center gap-2 rounded-[10px] bg-accent px-4 text-sm font-semibold text-oil focus-visible:ring-2 focus-visible:ring-parchment/60 focus-visible:outline-none"
         >
@@ -51,6 +52,7 @@ export default function AdminHeader() {
         >
           <img src={iconSettings} alt="" width={20} height={20} />
         </button>
+        <LogoutButton compact className="size-11 shrink-0 rounded-xl border border-line md:hidden" />
       </div>
     </header>
   )

@@ -5,13 +5,24 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, Field, StringConstraints
 
 # Імена: без зайвих пробілів, 1–50 символів (як CHECK у БД).
-Name = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=50)]
+# Без керівних символів (\x00-\x1f).
+Name = Annotated[
+    str,
+    StringConstraints(
+        strip_whitespace=True, min_length=1, max_length=50, pattern=r"^[^\x00-\x1f]+$"
+    ),
+]
 # Простий формат email (email-validator не підключаємо); CITEXT у БД ігнорує регістр.
 Email = Annotated[
     str,
-    StringConstraints(strip_whitespace=True, max_length=254, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$"),
+    StringConstraints(
+        strip_whitespace=True,
+        max_length=254,
+        pattern=r"^[^@\s\x00-\x1f]+@[^@\s\x00-\x1f]+\.[^@\s\x00-\x1f]+$",
+    ),
 ]
-Pin = Annotated[str, StringConstraints(pattern=r"^\d{4,6}$")]
+Pin = Annotated[str, StringConstraints(pattern=r"^[0-9]{4,6}$")]
+JoinCode = Annotated[str, StringConstraints(max_length=64, pattern=r"^[^\x00-\x1f]+$")]
 
 
 class TokenResponse(BaseModel):
@@ -23,8 +34,8 @@ class TokenResponse(BaseModel):
 
 class AuthorizeRequest(BaseModel):
     email: Email
-    password: str
-    code_challenge: str = Field(min_length=43, max_length=128)
+    password: str = Field(max_length=128)
+    code_challenge: str = Field(pattern=r"^[A-Za-z0-9_-]{43,128}$")
     code_challenge_method: Literal["S256"]
     client_id: str
     redirect_uri: str | None = None
@@ -39,7 +50,7 @@ class TokenRequest(BaseModel):
 
     grant_type: Literal["authorization_code", "refresh_token"]
     code: str | None = None
-    code_verifier: str | None = None
+    code_verifier: str | None = Field(default=None, pattern=r"^[A-Za-z0-9._~-]{43,128}$")
     client_id: str | None = None
     redirect_uri: str | None = None
     refresh_token: str | None = None
@@ -50,7 +61,7 @@ class LogoutRequest(BaseModel):
 
 
 class StudentJoinRequest(BaseModel):
-    join_code: str
+    join_code: JoinCode
     display_name: Name
     last_name: Name
     pin: Pin = Field(description="4–6 цифр")

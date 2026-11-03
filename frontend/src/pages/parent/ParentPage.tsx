@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { ChildId } from './content'
 import Homework from './sections/Homework'
 import Kpis from './sections/Kpis'
+import LinkChild from './sections/LinkChild'
 import MobileGreeting from './sections/MobileGreeting'
 import MobileHeader from './sections/MobileHeader'
 import MobileTabs from './sections/MobileTabs'
@@ -15,7 +16,7 @@ import WeekChart from './sections/WeekChart'
 
 export default function ParentPage() {
   // TODO: дані дашборда поки однакові для обох дітей; розділити, коли зʼявиться API
-  const [childId, setChildId] = useState<ChildId>('olya')
+  const [childId, setChildId] = useState<ChildId>('child')
 
   return (
     <div className="flex min-h-screen">
@@ -26,6 +27,7 @@ export default function ParentPage() {
         <main className="flex flex-col gap-5 px-5 pt-6 pb-24 md:gap-6 md:px-10 md:py-8">
           <MobileGreeting childId={childId} onChange={setChildId} />
           <SafetyStatus />
+          <LinkChild />
           <Kpis />
           <div className="flex flex-col gap-5 md:gap-6 xl:flex-row">
             <WeekChart className="xl:flex-1" />

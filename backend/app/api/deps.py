@@ -28,7 +28,7 @@ async def get_current_user(
         raise AppError("UNAUTHORIZED", "Not authenticated", status_code=401)
     claims = decode_access_token(credentials.credentials, settings)
     user = await session.get(User, uuid.UUID(claims["sub"]))
-    if user is None or not user.is_active:
+    if user is None or not user.is_active or user.token_version != claims["ver"]:
         raise AppError("UNAUTHORIZED", "Invalid or expired token", status_code=401)
     return user
 

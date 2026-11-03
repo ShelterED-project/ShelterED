@@ -31,3 +31,13 @@ async def test_changes_are_rolled_back_part_2(db_session):
 async def test_uses_test_database(db_session):
     # Захист від випадкового запуску тестів на Neon.
     assert await db_session.scalar(text("SELECT current_database()")) == "sheltered_test"
+
+
+def test_openapi_file_is_up_to_date():
+    from app.cli import OPENAPI_PATH, render_openapi
+
+    # read_text нормалізує CRLF, який Git на Windows може підставити.
+    committed = OPENAPI_PATH.read_text(encoding="utf-8")
+    assert committed == render_openapi(), (
+        "docs/openapi.json is stale: run `python -m app.cli export-openapi` and commit it"
+    )

@@ -45,8 +45,8 @@ export default function Hero() {
           світло і зв’язок, — а Кріт із ліхтариком веде маршрутом тем.
         </p>
         <div className="mt-8 flex flex-wrap gap-3">
-          <Button to="/register" variant="primary" className="h-14 px-7">
-            Почати безкоштовно
+          <Button to="/login" variant="primary" className="h-14 px-7">
+            Увійти в систему
           </Button>
           <Button href="#how" variant="outline" className="h-14 px-7">
             Як це працює

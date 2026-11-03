@@ -3,8 +3,9 @@ import iconCalm from '@/assets/student/nav-calm.svg'
 import iconLessons from '@/assets/student/nav-lessons.svg'
 import iconMe from '@/assets/student/nav-me.svg'
 import iconRoute from '@/assets/student/nav-route.svg'
+import { useCurrentUser } from '@/features/auth/useCurrentUser'
 import AppSidebar from '@/shared/ui/AppSidebar'
-import { sidebarNav, studentUser } from '../content'
+import { sidebarNav, studentRole } from '../content'
 import type { NavId } from '../content'
 
 const icons: Record<NavId, string> = {
@@ -18,5 +19,12 @@ const icons: Record<NavId, string> = {
 const items = sidebarNav.map((item) => ({ ...item, icon: icons[item.id] }))
 
 export default function StudentSidebar() {
-  return <AppSidebar items={items} activeId="route" user={studentUser} />
+  const user = useCurrentUser()
+  return (
+    <AppSidebar
+      items={items}
+      activeId="route"
+      user={{ initials: user?.initials ?? '', name: user?.fullName ?? '', role: studentRole }}
+    />
+  )
 }
