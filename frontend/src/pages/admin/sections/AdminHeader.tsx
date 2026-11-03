@@ -1,6 +1,7 @@
 import iconSettings from '@/assets/student/header-shield.svg'
 import iconPlus from '@/assets/admin/plus-dark.svg'
 import iconSearch from '@/assets/admin/search.svg'
+import LogoutButton from '@/features/auth/LogoutButton'
 import Brand from '@/shared/ui/Brand'
 import { school } from '../content'
 
@@ -51,6 +52,7 @@ export default function AdminHeader() {
         >
           <img src={iconSettings} alt="" width={20} height={20} />
         </button>
+        <LogoutButton compact className="size-11 shrink-0 rounded-xl border border-line md:hidden" />
       </div>
     </header>
   )
