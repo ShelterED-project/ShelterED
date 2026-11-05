@@ -7,8 +7,9 @@
 
 Застосування (лише для прийнятих подій), правила конфліктів — розділ 5 протоколу:
 - `module_progress` — максимум `progress_pct` (і найраніший `completed_at`);
-- `test_attempt` — зараховується перша завершена спроба (за `completed_at` пристрою), решта
-  зберігаються з `not_credited_repeat`; оцінює сервер за `answer_key`;
+- `test_attempt` — зараховується перша завершена спроба (за `completed_at` пристрою) у межах
+  вікна тесту (B11), пізніші за дедлайн — `not_credited_late`, решта — `not_credited_repeat`;
+  оцінює сервер за `answer_key`;
 - `rollcall_status` — перемагає найпізніший `occurred_at`;
 - `survey_answer` — лише запис у `sync_event` (окреме сховище — B13.4).
 
@@ -197,6 +198,97 @@ async def grade(
     return (Decimal(earned * 100) / Decimal(total)).quantize(Decimal("0.01"))
 
 
+async def _lock_attempts(session: AsyncSession, student_id: uuid.UUID, test_id: uuid.UUID) -> None:
+    """Спроби учня з тесту зараховуємо по черзі (до кінця транзакції події)."""
+    await session.execute(
+        select(
+            func.pg_advisory_xact_lock(func.hashtextextended(f"attempt:{student_id}:{test_id}", 0))
+        )
+    )
+
+
+async def lesson_completed_at(
+    session: AsyncSession, student_id: uuid.UUID, lesson_id: uuid.UUID
+) -> dt.datetime | None:
+    """Момент завершення уроку учнем: `occurred_at` події, що довела останній модуль до 100%
+    (найпізніший `full_at` модулів), якщо всі модулі уроку завершені; інакше None."""
+    total, done, last = (
+        await session.execute(
+            select(
+                func.count(Module.id),
+                func.count(ModuleProgress.full_at),
+                func.max(ModuleProgress.full_at),
+            )
+            .select_from(Module)
+            .outerjoin(
+                ModuleProgress,
+                and_(
+                    ModuleProgress.module_id == Module.id,
+                    ModuleProgress.student_id == student_id,
+                ),
+            )
+            .where(Module.lesson_id == lesson_id)
+        )
+    ).one()
+    return last if total and done == total else None
+
+
+async def _recredit(session: AsyncSession, student_id: uuid.UUID, test: Test) -> None:
+    """Статуси всіх спроб учня з тесту як чиста функція від набору спроб і вікна (B11), тож
+    порядок надходження подій не важливий. Зараховується перша завершена спроба за часом
+    пристрою (рівність — менший `client_event_id`) у межах вікна: `completed_at` ≤ завершення
+    уроку + `window_hours`. Пізніші за дедлайн — `not_credited_late`, решта —
+    `not_credited_repeat`. Поки завершення уроку невідоме серверу (події модулів ще в дорозі),
+    дедлайну немає; щойно воно стане відомим, перерахунок викликається знову. Викликати під
+    `_lock_attempts`."""
+    deadline = None
+    if test.window_enabled and test.window_hours:
+        completed = await lesson_completed_at(session, student_id, test.lesson_id)
+        if completed is not None:
+            deadline = completed + dt.timedelta(hours=test.window_hours)
+    attempts = (
+        await session.execute(
+            select(Attempt.id, Attempt.completed_at_client, Attempt.credit_status)
+            .where(Attempt.student_id == student_id, Attempt.test_id == test.id)
+            .order_by(Attempt.completed_at_client, Attempt.client_event_id)
+        )
+    ).all()
+    winner = next(
+        (a.id for a in attempts if deadline is None or a.completed_at_client <= deadline), None
+    )
+    wanted = {
+        a.id: "credited"
+        if a.id == winner
+        else "not_credited_late"
+        if deadline is not None and a.completed_at_client > deadline
+        else "not_credited_repeat"
+        for a in attempts
+    }
+    changed = [a for a in attempts if a.credit_status != wanted[a.id]]
+    # Спершу знімаємо зарахування, потім ставимо: частковий UNIQUE на зараховану спробу.
+    for a in sorted(changed, key=lambda a: wanted[a.id] == "credited"):
+        await session.execute(
+            update(Attempt).where(Attempt.id == a.id).values(credit_status=wanted[a.id])
+        )
+
+
+async def _recredit_window_tests(
+    session: AsyncSession, student_id: uuid.UUID, module_id: uuid.UUID
+) -> None:
+    """Модуль завершено: могло стати відомим завершення уроку — перерахувати тести з вікном."""
+    tests = (
+        await session.scalars(
+            select(Test)
+            .join(Module, Module.lesson_id == Test.lesson_id)
+            .where(Module.id == module_id, Test.window_enabled)
+            .order_by(Test.id)
+        )
+    ).all()
+    for test in tests:
+        await _lock_attempts(session, student_id, test.id)
+        await _recredit(session, student_id, test)
+
+
 async def _apply_test_attempt(
     session: AsyncSession,
     batch: Batch,
@@ -205,38 +297,10 @@ async def _apply_test_attempt(
     suspicious: bool,
 ) -> None:
     student_id = batch.user_id
-    # Паралельні спроби того самого тесту зараховуємо по черзі (до кінця транзакції події).
-    await session.execute(
-        select(
-            func.pg_advisory_xact_lock(
-                func.hashtextextended(f"attempt:{student_id}:{payload.test_id}", 0)
-            )
-        )
-    )
-    credited = (
-        await session.execute(
-            select(Attempt.id, Attempt.completed_at_client, Attempt.client_event_id).where(
-                Attempt.student_id == student_id,
-                Attempt.test_id == payload.test_id,
-                Attempt.credit_status == "credited",
-            )
-        )
-    ).first()
-    # Перша завершена спроба за часом пристрою (рівність — менший client_event_id), незалежно
-    # від порядку надходження: офлайн-спроба з іншого пристрою може прийти пізніше.
-    mine = (payload.completed_at, event_id)
-    if credited is None:
-        status = "credited"
-    elif mine < (credited.completed_at_client, credited.client_event_id):
-        await session.execute(
-            update(Attempt)
-            .where(Attempt.id == credited.id)
-            .values(credit_status="not_credited_repeat")
-        )
-        status = "credited"
-    else:
-        status = "not_credited_repeat"
-    # Вікно тесту (B11, P1) ще не застосовується: `not_credited_late` поки не ставиться.
+    await _lock_attempts(session, student_id, payload.test_id)
+    test = await session.get(Test, payload.test_id)
+    assert test is not None  # перевірено в _check_test_attempt
+    # Спроба зберігається завжди (і поза вікном); статус ставить _recredit.
     session.add(
         Attempt(
             client_event_id=event_id,
@@ -246,11 +310,12 @@ async def _apply_test_attempt(
             completed_at_client=payload.completed_at,
             received_at=batch.received_at,
             score=await grade(session, payload.test_id, payload.answers),
-            credit_status=status,
+            credit_status="not_credited_repeat",
             is_suspicious=suspicious,
         )
     )
     await session.flush()
+    await _recredit(session, student_id, test)
 
 
 async def _check_rollcall(
@@ -388,6 +453,8 @@ async def _process_event(
 
     if isinstance(payload, ModuleProgressPayload):
         await _apply_module_progress(session, batch, event.client_event_id, occurred_at, payload)
+        if payload.progress_pct == 100:
+            await _recredit_window_tests(session, batch.user_id, payload.module_id)
     elif isinstance(payload, TestAttemptPayload):
         await _apply_test_attempt(session, batch, event.client_event_id, payload, suspicious)
     elif isinstance(payload, RollCallStatusPayload):

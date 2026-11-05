@@ -2756,6 +2756,7 @@
         "type": "object"
       },
       "PackTest": {
+        "description": "Тест уроку. Тест із вікном (B11) пристрій закриває сам, без мережі: дедлайн =\n`occurred_at` події, що довела останній модуль уроку до 100%, + `window_hours`.",
         "properties": {
           "id": {
             "format": "uuid",
@@ -2774,6 +2775,7 @@
             "type": "string"
           },
           "window_enabled": {
+            "description": "Оцінюваний тест із вікном (оцінює сервер)",
             "title": "Window Enabled",
             "type": "boolean"
           },
@@ -2786,6 +2788,7 @@
                 "type": "null"
               }
             ],
+            "description": "Тривалість вікна (24/48/72 год) від завершення останнього модуля уроку",
             "title": "Window Hours"
           }
         },

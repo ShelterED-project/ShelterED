@@ -103,10 +103,15 @@ class PackQuestion(BaseModel):
 
 
 class PackTest(BaseModel):
+    """Тест уроку. Тест із вікном (B11) пристрій закриває сам, без мережі: дедлайн =
+    `occurred_at` події, що довела останній модуль уроку до 100%, + `window_hours`."""
+
     id: uuid.UUID
     title: str
-    window_enabled: bool
-    window_hours: int | None
+    window_enabled: bool = Field(description="Оцінюваний тест із вікном (оцінює сервер)")
+    window_hours: int | None = Field(
+        description="Тривалість вікна (24/48/72 год) від завершення останнього модуля уроку"
+    )
     questions: list[PackQuestion]
 
 
