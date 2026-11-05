@@ -23,6 +23,7 @@ os.environ["CORS_ORIGINS"] = '["http://localhost:5173"]'
 os.environ["ALERTS_API_TOKEN"] = ""
 os.environ["ALERTS_SOURCE_STALE_S"] = "300"
 os.environ["SYNC_SUSPICIOUS_SKEW_S"] = "300"
+os.environ["SYNC_ROLLCALL_CLOSE_GRACE_S"] = "120"
 os.environ["STATS_PASS_SCORE"] = "60"
 os.environ["STATS_CLOSING_SOON_H"] = "6"
 os.environ["RATE_LIMIT_JOIN_ACCOUNT"] = "10"

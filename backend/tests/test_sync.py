@@ -242,6 +242,30 @@ async def test_status_before_closing_is_accepted_after_closing(
     assert statuses(results) == [("accepted", None)]
 
 
+async def test_mark_before_closing_by_server_time_survives_fast_device_clock(
+    client, db_session, world, factory, c
+) -> None:
+    """Годинник телефона на 10 хв уперед: відмітка за 5 хв до закриття (за часом сервера)
+    має `occurred_at` після закриття, але з поправкою на зсув пакета приймається. Відмітка в
+    межах допуску після закриття — теж; явно пізня (і за пристроєм, і з поправкою) — ні."""
+    closed_at = now() - dt.timedelta(minutes=1)
+    c.rc.closed_at = closed_at
+    await db_session.flush()
+    ahead = dt.timedelta(minutes=10)
+    mark = rollcall(c.rc.id, "in_shelter", closed_at - dt.timedelta(minutes=5) + ahead)
+    results = await send(client, world.student_a, batch(mark, sent_at=now() + ahead))
+    assert statuses(results) == [("accepted", None)]
+    status = await db_session.get(RollCallStatus, (c.rc.id, world.student_a.id))
+    assert status.status == "in_shelter"
+
+    second = await factory.student(world.class_a, "Олег", "Мельник")
+    grace = rollcall(c.rc.id, "safe", closed_at + dt.timedelta(seconds=60))
+    assert statuses(await send(client, second, batch(grace))) == [("accepted", None)]
+    late = rollcall(c.rc.id, "safe", closed_at + dt.timedelta(minutes=10))
+    results = await send(client, second, batch(late, sent_at=now()))
+    assert statuses(results) == [("rejected", "session_closed")]
+
+
 async def test_foreign_event_id_is_not_overwritten(client, db_session, world, c) -> None:
     e = progress(c.module.id, 10)
     await send(client, world.student_a, batch(e))

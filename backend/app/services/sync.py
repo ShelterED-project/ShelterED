@@ -80,6 +80,8 @@ class Batch:
     clock_skew_ms: int
     suspicious_skew: bool
     threshold: dt.timedelta
+    # Допуск для `session_closed` (SYNC_ROLLCALL_CLOSE_GRACE_S).
+    close_grace: dt.timedelta = dt.timedelta(0)
 
 
 def _result(event_id: uuid.UUID, status: str, reason: str | None = None) -> SyncEventResult:
@@ -364,8 +366,17 @@ async def _check_rollcall(
     )
     if member is None:
         raise Rejected("forbidden")
-    if rc.closed_at is not None and occurred_at > rc.closed_at:
+    if rc.closed_at is not None and _after_close(batch, occurred_at, rc.closed_at):
         raise Rejected("session_closed")
+
+
+def _after_close(batch: Batch, occurred_at: dt.datetime, closed_at: dt.datetime) -> bool:
+    """Відмітка точно пізніша за закриття переклички. `occurred_at` — годинник пристрою, тож
+    порівнюємо й час, виправлений на зсув пакета (`occurred_at + clock_skew`, де
+    `clock_skew = received_at - sent_at`), і беремо раніший із двох плюс допуск: справжню
+    відмітку краще прийняти зайвий раз, ніж загубити через годинник телефона."""
+    corrected = occurred_at + dt.timedelta(milliseconds=batch.clock_skew_ms)
+    return min(occurred_at, corrected) > closed_at + batch.close_grace
 
 
 async def _apply_rollcall(
@@ -558,6 +569,7 @@ async def receive_events(
         clock_skew_ms=int(skew / dt.timedelta(milliseconds=1)),
         suspicious_skew=abs(skew) > threshold,
         threshold=threshold,
+        close_grace=dt.timedelta(seconds=settings.sync_rollcall_close_grace_s),
     )
 
     results: list[SyncEventResult | None] = [None] * len(body.events)
