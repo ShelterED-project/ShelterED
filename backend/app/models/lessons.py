@@ -6,6 +6,7 @@ from sqlalchemy import (
     BigInteger,
     CheckConstraint,
     ForeignKey,
+    Index,
     Integer,
     SmallInteger,
     UniqueConstraint,
@@ -30,7 +31,11 @@ class Lesson(TimestampMixin, Base):
     """Урок не прив'язаний до класу: призначається на слот у дату (lesson_assignment)."""
 
     __tablename__ = "lesson"
-    __table_args__ = (CheckConstraint("status IN ('draft', 'published')", name="status"),)
+    __table_args__ = (
+        CheckConstraint("status IN ('draft', 'published')", name="status"),
+        # «Мої уроки» вчителя.
+        Index("ix_lesson_author_id", "author_id"),
+    )
 
     id: Mapped[uuid.UUID] = uuid_pk()
     subject_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("subject.id"))

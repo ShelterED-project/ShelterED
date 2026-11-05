@@ -26,9 +26,9 @@ app/
 | `packs` | пакети знань «Рюкзак»: збірка, маніфест, завантаження | B2.4, B6 |
 | `sync` | прийом подій `POST /sync/events`, `GET /sync/changes`, агрегати | B2.5, B9, B10 |
 | `rollcall` | сесії й статуси переклички | B2.6, B12 |
-| `alerts` | тривоги: вебхук від AI-сервісу, ручна тривога, журнал | B2.6, B7 |
+| `alerts` | тривоги: опитування API тривог, ручна тривога, журнал | B2.6, B7 |
 
-Пізніше додаються `push` (Web Push, B8) і `tutor` (проксі до AI-сервісу, B13).
+Також `push` (Web Push, B8) і `tutor` (проксі до AI-сервісу, B13). Ендпоінти доменів `packs`, `sync`, `rollcall`, `alerts`, `push`, `tutor` поки заглушки контракту (B4, `app/api/stub.py`): перевіряють автентифікацію й роль і відповідають `501 NOT_IMPLEMENTED`; успішні відповіді описані в OpenAPI з прикладами.
 
 Залежності між шарами йдуть в один бік: `api → services → models`. Роутер не звертається до БД напряму, а сервіс нічого не знає про HTTP.
 
@@ -58,6 +58,19 @@ python -m app.cli create-admin --email admin@school.ua --name Імʼя --school-
 ```
 python -m app.cli export-openapi
 ```
+
+Приклади запитів і відповідей лежать у схемах (`json_schema_extra.examples`) і в описі відповідей ендпоінтів; Swagger UI — `/docs`.
+
+### TS-типи для фронтенду
+
+Запускати з кореня репозиторію (пакети тягне `npx`, у `package.json` нічого не додається):
+
+```
+npx openapi-typescript docs/openapi.json -o frontend/src/shared/api/schema.d.ts
+npx @stoplight/prism-cli mock docs/openapi.json
+```
+
+Перша команда генерує типи (`components["schemas"]["SyncEventsRequest"]` тощо; шлях — пропозиція, остаточний обирає фронтенд). Друга піднімає мок-сервер на `http://127.0.0.1:4010`, який віддає приклади з контракту, зокрема для ендпоінтів-заглушок, що на справжньому API поки відповідають `501`.
 
 ## Міграції (Alembic)
 

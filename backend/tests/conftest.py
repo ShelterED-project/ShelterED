@@ -34,10 +34,13 @@ from httpx import ASGITransport, AsyncClient  # noqa: E402
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine  # noqa: E402
 from sqlalchemy.pool import NullPool  # noqa: E402
 
+from app.api.deps import get_storage  # noqa: E402
 from app.core.config import get_settings  # noqa: E402
 from app.core.db import get_session  # noqa: E402
 from app.core.security import create_access_token, hash_secret, new_link_code  # noqa: E402
+from app.core.storage import LocalMediaStorage  # noqa: E402
 from app.main import create_app  # noqa: E402
+from app.models.lessons import Subject  # noqa: E402
 from app.models.school import (  # noqa: E402
     ClassMembership,
     ParentChild,
@@ -165,6 +168,12 @@ class Factory:
         await self.session.flush()
         return student
 
+    async def subject(self, school: School | None = None, name: str = "Математика") -> Subject:
+        subject = Subject(name=name, school_id=school.id if school else None)
+        self.session.add(subject)
+        await self.session.flush()
+        return subject
+
     async def parent_of(self, student: User) -> User:
         parent = await self.adult("parent", None, "Марія")
         self.session.add(ParentChild(parent_id=parent.id, child_id=student.id))
@@ -219,3 +228,11 @@ def app(db_session: AsyncSession) -> FastAPI:
 async def client(app: FastAPI) -> AsyncIterator[AsyncClient]:
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         yield c
+
+
+@pytest.fixture
+def media_storage(app: FastAPI, tmp_path: Path) -> LocalMediaStorage:
+    """Медіа пишуться в тимчасовий каталог тесту, а не в MEDIA_ROOT."""
+    storage = LocalMediaStorage(tmp_path / "media", "/media")
+    app.dependency_overrides[get_storage] = lambda: storage
+    return storage

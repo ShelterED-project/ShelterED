@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import auth, health
+from app.api import alerts, auth, health, lessons, media, packs, push, rollcall, school, sync, tutor
 from app.core.config import APP_VERSION, get_settings
 from app.core.db import get_engine
 from app.core.errors import register_error_handlers
@@ -43,6 +43,15 @@ def create_app() -> FastAPI:
     app.add_middleware(RequestIdMiddleware)
     app.include_router(health.router)
     app.include_router(auth.router)
+    app.include_router(school.router)
+    app.include_router(lessons.router)
+    app.include_router(media.router)
+    app.include_router(packs.router)
+    app.include_router(sync.router)
+    app.include_router(rollcall.router)
+    app.include_router(alerts.router)
+    app.include_router(push.router)
+    app.include_router(tutor.router)
     return app
 
 

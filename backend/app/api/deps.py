@@ -10,8 +10,11 @@ from app.core.config import Settings, get_settings
 from app.core.db import get_session
 from app.core.errors import AppError
 from app.core.security import decode_access_token
+from app.core.storage import LocalMediaStorage, MediaStorage
+from app.models.lessons import Card, Lesson, Module, Question, Test
 from app.models.school import SchoolClass, User
 from app.services import auth as auth_service
+from app.services import lessons as lessons_service
 
 bearer_scheme = HTTPBearer(auto_error=False, description="Access-токен (JWT)")
 
@@ -50,6 +53,7 @@ def require_roles(*roles: str) -> Callable[[User], Awaitable[User]]:
 Admin = Annotated[User, Depends(require_roles("admin"))]
 Parent = Annotated[User, Depends(require_roles("parent"))]
 Staff = Annotated[User, Depends(require_roles("teacher", "admin"))]
+Teacher = Annotated[User, Depends(require_roles("teacher"))]
 
 
 async def get_accessible_class(
@@ -84,3 +88,69 @@ async def get_accessible_student(
 AccessibleClass = Annotated[SchoolClass, Depends(get_accessible_class)]
 StaffClass = Annotated[SchoolClass, Depends(get_staff_class)]
 AccessibleStudent = Annotated[User, Depends(get_accessible_student)]
+
+
+async def get_admin_class(class_id: uuid.UUID, user: Admin, session: Session) -> SchoolClass:
+    """Клас школи адміна (керування класом і розкладом), інакше 403/404."""
+    return await get_accessible_class(class_id, user, session)
+
+
+async def get_teacher_class(class_id: uuid.UUID, user: Teacher, session: Session) -> SchoolClass:
+    """Клас, у якому користувач — вчитель (прив'язка уроків до розкладу)."""
+    return await get_accessible_class(class_id, user, session)
+
+
+AdminClass = Annotated[SchoolClass, Depends(get_admin_class)]
+TeacherClass = Annotated[SchoolClass, Depends(get_teacher_class)]
+
+
+# ---------- уроки: читає автор і персонал його школи, змінює лише автор ----------
+
+
+async def get_readable_lesson(lesson_id: uuid.UUID, user: Staff, session: Session) -> Lesson:
+    return await lessons_service.get_readable_lesson(session, user, lesson_id)
+
+
+async def get_editable_lesson(lesson_id: uuid.UUID, user: Teacher, session: Session) -> Lesson:
+    """Чернетка автора (опублікований урок — 409 LESSON_PUBLISHED)."""
+    return await lessons_service.get_editable_lesson(session, user, lesson_id)
+
+
+async def get_own_lesson(lesson_id: uuid.UUID, user: Teacher, session: Session) -> Lesson:
+    """Урок автора в будь-якому статусі (публікація, зняття з публікації)."""
+    return await lessons_service.get_editable_lesson(session, user, lesson_id, require_draft=False)
+
+
+async def get_editable_module(module_id: uuid.UUID, user: Teacher, session: Session) -> Module:
+    return await lessons_service.get_editable_module(session, user, module_id)
+
+
+async def get_editable_card(card_id: uuid.UUID, user: Teacher, session: Session) -> Card:
+    return await lessons_service.get_editable_card(session, user, card_id)
+
+
+async def get_editable_test(test_id: uuid.UUID, user: Teacher, session: Session) -> Test:
+    return await lessons_service.get_editable_test(session, user, test_id)
+
+
+async def get_editable_question(
+    question_id: uuid.UUID, user: Teacher, session: Session
+) -> Question:
+    return await lessons_service.get_editable_question(session, user, question_id)
+
+
+ReadableLesson = Annotated[Lesson, Depends(get_readable_lesson)]
+EditableLesson = Annotated[Lesson, Depends(get_editable_lesson)]
+OwnLesson = Annotated[Lesson, Depends(get_own_lesson)]
+EditableModule = Annotated[Module, Depends(get_editable_module)]
+EditableCard = Annotated[Card, Depends(get_editable_card)]
+EditableTest = Annotated[Test, Depends(get_editable_test)]
+EditableQuestion = Annotated[Question, Depends(get_editable_question)]
+
+
+def get_storage(settings: SettingsDep) -> MediaStorage:
+    """Сховище медіа; у тестах підміняється через dependency_overrides."""
+    return LocalMediaStorage(settings.media_root, settings.media_url_prefix)
+
+
+Storage = Annotated[MediaStorage, Depends(get_storage)]

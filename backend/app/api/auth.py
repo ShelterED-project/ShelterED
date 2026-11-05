@@ -1,9 +1,9 @@
 import json
 import uuid
-from typing import Annotated
+from typing import Annotated, Literal
 from urllib.parse import parse_qsl
 
-from fastapi import APIRouter, Header, Request, Response, status
+from fastapi import APIRouter, Header, Query, Request, Response, status
 from pydantic import ValidationError
 
 from app.api.deps import (
@@ -32,6 +32,7 @@ from app.schemas.auth import (
 )
 from app.schemas.errors import ErrorResponse
 from app.services import auth as service
+from app.services import school as school_service
 
 router = APIRouter(tags=["auth"])
 
@@ -238,3 +239,19 @@ async def admin_create_user(body: AdminCreateUserRequest, admin: Admin, session:
         school_id=admin.school_id,
     )
     return UserOut.model_validate(user)
+
+
+@router.get("/admin/users", response_model=list[UserOut], responses={**R401, **R403})
+async def admin_list_users(
+    admin: Admin,
+    session: Session,
+    role: Annotated[Literal["teacher", "admin", "student"] | None, Query()] = None,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> list[UserOut]:
+    """Активні користувачі школи адміна (напр. `?role=teacher` для призначення на клас),
+    за прізвищем та ім'ям. Батьки до школи не прив'язані й тут не показуються."""
+    if admin.school_id is None:
+        raise AppError("FORBIDDEN", "Admin is not attached to a school", status_code=403)
+    users = await school_service.list_school_users(session, admin.school_id, role, limit, offset)
+    return [UserOut.model_validate(u) for u in users]

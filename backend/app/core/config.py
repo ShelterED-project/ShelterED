@@ -50,6 +50,15 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6380/0"
     redis_result_url: str = "redis://localhost:6380/1"
 
+    # Медіа: локальний том (у Docker — volume, роздає Nginx за MEDIA_URL_PREFIX).
+    media_root: str = "media"
+    media_url_prefix: str = "/media"
+    media_max_video_bytes: int = 30 * 1024 * 1024
+    media_max_image_bytes: int = 2 * 1024 * 1024
+    media_max_subtitles_bytes: int = 200 * 1024
+    # Ліміт пакета класу на день; той самий ліміт діє на один урок.
+    pack_max_day_bytes: int = 50 * 1024 * 1024
+
 
 @lru_cache
 def get_settings() -> Settings:

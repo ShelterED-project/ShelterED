@@ -11,7 +11,7 @@ class AlertEvent(Base):
     __tablename__ = "alert_event"
     __table_args__ = (
         CheckConstraint("source IN ('api', 'manual')", name="source"),
-        # Повтор події від AI-сервісу ігнорується. NULLS NOT DISTINCT: NULL у school_id не обходить
+        # Повтор події з API тривог ігнорується. NULLS NOT DISTINCT: NULL у school_id не обходить
         # унікальність. Лише для подій із external_id: ручні тривоги (external_id IS NULL)
         # можуть повторюватися. Ідемпотентна вставка: on_conflict_do_nothing(index_elements=[...],
         # index_where=text("external_id IS NOT NULL")), а не constraint=.
