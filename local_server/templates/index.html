@@ -2,40 +2,96 @@
 <html lang="uk">
 <head>
     <meta charset="UTF-8">
-    <title>ShelterED - Перекличка</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ShelterED - Я в укритті</title>
     <style>
-        body { font-family: sans-serif; background-color: #1a1a1a; color: white; padding: 20px; }
-        h1 { color: #fbbf24; }
-        .form-container { margin-bottom: 30px; }
-        input { padding: 10px; font-size: 16px; border-radius: 5px; border: none; }
-        button { padding: 10px 20px; font-size: 16px; background-color: #fbbf24; border: none; border-radius: 5px; font-weight: bold; cursor: pointer; }
-        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-        th, td { padding: 10px; text-align: left; border-bottom: 1px solid #444; }
-        th { color: #fbbf24; }
+        /* Базові стилі */
+        body {
+            background-color: #121212;
+            color: #ffffff;
+            font-family: 'Inter', sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+
+        .logo {
+            font-size: 24px;
+            font-weight: bold;
+            margin-bottom: 40px;
+            color: #fbbf24;
+        }
+
+        .card {
+            background-color: #1e1e1e;
+            border-radius: 16px;
+            padding: 24px;
+            width: 100%;
+            max-width: 400px;
+            text-align: center;
+            border: 1px solid #333;
+        }
+
+        h1 {
+            font-size: 20px;
+            margin-bottom: 8px;
+        }
+
+        p {
+            font-size: 14px;
+            color: #a0a0a0;
+            margin-bottom: 24px;
+        }
+
+        input[type="text"] {
+            width: 100%;
+            padding: 16px;
+            margin-bottom: 16px;
+            border-radius: 12px;
+            border: 1px solid #444;
+            background-color: #2a2a2a;
+            color: white;
+            font-size: 16px;
+            box-sizing: border-box;
+        }
+
+        /* жовта кнопка */
+        button {
+            width: 100%;
+            padding: 16px;
+            background-color: #fbbf24;
+            color: #121212;
+            border: none;
+            border-radius: 12px;
+            font-size: 18px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+
+        button:hover {
+            background-color: #f59e0b;
+        }
     </style>
 </head>
 <body>
-    <h1>Перекличка в укритті</h1>
 
-    <div class="form-container">
+    <div class="logo">ShelterED</div>
+
+    <div class="card">
+        <h1>Перекличка</h1>
+        <p>Будь ласка, підтвердіть, що ви в безпеці</p>
+
         <form action="/roll-call" method="post">
             <input type="text" name="student_name" placeholder="Твоє ім'я" required>
-            <button type="submit">Я в укритті!</button>
+            <button type="submit">Я в укритті</button>
         </form>
     </div>
 
-    <h2>Зараз в укритті:</h2>
-    <table>
-        <tr>
-            <th>Ім'я</th>
-            <th>Час</th>
-        </tr>
-        {% for student in students %}
-        <tr>
-            <td>{{ student.student_name }}</td>
-            <td>{{ student.created_at.strftime('%H:%M:%S') }}</td>
-        </tr>
-        {% endfor %}
-    </table>
 </body>
 </html>
