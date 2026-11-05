@@ -4645,7 +4645,7 @@
     },
     "/alerts": {
       "get": {
-        "description": "Журнал тривог школи адміна (з API і ручних), найновіші першими.",
+        "description": "Журнал тривог школи адміна (з API і ручних), найновіші першими.\n`from`/`to` — дати за київським часом, включно.",
         "operationId": "alert_journal_alerts_get",
         "parameters": [
           {
@@ -4771,16 +4771,6 @@
               }
             },
             "description": "Internal Server Error"
-          },
-          "501": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "NOT_IMPLEMENTED: заглушка контракту"
           }
         },
         "security": [
@@ -4796,7 +4786,7 @@
     },
     "/alerts/active": {
       "get": {
-        "description": "Активні тривоги для шкіл і класів користувача (батьки — шкіл своїх дітей).\nЗапасний шлях для клієнта, який не отримав push.",
+        "description": "Активні тривоги для шкіл і класів користувача (батьки — шкіл і класів своїх дітей,\nадміністрація — усієї школи). Запасний шлях для клієнта, який не отримав push.\n`source_available = false` — API тривог давно не відповідало: лишається ручна кнопка.",
         "operationId": "active_alerts_alerts_active_get",
         "responses": {
           "200": {
@@ -4851,16 +4841,6 @@
               }
             },
             "description": "Internal Server Error"
-          },
-          "501": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "NOT_IMPLEMENTED: заглушка контракту"
           }
         },
         "security": [
@@ -4876,7 +4856,7 @@
     },
     "/alerts/manual": {
       "post": {
-        "description": "Ручна кнопка «Тривога» вчителя для свого класу (зокрема тренувальна): відкриває\nперекличку й розсилає push класу. Ідемпотентно за `id`; чужий клас — 403.",
+        "description": "Ручна кнопка «Тривога» для класу (зокрема тренувальна): вчитель цього класу або\nадміністрація його школи. Відкриває перекличку класу й ставить push класу з id уроку,\nщо йде зараз. Ідемпотентно за `id` (повтор — 200 без нового push); чужий клас — 403.",
         "operationId": "manual_alert_alerts_manual_post",
         "requestBody": {
           "content": {
@@ -4941,6 +4921,16 @@
             },
             "description": "Не знайдено"
           },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "ID_CONFLICT / ALERT_NOT_MANUAL"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -4960,16 +4950,6 @@
               }
             },
             "description": "Internal Server Error"
-          },
-          "501": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "NOT_IMPLEMENTED: заглушка контракту"
           }
         },
         "security": [
@@ -4985,7 +4965,7 @@
     },
     "/alerts/{alert_id}/end": {
       "post": {
-        "description": "Відбій ручної тривоги вчителем її класу; закриває перекличку. Ідемпотентно.\nВідбій тривоги з API приходить лише з API.",
+        "description": "Відбій ручної тривоги вчителем її класу або адміністрацією школи; закриває\nперекличку й ставить push «відбій». Ідемпотентно. Тривога з API закінчується лише\nз API (409 `ALERT_NOT_MANUAL`).",
         "operationId": "end_alert_alerts__alert_id__end_post",
         "parameters": [
           {
@@ -5050,6 +5030,16 @@
             },
             "description": "Не знайдено"
           },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "ID_CONFLICT / ALERT_NOT_MANUAL"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -5069,16 +5059,6 @@
               }
             },
             "description": "Internal Server Error"
-          },
-          "501": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "NOT_IMPLEMENTED: заглушка контракту"
           }
         },
         "security": [

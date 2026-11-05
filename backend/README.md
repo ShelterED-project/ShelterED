@@ -106,6 +106,14 @@ celery -A app.workers.celery_app worker -Q default,push,sync -l info --pool=solo
 
 Черги: `default` — загальні, `push` — Web Push, `sync` — обробка подій синхронізації. Задачі підтверджуються після виконання (`acks_late`), тому кожна задача має бути ідемпотентною. Перевірка: `python -c "from app.workers.system import ping; print(ping.delay().get(timeout=10))"` → `pong`.
 
+Періодичні задачі запускає окремий процес Celery beat (у Docker — окремий сервіс, рівно один екземпляр):
+
+```
+celery -A app.workers.celery_app beat -l info
+```
+
+- `alerts.poll` — кожні `ALERTS_POLL_INTERVAL_S` (30 с) опитує API тривог alerts.in.ua. Без `ALERTS_API_TOKEN` нічого не робить (лишається ручна кнопка «Тривога»).
+
 ## Тести
 
 Тести з БД ходять у окрему PostgreSQL 17 у Docker (порт 5433, дані в tmpfs), **ніколи не в Neon**: `tests/conftest.py` підміняє `DATABASE_URL` до імпорту застосунку.

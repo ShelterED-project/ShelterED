@@ -80,24 +80,6 @@ STUBS: list[tuple[str, str, Path, Body, str, str | None]] = [
     ),
     (
         "post",
-        "/alerts/manual",
-        lambda w: "/alerts/manual",
-        lambda w: {"id": str(uuid.uuid4()), "class_id": str(w.class_a.id), "is_drill": True},
-        "teacher_a",
-        "student_a",
-    ),
-    (
-        "post",
-        "/alerts/{alert_id}/end",
-        lambda w: f"/alerts/{ANY_ID}/end",
-        None,
-        "teacher_a",
-        "parent_a",
-    ),
-    ("get", "/alerts/active", lambda w: "/alerts/active", None, "parent_a", None),
-    ("get", "/alerts", lambda w: "/alerts?limit=10", None, "admin", "teacher_a"),
-    (
-        "post",
         "/push/subscriptions",
         lambda w: "/push/subscriptions",
         lambda w: {
