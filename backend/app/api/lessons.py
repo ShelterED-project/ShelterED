@@ -200,7 +200,7 @@ async def publish_lesson(lesson: OwnLesson, session: Session, settings: Settings
     урок і пакети днів, де він уже стоїть, — у межах ліміту. Повторна публікація після правок
     збільшує `version`. Ідемпотентно. Пакети класів, де урок стоїть, перезбирає Celery."""
     lesson = await service.publish(session, lesson, settings)
-    enqueue_rebuild_for_lesson(lesson.id)
+    await enqueue_rebuild_for_lesson(lesson.id)
     return await service.lesson_out(session, lesson)
 
 
@@ -209,7 +209,7 @@ async def unpublish_lesson(lesson: OwnLesson, session: Session) -> LessonOut:
     """Повертає урок у чернетку для правок. Ідемпотентно. Урок зникає з нових версій пакетів;
     уже завантажені версії лишаються на пристроях."""
     lesson = await service.unpublish(session, lesson)
-    enqueue_rebuild_for_lesson(lesson.id)
+    await enqueue_rebuild_for_lesson(lesson.id)
     return await service.lesson_out(session, lesson)
 
 

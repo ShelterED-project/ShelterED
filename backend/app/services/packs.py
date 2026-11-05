@@ -401,7 +401,9 @@ async def rebuild_class(
                 settings.pack_max_week_bytes,
             )
         first = min(built, key=lambda p: p.pack_date)
-        enqueue_push("pack_updated", class_id=klass.id, pack_id=first.id, pack_date=first.pack_date)
+        await enqueue_push(
+            "pack_updated", class_id=klass.id, pack_id=first.id, pack_date=first.pack_date
+        )
     return built
 
 

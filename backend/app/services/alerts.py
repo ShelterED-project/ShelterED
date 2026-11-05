@@ -57,9 +57,9 @@ class Pushes:
     def add(self, push_type: str, class_id: uuid.UUID, **ids: Any) -> None:
         self.items.append({"push_type": push_type, "class_id": class_id, **ids})
 
-    def send(self) -> None:
+    async def send(self) -> None:
         for item in self.items:
-            enqueue_push(**item)
+            await enqueue_push(**item)
 
 
 # ---------- реакція на тривогу ----------
@@ -278,7 +278,7 @@ async def poll(
 
     await _record_attempt(session, provider.name, now, None)
     await session.commit()
-    pushes.send()
+    await pushes.send()
     result = {
         "active": len(active),
         "started": started,
@@ -350,7 +350,7 @@ async def create_manual(
     await open_rollcall(session, klass.id, alert, now, opened_by=user.id)
     pushes.add("alert", klass.id, alert_id=alert.id, lesson_id=item.lesson_id if item else None)
     await session.commit()
-    pushes.send()
+    await pushes.send()
     return alert, True
 
 
@@ -370,7 +370,7 @@ async def end_manual(session: AsyncSession, user: User, alert_id: uuid.UUID) -> 
     pushes = Pushes()
     await _end_alerts(session, [alert.id], _now(), pushes)
     await session.commit()
-    pushes.send()
+    await pushes.send()
     await session.refresh(alert)
     return alert
 

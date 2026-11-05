@@ -613,7 +613,7 @@ async def receive_events(
             logger.exception("Sync event processing failed (type=%s)", event.type)
     if any(r is not None and r.status == "accepted" for r in results):
         # Агрегати кабінетів (B14) — після commit подій; помилка брокера не ламає прийом.
-        enqueue_recompute_student(batch.user_id)
+        await enqueue_recompute_student(batch.user_id)
     if failed:
         raise AppError(
             "INTERNAL_ERROR",

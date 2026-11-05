@@ -10,9 +10,9 @@ from app.services import stats as stats_service
 from app.workers.celery_app import celery_app, enqueue
 
 
-def enqueue_recompute_student(student_id: uuid.UUID) -> None:
+async def enqueue_recompute_student(student_id: uuid.UUID) -> None:
     """Після commit пакета синхронізації: одна задача на пакет, а не на подію."""
-    enqueue("stats.recompute_student", args=[str(student_id)])
+    await enqueue("stats.recompute_student", args=[str(student_id)])
 
 
 async def _recompute_student(student_id: uuid.UUID) -> int:
