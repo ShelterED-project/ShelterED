@@ -5,6 +5,7 @@ from sqlalchemy import Boolean, CheckConstraint, ForeignKey, Index, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, uuid_pk
+from app.models.sync import SyncChangeMixin
 
 
 class RollCallSession(Base):
@@ -32,11 +33,14 @@ class RollCallSession(Base):
     closed_at: Mapped[dt.datetime | None]
 
 
-class RollCallStatus(Base):
+class RollCallStatus(SyncChangeMixin, Base):
     """Статус учня в сесії. «Немає відповіді» = рядка немає."""
 
     __tablename__ = "rollcall_status"
-    __table_args__ = (CheckConstraint("status IN ('safe', 'in_shelter')", name="status"),)
+    __table_args__ = (
+        CheckConstraint("status IN ('safe', 'in_shelter')", name="status"),
+        Index("ix_rollcall_status_sync_changes", "student_id", "change_xid", "change_seq"),
+    )
 
     session_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("rollcall_session.id", ondelete="CASCADE"), primary_key=True

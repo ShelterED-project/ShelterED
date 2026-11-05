@@ -301,7 +301,7 @@ UNIQUE (`lesson_id`, `part`, `position`).
 | status | text CHECK IN (`accepted`, `rejected`) | |
 | reject_reason | text NULL | |
 
-Індекс: (`user_id`, `received_at`). Курсор для `GET /sync/changes` проєктується в B9.5.
+Індекс: (`user_id`, `received_at`). Курсор для `GET /sync/changes` -- див. «Рішення B9».
 
 ### `attempt`
 Спроба тесту.
@@ -501,3 +501,13 @@ UNIQUE (`lesson_id`, `part`, `position`).
 - **Завантаження** `GET /packs/{id}`: `ETag` = `"<content_hash>"`, `If-None-Match` → 304; gzip, якщо клієнт його приймає (`Accept-Encoding` з q-значеннями: `gzip`/`x-gzip` або `*` з q > 0; `gzip;q=0` — без стиснення; brotli не додаємо — немає залежності); `Cache-Control: private, no-cache`, `Vary: Accept-Encoding`.
 - **Доступ:** учень свого класу, вчитель своїх класів, адміністрація школи; батьки — ні (403).
 - **Ліміти й розміри.** `size_bytes` — JSON без стиснення. Кожна збірка логує `json_bytes` і `media_bytes` (без персональних даних). День > `PACK_MAX_DAY_BYTES` (50 МБ) чи 7 днів > `PACK_MAX_WEEK_BYTES` (200 МБ) → попередження в лог, пакет усе одно збирається (блокує ліміт дня при прив'язці уроку, B5).
+
+## Рішення B9 «Синхронізація» (05.11.2026)
+
+Міграція `827ed8465b1b`: послідовність `sync_change_seq`, функція `sync_change_stamp()` і тригери `<table>_sync_change` (BEFORE INSERT OR UPDATE) на `attempt`, `module_progress`, `rollcall_status`; у цих таблицях колонки `change_seq` (bigint NOT NULL) і `change_xid` (bigint NOT NULL, `pg_current_xact_id()` -- xid8, що вміщується в bigint) та індекси `ix_<table>_sync_changes` (`student_id`, `change_xid`, `change_seq`). Код ці колонки не пише (у моделях `server_default=FetchedValue()`). Нових полів про дітей немає.
+
+- **Прийом** (`app/services/sync.py`): кожна подія -- окрема транзакція (commit після кожної); `INSERT INTO sync_event ... ON CONFLICT (client_event_id) DO NOTHING RETURNING`, програвший паралельний запит чекає на commit переможця й повертає збережений результат. Відхилена подія записується з `status = rejected` і причиною; `unknown_type` не записується (CHECK), але результат той самий. `received_at` -- один час сервера на пакет; `clock_skew_ms = received_at - sent_at`; `is_suspicious`, якщо `|зсув|` чи `occurred_at - received_at` > `SYNC_SUSPICIOUS_SKEW_S` (300 с).
+- **Доступ:** модуль/тест -- урок був у будь-якій версії пакета класу учня (`knowledge_pack_lesson`) або прив'язаний до слота його класу (`lesson_assignment`); перекличка -- учень класу сесії.
+- **Зарахування спроби:** `pg_advisory_xact_lock` на (учень, тест) серіалізує паралельні спроби; частковий UNIQUE `uq_attempt_student_id_test_id_credited` -- остання лінія захисту. Вікно тесту (B11) ще не застосовується.
+- **Стрічка змін:** порядок і курсор -- (`change_xid`, `change_seq`), фільтр `change_xid < pg_snapshot_xmin(pg_current_snapshot())`; див. `docs/sync-protocol.md`, розділ 8.
+- **Агрегати** (B9.6: прогрес класу, мапа знань) поки не рахуються: таблиць агрегатів немає, Celery-задач у черзі `sync` теж; з'являться разом із B14.
