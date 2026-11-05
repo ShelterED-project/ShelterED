@@ -338,13 +338,21 @@ UNIQUE (`lesson_id`, `part`, `position`).
 | school_id | uuid FK → school NULL | запис для кожної школи регіону (B7.2) |
 | class_id | uuid FK → school_class NULL | ручна тривога для класу (B7.3) |
 | source | text CHECK IN (`api`, `manual`) | |
-| external_id | text NULL | id події від API тривог (бекенд опитує його сам, B7); унікальний індекс (source, external_id, school_id) NULLS NOT DISTINCT WHERE external_id IS NOT NULL — повтори ігноруються, NULL у school_id не обходить унікальність; ручні тривоги без external_id можуть повторюватися (B7.1) |
+| external_id | text NULL | id тривоги провайдера (бекенд опитує API сам, B7); унікальний індекс `uq_alert_event_source_region_external_school` (source, region_code, external_id, school_id) NULLS NOT DISTINCT WHERE external_id IS NOT NULL — повтори ігноруються, NULL у school_id не обходить унікальність; відбій — `ended_at` того самого рядка, а не окрема подія; ручні тривоги без external_id можуть повторюватися (B7.1) |
 | is_drill | boolean default false | тренувальна |
 | started_at | timestamptz NOT NULL | |
 | ended_at | timestamptz NULL | відбій |
 | created_by | uuid FK → app_user NULL | вчитель для ручної |
 
 Індекс: (`school_id`, `started_at`) — журнал тривог школи (B14.4). Частковий індекс для `GET /alerts/active`: WHERE `ended_at IS NULL`.
+
+### `alert_source` (B7.6)
+| Поле | Тип | Примітка |
+|---|---|---|
+| name | text PK | провайдер, напр. `alerts.in.ua` |
+| last_success_at | timestamptz NULL | останнє успішне опитування; давніше `ALERTS_SOURCE_STALE_S` → `source_available = false` |
+| last_attempt_at | timestamptz NULL | |
+| last_error | text NULL | лише тип помилки (без тексту: там може бути URL із токеном) |
 
 ### `rollcall_session`
 | Поле | Тип | Примітка |
@@ -451,7 +459,7 @@ UNIQUE (`lesson_id`, `part`, `position`).
 10. **Предмети** — ✅ `subject.school_id = NULL` означає загальний довідник.
 
 
-> `alert_event`: унікальний індекс `uq_alert_event_source_external_school` частковий, тому ідемпотентна вставка має бути `on_conflict_do_nothing(index_elements=[...], index_where=text("external_id IS NOT NULL"))`, а не `constraint=`.
+> `alert_event`: унікальний індекс `uq_alert_event_source_region_external_school` частковий, тому ідемпотентна вставка має бути `on_conflict_do_nothing(index_elements=[...], index_where=text("external_id IS NOT NULL"))`, а не `constraint=`.
 
 ## Рішення B5 (05.11.2026)
 
