@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import Settings
 from app.core.errors import AppError
 from app.core.security import new_link_code
-from app.models.lessons import Lesson, Subject
+from app.models.lessons import Lesson
 from app.models.school import (
     ClassMembership,
     LessonAssignment,
@@ -197,16 +197,6 @@ async def unassign_teacher(
     await session.commit()
 
 
-# ---------- предмети (довідник для слотів і уроків) ----------
-
-
-async def check_subject(session: AsyncSession, subject_id: uuid.UUID, school_id) -> None:
-    """Предмет має бути загальним (school_id NULL) або належати школі."""
-    subject = await session.get(Subject, subject_id)
-    if subject is None or subject.school_id not in (None, school_id):
-        raise _not_found("Subject")
-
-
 # ---------- розклад: слоти й перевизначення ----------
 
 
@@ -238,7 +228,7 @@ async def get_slot(session: AsyncSession, klass: SchoolClass, slot_id: uuid.UUID
 async def create_slot(
     session: AsyncSession, klass: SchoolClass, body: SlotCreate
 ) -> tuple[ScheduleSlot, bool]:
-    await check_subject(session, body.subject_id, klass.school_id)
+    await lessons_service.check_subject(session, body.subject_id, klass.school_id)
     slot, created = await insert_or_get(
         session, ScheduleSlot, {"class_id": klass.id, **body.model_dump()}
     )
@@ -261,7 +251,7 @@ async def update_slot(session: AsyncSession, slot: ScheduleSlot, body: SlotUpdat
         raise _invalid_schedule(str(exc).splitlines()[-1].strip()) from exc
     if "subject_id" in data:
         klass = await session.get(SchoolClass, slot.class_id)
-        await check_subject(session, data["subject_id"], klass.school_id)
+        await lessons_service.check_subject(session, data["subject_id"], klass.school_id)
     for field, value in data.items():
         setattr(slot, field, value)
     await session.commit()
@@ -299,7 +289,7 @@ async def create_override(
         if not schedule.slot_active_on(_slot_data(slot), body.date):
             raise _invalid_schedule("Slot does not take place on this date")
     if body.subject_id is not None:
-        await check_subject(session, body.subject_id, klass.school_id)
+        await lessons_service.check_subject(session, body.subject_id, klass.school_id)
     override, created = await insert_or_get(
         session,
         ScheduleOverride,
@@ -389,6 +379,23 @@ async def class_schedule(
     return tz, result
 
 
+async def day_lesson_ids(
+    session: AsyncSession,
+    klass: SchoolClass,
+    day: dt.date,
+    *,
+    exclude_slot_id: uuid.UUID | None = None,
+) -> set[uuid.UUID]:
+    """Уроки, що справді стоять у розкладі класу на дату: прив'язки до скасованих слотів і до
+    слотів, які цього дня не діють (інший день тижня, поза дійсністю), не рахуються."""
+    _, days = await class_schedule(session, klass, day, 1)
+    return {
+        i.lesson_id
+        for i in days[0][1]
+        if i.lesson_id is not None and (exclude_slot_id is None or i.slot_id != exclude_slot_id)
+    }
+
+
 async def current_lesson(
     session: AsyncSession, klass: SchoolClass, at: dt.datetime | None = None
 ) -> tuple[dt.datetime, dt.date, schedule.ResolvedItem | None]:
@@ -438,7 +445,7 @@ async def assign_lesson(
     await session.scalar(
         select(SchoolClass.id).where(SchoolClass.id == klass.id).with_for_update(key_share=True)
     )
-    others = await lessons_service.day_lesson_ids(session, klass.id, day, exclude_slot_id=slot.id)
+    others = await day_lesson_ids(session, klass, day, exclude_slot_id=slot.id)
     size = await lessons_service.pack_size(session, {*others, lesson.id})
     if size > settings.pack_max_day_bytes:
         raise AppError(

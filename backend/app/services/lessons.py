@@ -13,13 +13,13 @@ from collections.abc import Iterable
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import Text, cast, func, or_, select
+from sqlalchemy import Select, Text, cast, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
 from app.core.errors import AppError
 from app.models.lessons import Card, Lesson, MediaAsset, Module, Question, Subject, Test
-from app.models.school import LessonAssignment, ScheduleSlot, User
+from app.models.school import LessonAssignment, ScheduleSlot, SchoolClass, User
 from app.schemas.lessons import (
     CardCreate,
     CardOut,
@@ -92,7 +92,8 @@ async def create_subject(
     return subject, created
 
 
-async def _check_subject(session: AsyncSession, subject_id: uuid.UUID, school_id) -> None:
+async def check_subject(session: AsyncSession, subject_id: uuid.UUID, school_id) -> None:
+    """Предмет має бути загальним (school_id NULL) або належати школі."""
     subject = await session.get(Subject, subject_id)
     if subject is None or subject.school_id not in (None, school_id):
         raise _not_found("Subject")
@@ -199,7 +200,7 @@ async def list_lessons(session: AsyncSession, user: User, status: str | None) ->
 async def create_lesson(
     session: AsyncSession, teacher: User, body: LessonCreate
 ) -> tuple[Lesson, bool]:
-    await _check_subject(session, body.subject_id, teacher.school_id)
+    await check_subject(session, body.subject_id, teacher.school_id)
     lesson, created = await insert_or_get(
         session, Lesson, {**body.model_dump(), "author_id": teacher.id}
     )
@@ -220,7 +221,7 @@ async def update_lesson(
 ) -> Lesson:
     data = body.model_dump(exclude_unset=True)
     if data.get("subject_id") is not None:
-        await _check_subject(session, data["subject_id"], teacher.school_id)
+        await check_subject(session, data["subject_id"], teacher.school_id)
     _apply(lesson, data, ("subject_id", "title", "shelter_part", "main_part"))
     await session.commit()
     return lesson
@@ -444,13 +445,8 @@ async def _text_bytes(session: AsyncSession, ids: set[uuid.UUID]) -> int:
     return int(total)
 
 
-async def _media_bytes(session: AsyncSession, ids: set[uuid.UUID]) -> int:
-    """Унікальні медіа карток уроків + їхні субтитри (файл, спільний для уроків, — один раз)."""
-    media_ids = (
-        select(Card.media_asset_id)
-        .join(Module, Module.id == Card.module_id)
-        .where(Module.lesson_id.in_(ids), Card.media_asset_id.is_not(None))
-    )
+async def media_size(session: AsyncSession, media_ids: Iterable[uuid.UUID] | Select) -> int:
+    """Розмір медіа разом з їхніми субтитрами; кожен файл рахується один раз."""
     subtitle_ids = select(MediaAsset.subtitles_id).where(
         MediaAsset.id.in_(media_ids), MediaAsset.subtitles_id.is_not(None)
     )
@@ -462,27 +458,20 @@ async def _media_bytes(session: AsyncSession, ids: set[uuid.UUID]) -> int:
     return int(total or 0)
 
 
+async def _media_bytes(session: AsyncSession, ids: set[uuid.UUID]) -> int:
+    """Унікальні медіа карток уроків + їхні субтитри (файл, спільний для уроків, — один раз)."""
+    media_ids = (
+        select(Card.media_asset_id)
+        .join(Module, Module.id == Card.module_id)
+        .where(Module.lesson_id.in_(ids), Card.media_asset_id.is_not(None))
+    )
+    return await media_size(session, media_ids)
+
+
 async def pack_size(session: AsyncSession, lesson_ids: set[uuid.UUID]) -> int:
     if not lesson_ids:
         return 0
     return await _text_bytes(session, lesson_ids) + await _media_bytes(session, lesson_ids)
-
-
-async def day_lesson_ids(
-    session: AsyncSession,
-    class_id: uuid.UUID,
-    day: dt.date,
-    *,
-    exclude_slot_id: uuid.UUID | None = None,
-) -> set[uuid.UUID]:
-    query = (
-        select(LessonAssignment.lesson_id)
-        .join(ScheduleSlot, ScheduleSlot.id == LessonAssignment.slot_id)
-        .where(ScheduleSlot.class_id == class_id, LessonAssignment.date == day)
-    )
-    if exclude_slot_id is not None:
-        query = query.where(LessonAssignment.slot_id != exclude_slot_id)
-    return set(await session.scalars(query))
 
 
 # ---------- публікація ----------
@@ -543,8 +532,15 @@ async def publish_problems(
         .distinct()
         .order_by(LessonAssignment.date, ScheduleSlot.class_id)
     )
+    # Відкладений імпорт: school імпортує цей модуль.
+    from app.services import school as school_service
+
     for class_id, day in days:
-        day_size = await pack_size(session, await day_lesson_ids(session, class_id, day))
+        klass = await session.get(SchoolClass, class_id)
+        assert klass is not None
+        day_size = await pack_size(
+            session, await school_service.day_lesson_ids(session, klass, day)
+        )
         if day_size > limit:
             problems.append(
                 {
