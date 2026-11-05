@@ -12,6 +12,7 @@ TEST_ID = "0192f0a0-0000-7000-8000-000000000301"
 QUESTION_ID = "0192f0a0-0000-7000-8000-000000000401"
 SUBJECT_ID = "0192f0a0-0000-7000-8000-000000000051"
 STUDENT_ID = "0192f0a0-0000-7000-8000-0000000000cc"
+ALERT_ID = "0192f0a0-0000-7000-8000-000000000901"
 
 # passed — зарахована спроба з оцінкою ≥ порогу; not_passed — оцінка нижча або вікно минуло
 # без зарахованої спроби; closing_soon — до кінця вікна < STATS_CLOSING_SOON_H год і спроби
@@ -307,6 +308,54 @@ class KnowledgeMapOut(BaseModel):
                             "lessons_completed": 3,
                             "avg_score": 72.5,
                             "is_gap": False,
+                        }
+                    ],
+                }
+            ]
+        }
+    )
+
+
+class AlertStudyItem(BaseModel):
+    alert_id: uuid.UUID
+    source: Literal["api", "manual"]
+    is_drill: bool
+    class_id: uuid.UUID | None = Field(description="Лише для ручної тривоги класу")
+    started_at: dt.datetime
+    ended_at: dt.datetime | None
+    duration_minutes: int = Field(description="Тривалість (триває — до зараз)")
+    students: int | None = Field(description="Учні, що завершували модулі під час тривоги")
+    study_minutes: int | None = Field(
+        description="Плановий час модулів, завершених під час тривоги; null — ще не пораховано"
+    )
+
+
+class AlertStudyOut(BaseModel):
+    """Журнал тривог школи з навчанням, що на них припало (дашборд адміністрації, P2)."""
+
+    computed_at: dt.datetime | None
+    alert_minutes: int
+    study_minutes: int
+    alerts: list[AlertStudyItem]
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {
+                    "computed_at": "2026-11-05T11:00:00Z",
+                    "alert_minutes": 75,
+                    "study_minutes": 96,
+                    "alerts": [
+                        {
+                            "alert_id": ALERT_ID,
+                            "source": "api",
+                            "is_drill": False,
+                            "class_id": None,
+                            "started_at": "2026-11-05T09:30:00Z",
+                            "ended_at": "2026-11-05T10:45:00Z",
+                            "duration_minutes": 75,
+                            "students": 12,
+                            "study_minutes": 96,
                         }
                     ],
                 }

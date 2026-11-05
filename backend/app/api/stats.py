@@ -1,15 +1,20 @@
 """Кабінети (B14): дані з агрегатів, які рахує Celery (`app/services/stats.py`).
 
 Вчитель — лише свої класи; учень — лише себе; батьки — лише свою дитину. Адміністрація
-навчальних даних учнів не бачить (її дашборд — безпека й тривоги).
+навчальних даних окремих учнів не бачить: її дашборд — тривоги школи й сумарне навчання під
+час них (P2).
 """
 
-from fastapi import APIRouter
+import datetime as dt
+from typing import Annotated
 
-from app.api.deps import CabinetStudent, Session, SettingsDep, TeacherClass
+from fastapi import APIRouter, Query
+
+from app.api.deps import Admin, CabinetStudent, Session, SettingsDep, TeacherClass
 from app.api.stub import example_of
 from app.schemas.errors import ErrorResponse
 from app.schemas.stats import (
+    AlertStudyOut,
     ClassGapsOut,
     ClassProgressOut,
     ClassTestsOut,
@@ -88,3 +93,21 @@ async def knowledge_map(
     """Мапа знань: по предметах — уроки завершено / усього, середня оцінка тестів, прогалина.
     Ті самі права, що й прогрес учня."""
     return await service.knowledge_map(session, student, settings)
+
+
+@router.get(
+    "/alerts/study",
+    response_model=AlertStudyOut,
+    responses={200: example_of(AlertStudyOut), **ACCESS},
+)
+async def alert_study(
+    admin: Admin,
+    session: Session,
+    date_from: Annotated[dt.date | None, Query(alias="from")] = None,
+    date_to: Annotated[dt.date | None, Query(alias="to")] = None,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+) -> AlertStudyOut:
+    """Дашборд адміністрації (P2): тривоги своєї школи (найновіші першими, `from`/`to` — дати
+    за поясом школи, включно) і скільки навчання на них припало — без даних окремих учнів.
+    Агрегат перераховує beat раз на `STATS_REFRESH_INTERVAL_S`. Лише адміністрація."""
+    return await service.alert_study(session, admin, date_from, date_to, limit)

@@ -115,3 +115,19 @@ class ClassQuestionStat(Base):
     answered: Mapped[int] = mapped_column(Integer)
     correct: Mapped[int] = mapped_column(Integer)
     computed_at: Mapped[dt.datetime]
+
+
+class AlertStudyStat(Base):
+    """Скільки навчалися учні школи під час тривоги (дашборд адміністрації, P2): завершені
+    модулі з `full_at` у межах [початок, відбій) тривоги; для ручної тривоги — лише її клас."""
+
+    __tablename__ = "alert_study_stat"
+    __table_args__ = (Index("ix_alert_study_stat_school_id", "school_id"),)
+
+    alert_event_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("alert_event.id", ondelete="CASCADE"), primary_key=True
+    )
+    school_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("school.id", ondelete="CASCADE"))
+    students: Mapped[int] = mapped_column(Integer)
+    study_minutes: Mapped[int] = mapped_column(Integer)
+    computed_at: Mapped[dt.datetime]

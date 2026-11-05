@@ -209,3 +209,51 @@ async def test_module_full_at_is_earliest_completion_event(client, db_session, w
     row = await db_session.get(ModuleProgress, (world.student_a.id, c.module.id))
     await db_session.refresh(row)
     assert row.full_at == t1.replace(microsecond=t1.microsecond)
+
+
+# ---------- дашборд адміністрації (P2) ----------
+
+
+async def test_admin_sees_study_time_during_school_alerts(client, db_session, world, c) -> None:
+    from app.models.alerts import AlertEvent
+
+    t = now()
+    api_alert = AlertEvent(
+        region_code="kyiv",
+        school_id=world.school.id,
+        source="api",
+        external_id="a1",
+        started_at=t - dt.timedelta(hours=1),
+        ended_at=t - dt.timedelta(minutes=10),
+    )
+    # Ручна тривога іншого класу: навчання учня 7-А на неї не припадає.
+    class_alert = AlertEvent(
+        region_code="kyiv",
+        school_id=world.school.id,
+        class_id=world.class_b.id,
+        source="manual",
+        started_at=t - dt.timedelta(hours=1),
+        ended_at=t - dt.timedelta(minutes=10),
+    )
+    db_session.add_all([api_alert, class_alert])
+    await db_session.flush()
+    await send(
+        client, world.student_a, batch(progress(c.module.id, 100, t - dt.timedelta(minutes=30)))
+    )
+    result = await stats_service.refresh_all(db_session, get_settings())
+    assert result["schools"] >= 2
+
+    data = await get(client, world.admin, "/alerts/study")
+    by_id = {a["alert_id"]: a for a in data["alerts"]}
+    assert (by_id[str(api_alert.id)]["students"], by_id[str(api_alert.id)]["study_minutes"]) == (
+        1,
+        4,
+    )
+    assert by_id[str(class_alert.id)]["study_minutes"] == 0
+    assert by_id[str(api_alert.id)]["duration_minutes"] == 50
+    assert data["study_minutes"] == 4 and data["alert_minutes"] == 100
+    # Адмін іншої школи не бачить чужих тривог; інші ролі — 403.
+    assert (await get(client, world.other_admin, "/alerts/study"))["alerts"] == []
+    for user in (world.teacher_a, world.student_a, world.parent_a):
+        r = await client.get("/alerts/study", headers=auth_header(user))
+        assert r.status_code == 403, user.role

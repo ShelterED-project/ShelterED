@@ -25,6 +25,7 @@ from sqlalchemy import delete, func, select, union
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
+from app.models.alerts import AlertEvent
 from app.models.lessons import Lesson, Module, Question, Subject, Test
 from app.models.school import (
     ClassMembership,
@@ -35,6 +36,7 @@ from app.models.school import (
     User,
 )
 from app.models.stats import (
+    AlertStudyStat,
     ClassLessonStat,
     ClassQuestionStat,
     StudentLessonStat,
@@ -43,6 +45,8 @@ from app.models.stats import (
 )
 from app.models.sync import Attempt, ModuleProgress
 from app.schemas.stats import (
+    AlertStudyItem,
+    AlertStudyOut,
     ClassGapsOut,
     ClassLessonProgress,
     ClassProgressOut,
@@ -366,8 +370,62 @@ async def recompute_for_student(
     return len(class_ids)
 
 
+async def recompute_alert_study(
+    session: AsyncSession, school_id: uuid.UUID, settings: Settings, now: dt.datetime | None = None
+) -> int:
+    """Навчання під час тривог школи за `STATS_ALERT_LOOKBACK_DAYS` (старіші рядки лишаються).
+    Хвилини — `duration_min` модулів, завершених (`full_at`) між початком і відбоєм тривоги
+    (триває — до now) учнями школи; ручна тривога класу — лише учнями цього класу. Не комітить."""
+    now = now or _now()
+    await _lock(session, f"stats:alerts:{school_id}")
+    alerts = (
+        await session.scalars(
+            select(AlertEvent).where(
+                AlertEvent.school_id == school_id,
+                AlertEvent.started_at
+                >= now - dt.timedelta(days=settings.stats_alert_lookback_days),
+            )
+        )
+    ).all()
+    rows = []
+    for alert in alerts:
+        query = (
+            select(
+                func.count(func.distinct(ModuleProgress.student_id)),
+                func.coalesce(func.sum(Module.duration_min), 0),
+            )
+            .join(Module, Module.id == ModuleProgress.module_id)
+            .join(User, User.id == ModuleProgress.student_id)
+            .where(
+                User.school_id == school_id,
+                ModuleProgress.progress_pct == 100,
+                ModuleProgress.full_at >= alert.started_at,
+                ModuleProgress.full_at < (alert.ended_at or now),
+            )
+        )
+        if alert.class_id is not None:
+            query = query.where(ModuleProgress.student_id.in_(_class_students(alert.class_id)))
+        students, minutes = (await session.execute(query)).one()
+        rows.append(
+            {
+                "alert_event_id": alert.id,
+                "school_id": school_id,
+                "students": students,
+                "study_minutes": minutes,
+                "computed_at": now,
+            }
+        )
+    await session.execute(
+        delete(AlertStudyStat).where(AlertStudyStat.alert_event_id.in_([a.id for a in alerts]))
+    )
+    if rows:
+        await session.execute(AlertStudyStat.__table__.insert(), rows)
+    return len(rows)
+
+
 async def refresh_all(session: AsyncSession, settings: Settings) -> dict[str, int]:
-    """Періодично (beat): усі учні, потім усі класи — новий день у розкладі, пропущені задачі."""
+    """Періодично (beat): усі учні, потім усі класи й навчання під час тривог шкіл — новий день
+    у розкладі, пропущені задачі, події, що прийшли після відбою."""
     student_ids = list(
         await session.scalars(select(User.id).where(User.role == "student", User.is_active))
     )
@@ -378,7 +436,11 @@ async def refresh_all(session: AsyncSession, settings: Settings) -> dict[str, in
     for class_id in class_ids:
         await recompute_class(session, class_id, settings)
         await session.commit()
-    return {"students": len(student_ids), "classes": len(class_ids)}
+    school_ids = list(await session.scalars(select(School.id)))
+    for school_id in school_ids:
+        await recompute_alert_study(session, school_id, settings)
+        await session.commit()
+    return {"students": len(student_ids), "classes": len(class_ids), "schools": len(school_ids)}
 
 
 # ---------- читання (кабінети) ----------
@@ -700,3 +762,56 @@ async def knowledge_map(
         )
     out.sort(key=lambda s: s.name)
     return KnowledgeMapOut(student_id=student.id, subjects=out)
+
+
+async def alert_study(
+    session: AsyncSession,
+    admin: User,
+    date_from: dt.date | None,
+    date_to: dt.date | None,
+    limit: int,
+    now: dt.datetime | None = None,
+) -> AlertStudyOut:
+    """Дашборд адміністрації: тривоги школи за період (дати за поясом школи, включно) і скільки
+    навчання на них припало. Тривога без перерахунку — `students`/`study_minutes` = null."""
+    now = now or _now()
+    if admin.school_id is None:
+        return AlertStudyOut(alerts=[], alert_minutes=0, study_minutes=0, computed_at=None)
+    tz = await _school_tz(session, admin.school_id)
+    query = (
+        select(AlertEvent, AlertStudyStat)
+        .outerjoin(AlertStudyStat, AlertStudyStat.alert_event_id == AlertEvent.id)
+        .where(AlertEvent.school_id == admin.school_id)
+    )
+    if date_from is not None:
+        query = query.where(
+            AlertEvent.started_at >= dt.datetime.combine(date_from, dt.time(), tzinfo=tz)
+        )
+    if date_to is not None:
+        end = dt.datetime.combine(date_to + dt.timedelta(days=1), dt.time(), tzinfo=tz)
+        query = query.where(AlertEvent.started_at < end)
+    rows = (
+        await session.execute(
+            query.order_by(AlertEvent.started_at.desc(), AlertEvent.id).limit(limit)
+        )
+    ).all()
+    items = [
+        AlertStudyItem(
+            alert_id=a.id,
+            source=a.source,
+            is_drill=a.is_drill,
+            class_id=a.class_id,
+            started_at=a.started_at,
+            ended_at=a.ended_at,
+            duration_minutes=int(((a.ended_at or now) - a.started_at).total_seconds() // 60),
+            students=s.students if s else None,
+            study_minutes=s.study_minutes if s else None,
+        )
+        for a, s in rows
+    ]
+    return AlertStudyOut(
+        alerts=items,
+        alert_minutes=sum(i.duration_minutes for i in items),
+        study_minutes=sum(i.study_minutes or 0 for i in items),
+        computed_at=max((s.computed_at for _, s in rows if s), default=None),
+    )
