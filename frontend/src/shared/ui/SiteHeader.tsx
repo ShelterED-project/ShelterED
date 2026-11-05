@@ -20,7 +20,7 @@ export default function SiteHeader({ links }: { links: NavLink[] }) {
             Увійти
           </Button>
           <Button to="/register" variant="primary" className="hidden h-11 px-5 text-[15px] md:inline-flex">
-            Зареєструватися
+            Я учень
           </Button>
         </div>
       </div>

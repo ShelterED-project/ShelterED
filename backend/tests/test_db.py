@@ -1,4 +1,8 @@
+from pathlib import Path
+
 import pytest
+from alembic.config import Config
+from alembic.script import ScriptDirectory
 from sqlalchemy import text
 
 pytestmark = pytest.mark.anyio
@@ -6,7 +10,9 @@ pytestmark = pytest.mark.anyio
 
 async def test_migrations_applied(db_session):
     version = await db_session.scalar(text("SELECT version_num FROM alembic_version"))
-    assert version == "52e9b26bd4f0"
+    alembic_ini = Path(__file__).resolve().parents[1] / "alembic.ini"
+    head = ScriptDirectory.from_config(Config(str(alembic_ini))).get_current_head()
+    assert version == head
 
 
 async def test_changes_are_rolled_back_part_1(db_session):
@@ -25,3 +31,13 @@ async def test_changes_are_rolled_back_part_2(db_session):
 async def test_uses_test_database(db_session):
     # Захист від випадкового запуску тестів на Neon.
     assert await db_session.scalar(text("SELECT current_database()")) == "sheltered_test"
+
+
+def test_openapi_file_is_up_to_date():
+    from app.cli import OPENAPI_PATH, render_openapi
+
+    # read_text нормалізує CRLF, який Git на Windows може підставити.
+    committed = OPENAPI_PATH.read_text(encoding="utf-8")
+    assert committed == render_openapi(), (
+        "docs/openapi.json is stale: run `python -m app.cli export-openapi` and commit it"
+    )

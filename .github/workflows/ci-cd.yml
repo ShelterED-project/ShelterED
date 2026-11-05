@@ -1,0 +1,100 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  backend-checks:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: sheltered
+          POSTGRES_PASSWORD: sheltered
+          POSTGRES_DB: sheltered_test
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U sheltered -d sheltered_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout коду
+        uses: actions/checkout@v4
+
+      - name: Налаштування Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+
+      - name: Встановлення залежностей
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+          if [ -f "backend/pyproject.toml" ] || [ -f "backend/setup.py" ]; then
+            pip install -e backend/
+          elif [ -f "pyproject.toml" ] || [ -f "setup.py" ]; then
+            pip install -e .
+          fi
+
+      - name: Запуск лінтера Ruff
+        run: |
+          ruff check backend/
+
+      - name: Запуск лінтера Flake8
+        run: |
+          flake8 backend/ --max-line-length=120 --exclude=venv,__pycache__
+
+      - name: Запуск автоматичних тестів pytest
+        env:
+          PYTHONPATH: backend
+        run: |
+          pytest backend/tests/
+
+  docker-build-push:
+    needs: backend-checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout коду
+        uses: actions/checkout@v4
+
+      - name: Підготовка назви репозиторію в нижньому регістрі
+        run: |
+          echo "IMAGE_PREFIX=ghcr.io/$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+
+      - name: Логін у GitHub Container Registry (GHCR)
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Налаштування Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and Push Backend
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          file: ./backend/Dockerfile
+          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          tags: ${{ env.IMAGE_PREFIX }}/backend:latest
+
+      - name: Build and Push Frontend
+        uses: docker/build-push-action@v5
+        with:
+          context: ./frontend
+          file: ./frontend/Dockerfile
+          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          tags: ${{ env.IMAGE_PREFIX }}/frontend:latest

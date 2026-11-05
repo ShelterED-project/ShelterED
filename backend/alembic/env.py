@@ -7,7 +7,7 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from app.core.config import get_settings
-from app.models.base import Base
+from app.models import Base
 
 config = context.config
 
@@ -51,7 +51,7 @@ def do_run_migrations(connection: Connection) -> None:
 async def run_async_migrations() -> None:
     engine = create_async_engine(
         get_url(),
-        connect_args={"ssl": "require"} if settings.database_ssl else {},
+        connect_args={"ssl": True} if settings.database_ssl else {},
         poolclass=pool.NullPool,
     )
     async with engine.connect() as connection:

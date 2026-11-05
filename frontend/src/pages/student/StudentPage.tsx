@@ -1,43 +1,38 @@
-import { useState } from 'react'
-import { markStatus } from '@/features/roll-call/rollCall'
-import type { RollCallStatus } from '@/features/roll-call/types'
 import { useOutboxCount } from '@/shared/db/useOutboxCount'
-
-const STATUS_LABELS: Record<RollCallStatus, string> = {
-  safe: 'Я в безпеці',
-  shelter: 'Я в укритті',
-}
+import CalmCard from './sections/CalmCard'
+import CheckIn from './sections/CheckIn'
+import LessonBanner from './sections/LessonBanner'
+import MobileGreeting from './sections/MobileGreeting'
+import RouteSection from './sections/RouteSection'
+import StudentHeader from './sections/StudentHeader'
+import StudentSidebar from './sections/StudentSidebar'
+import StudentTabs from './sections/StudentTabs'
+import SyncStatus from './sections/SyncStatus'
+import TodayLessons from './sections/TodayLessons'
 
 export default function StudentPage() {
-  const [lastStatus, setLastStatus] = useState<RollCallStatus | null>(null)
   const pending = useOutboxCount()
 
-  const mark = async (status: RollCallStatus) => {
-    await markStatus(status)
-    setLastStatus(status)
-  }
-
   return (
-    <main className="mx-auto flex min-h-screen max-w-md flex-col justify-center gap-4 p-4">
-      <h1 className="text-2xl font-bold">Кабінет учня</h1>
-
-      <button
-        className="rounded-2xl bg-green-700 px-6 py-8 text-2xl font-bold"
-        onClick={() => mark('safe')}
-      >
-        {STATUS_LABELS.safe}
-      </button>
-      <button
-        className="rounded-2xl bg-amber-600 px-6 py-8 text-2xl font-bold"
-        onClick={() => mark('shelter')}
-      >
-        {STATUS_LABELS.shelter}
-      </button>
-
-      {lastStatus && (
-        <p className="text-lg">Відмітку збережено: {STATUS_LABELS[lastStatus]}</p>
-      )}
-      <p className="text-sm text-slate-400">Очікує відправки: {pending}</p>
-    </main>
+    <div className="flex min-h-screen">
+      <StudentSidebar />
+      <div className="flex min-w-0 flex-1 flex-col">
+        <StudentHeader pending={pending} />
+        <main className="flex flex-col gap-5 px-5 pt-6 pb-24 md:px-8 md:pb-8 xl:gap-6 xl:px-10 xl:py-8">
+          <MobileGreeting />
+          <LessonBanner />
+          <div className="flex flex-col gap-5 xl:flex-row xl:gap-6">
+            <RouteSection className="xl:min-w-0 xl:flex-1" />
+            <div className="flex flex-col gap-5 xl:w-[380px] xl:shrink-0 xl:gap-6">
+              <CheckIn />
+              <SyncStatus pending={pending} />
+              <CalmCard />
+            </div>
+          </div>
+          <TodayLessons />
+        </main>
+      </div>
+      <StudentTabs />
+    </div>
   )
 }
