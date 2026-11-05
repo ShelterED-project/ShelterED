@@ -114,6 +114,7 @@ celery -A app.workers.celery_app beat -l info
 
 - `alerts.poll` — кожні `ALERTS_POLL_INTERVAL_S` (30 с) опитує API тривог alerts.in.ua. Без `ALERTS_API_TOKEN` нічого не робить (лишається ручна кнопка «Тривога»).
 - `packs.refresh_all` — кожні `PACKS_REFRESH_INTERVAL_S` (1 год) перезбирає пакети «Рюкзака» всіх класів на 7 днів наперед. Перезбірку після публікації уроку чи зміни розкладу API ставить одразу (`packs.rebuild_for_lesson`, `packs.rebuild_class`); без змін вмісту нова версія не створюється.
+- `stats.refresh_all` — кожні `STATS_REFRESH_INTERVAL_S` (1 год) перераховує агрегати кабінетів (B14) усіх учнів і класів: новий день у розкладі, зміни уроків, пропущені задачі. Після кожного пакета синхронізації з прийнятими подіями API одразу ставить `stats.recompute_student` (учень + його класи).
 
 ## Тести
 

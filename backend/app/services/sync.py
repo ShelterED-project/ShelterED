@@ -51,6 +51,7 @@ from app.schemas.sync import (
     SyncEventsResponse,
     TestAttemptPayload,
 )
+from app.workers.stats import enqueue_recompute_student
 
 logger = logging.getLogger(__name__)
 
@@ -128,13 +129,18 @@ async def _check_module_progress(
 
 
 async def _apply_module_progress(
-    session: AsyncSession, batch: Batch, event_id: uuid.UUID, payload: ModuleProgressPayload
+    session: AsyncSession,
+    batch: Batch,
+    event_id: uuid.UUID,
+    occurred_at: dt.datetime,
+    payload: ModuleProgressPayload,
 ) -> None:
     stmt = pg_insert(ModuleProgress).values(
         student_id=batch.user_id,
         module_id=payload.module_id,
         progress_pct=payload.progress_pct,
         completed_at_client=payload.completed_at,
+        full_at=occurred_at if payload.progress_pct == 100 else None,
         last_event_id=event_id,
     )
     new = stmt.excluded
@@ -149,6 +155,7 @@ async def _apply_module_progress(
                 new.completed_at_client < cur.completed_at_client,
             ),
         ),
+        and_(new.full_at.is_not(None), or_(cur.full_at.is_(None), new.full_at < cur.full_at)),
     )
     await session.execute(
         stmt.on_conflict_do_update(
@@ -157,6 +164,7 @@ async def _apply_module_progress(
                 "progress_pct": func.greatest(cur.progress_pct, new.progress_pct),
                 # LEAST ігнорує NULL: найраніше відоме завершення.
                 "completed_at_client": func.least(cur.completed_at_client, new.completed_at_client),
+                "full_at": func.least(cur.full_at, new.full_at),
                 "last_event_id": new.last_event_id,
             },
             where=improves,
@@ -379,7 +387,7 @@ async def _process_event(
         return _result(event.client_event_id, "rejected", reason)
 
     if isinstance(payload, ModuleProgressPayload):
-        await _apply_module_progress(session, batch, event.client_event_id, payload)
+        await _apply_module_progress(session, batch, event.client_event_id, occurred_at, payload)
     elif isinstance(payload, TestAttemptPayload):
         await _apply_test_attempt(session, batch, event.client_event_id, payload, suspicious)
     elif isinstance(payload, RollCallStatusPayload):
@@ -432,6 +440,9 @@ async def receive_events(
             await session.rollback()
             failed += 1
             logger.exception("Sync event processing failed (type=%s)", event.type)
+    if any(r is not None and r.status == "accepted" for r in results):
+        # Агрегати кабінетів (B14) — після commit подій; помилка брокера не ламає прийом.
+        enqueue_recompute_student(batch.user_id)
     if failed:
         raise AppError(
             "INTERNAL_ERROR",

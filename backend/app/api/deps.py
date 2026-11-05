@@ -87,9 +87,20 @@ async def get_accessible_student(
     return student
 
 
+async def get_cabinet_student(
+    student_id: uuid.UUID,
+    user: Annotated[User, Depends(require_roles("student", "parent", "teacher"))],
+    session: Session,
+) -> User:
+    """Кабінет учня (прогрес, мапа знань): учень — себе, батьки — свою дитину, вчитель — учнів
+    своїх класів; адміністрація — ні (навчальні дані учня їй не потрібні)."""
+    return await get_accessible_student(student_id, user, session)
+
+
 AccessibleClass = Annotated[SchoolClass, Depends(get_accessible_class)]
 StaffClass = Annotated[SchoolClass, Depends(get_staff_class)]
 AccessibleStudent = Annotated[User, Depends(get_accessible_student)]
+CabinetStudent = Annotated[User, Depends(get_cabinet_student)]
 
 
 async def get_admin_class(class_id: uuid.UUID, user: Admin, session: Session) -> SchoolClass:

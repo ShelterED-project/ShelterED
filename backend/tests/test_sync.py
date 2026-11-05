@@ -479,12 +479,12 @@ async def test_crash_in_the_middle_of_batch_loses_nothing(committed, monkeypatch
     original = sync_service._apply_module_progress
     calls = 0
 
-    async def crashing(session, b, event_id, payload):
+    async def crashing(*args):
         nonlocal calls
         calls += 1
         if calls == 4:
             raise Crash
-        await original(session, b, event_id, payload)
+        await original(*args)
 
     monkeypatch.setattr(sync_service, "_apply_module_progress", crashing)
     with pytest.raises(Crash):

@@ -20,6 +20,7 @@ celery_app = Celery(
         "app.workers.push",
         "app.workers.alerts",
         "app.workers.packs",
+        "app.workers.stats",
     ],
 )
 
@@ -51,6 +52,11 @@ celery_app.conf.update(
             "task": "packs.refresh_all",
             "schedule": float(settings.packs_refresh_interval_s),
             "options": {"queue": "default", "expires": settings.packs_refresh_interval_s},
+        },
+        "stats-refresh": {
+            "task": "stats.refresh_all",
+            "schedule": float(settings.stats_refresh_interval_s),
+            "options": {"queue": "default", "expires": settings.stats_refresh_interval_s},
         },
     },
 )

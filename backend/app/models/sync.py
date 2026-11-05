@@ -122,5 +122,9 @@ class ModuleProgress(SyncChangeMixin, Base):
     # Оновлюється через GREATEST: беремо максимум.
     progress_pct: Mapped[int] = mapped_column(SmallInteger)
     completed_at_client: Mapped[dt.datetime | None]
+    # `occurred_at` (годинник пристрою) найранішої прийнятої події з progress_pct = 100: момент
+    # завершення модуля. Від завершення останнього модуля уроку відкривається вікно тесту (B11),
+    # за ним же рахується день навчання (B14).
+    full_at: Mapped[dt.datetime | None]
     # Остання подія, яка змінила рядок.
     last_event_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("sync_event.client_event_id"))
