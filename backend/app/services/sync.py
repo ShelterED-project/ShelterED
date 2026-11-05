@@ -29,6 +29,7 @@ from typing import Any
 from pydantic import BaseModel, ValidationError
 from sqlalchemy import and_, exists, func, literal, or_, select, text, tuple_, union_all, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.exc import DataError, DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
@@ -83,6 +84,36 @@ class Batch:
 
 def _result(event_id: uuid.UUID, status: str, reason: str | None = None) -> SyncEventResult:
     return SyncEventResult(client_event_id=event_id, status=status, reason=reason)  # type: ignore[arg-type]
+
+
+# SQLSTATE класу 22 (помилка даних) і 23 (порушення обмеження): повтор дасть те саме.
+_DATA_SQLSTATE_CLASSES = ("22", "23")
+
+
+def _sqlstate(exc: BaseException) -> str | None:
+    state = getattr(getattr(exc, "orig", None), "sqlstate", None)
+    return state if isinstance(state, str) else None
+
+
+def _is_data_error(exc: Exception) -> bool:
+    """Детермінована помилка даних події (повтор пакета впаде так само) — на відміну від збою
+    інфраструктури (з'єднання, таймаут, deadlock, невідома помилка), після якого подію треба
+    повторити. Дубль сюди не потрапляє: його тримає `ON CONFLICT DO NOTHING`."""
+    if isinstance(exc, (DataError, IntegrityError, ValueError, OverflowError)):
+        return True
+    state = _sqlstate(exc)
+    return isinstance(exc, DBAPIError) and state is not None and state[:2] in _DATA_SQLSTATE_CLASSES
+
+
+def _has_nul(value: Any) -> bool:
+    """Символ U+0000 у рядку чи ключі: JSONB у PostgreSQL його не приймає."""
+    if isinstance(value, str):
+        return "\x00" in value
+    if isinstance(value, dict):
+        return any(_has_nul(k) or _has_nul(v) for k, v in value.items())
+    if isinstance(value, list):
+        return any(_has_nul(v) for v in value)
+    return False
 
 
 # ---------- доступ і застосування ----------
@@ -394,35 +425,17 @@ async def _stored_result(
     return _result(event_id, "duplicate")
 
 
-async def _process_event(
-    session: AsyncSession, batch: Batch, event: SyncEventIn
-) -> SyncEventResult:
-    stored = await _stored_result(session, batch, event.client_event_id)
-    if stored is not None:
-        return stored
-    model = PAYLOAD_MODELS.get(event.type)
-    if model is None:
-        # CHECK у БД не дає записати невідомий тип; результат детермінований і без запису.
-        return _result(event.client_event_id, "rejected", "unknown_type")
-
-    occurred_at = event.occurred_at.astimezone(dt.UTC)
-    suspicious = batch.suspicious_skew or occurred_at > batch.received_at + batch.threshold
-    reason: str | None = None
-    payload: BaseModel | None = None
-    try:
-        payload = model.model_validate(event.payload)
-    except ValidationError:
-        reason = "invalid_payload"
-    try:
-        if isinstance(payload, ModuleProgressPayload):
-            await _check_module_progress(session, batch, payload)
-        elif isinstance(payload, TestAttemptPayload):
-            await _check_test_attempt(session, batch, payload)
-        elif isinstance(payload, RollCallStatusPayload):
-            await _check_rollcall(session, batch, occurred_at, payload)
-    except Rejected as exc:
-        reason = exc.reason
-
+async def _insert_event(
+    session: AsyncSession,
+    batch: Batch,
+    event: SyncEventIn,
+    occurred_at: dt.datetime,
+    suspicious: bool,
+    payload: dict[str, Any],
+    reason: str | None,
+) -> SyncEventResult | None:
+    """Запис у журнал `sync_event`. None — записали ми; інакше подію вже записав паралельний
+    запит з тим самим id (ми дочекалися його commit) — повертаємо його результат."""
     inserted = await session.scalar(
         pg_insert(SyncEvent)
         .values(
@@ -436,17 +449,79 @@ async def _process_event(
             is_suspicious=suspicious,
             source="online",
             relayed_by=None,
-            payload=event.payload,
+            payload=payload,
             status="rejected" if reason else "accepted",
             reject_reason=reason,
         )
         .on_conflict_do_nothing(index_elements=["client_event_id"])
         .returning(SyncEvent.client_event_id)
     )
-    if inserted is None:
-        # Паралельний запит з тією самою подією встиг першим (ми дочекалися його commit).
-        stored = await _stored_result(session, batch, event.client_event_id)
-        assert stored is not None
+    if inserted is not None:
+        return None
+    stored = await _stored_result(session, batch, event.client_event_id)
+    assert stored is not None
+    return stored
+
+
+async def _reject_after_data_error(
+    session: AsyncSession, batch: Batch, event: SyncEventIn
+) -> SyncEventResult:
+    """Подія впала на детермінованій помилці даних (уже після rollback): записуємо `rejected`
+    / `invalid_payload` без payload, щоб повтор дав той самий результат, а не 500 назавжди."""
+    stored = await _stored_result(session, batch, event.client_event_id)
+    if stored is not None:
+        return stored
+    occurred_at = event.occurred_at.astimezone(dt.UTC)
+    suspicious = batch.suspicious_skew or occurred_at > batch.received_at + batch.threshold
+    stored = await _insert_event(
+        session, batch, event, occurred_at, suspicious, {}, "invalid_payload"
+    )
+    return stored or _result(event.client_event_id, "rejected", "invalid_payload")
+
+
+async def _process_event(
+    session: AsyncSession, batch: Batch, event: SyncEventIn
+) -> SyncEventResult:
+    stored = await _stored_result(session, batch, event.client_event_id)
+    if stored is not None:
+        return stored
+    model = PAYLOAD_MODELS.get(event.type)
+    if model is None:
+        # CHECK у БД не дає записати невідомий тип; результат детермінований і без запису.
+        return _result(event.client_event_id, "rejected", "unknown_type")
+
+    try:
+        occurred_at = event.occurred_at.astimezone(dt.UTC)
+    except OverflowError:
+        # Час пристрою поза межами datetime в UTC: без коректного часу подію не записати, тож
+        # (як unknown_type) лише детермінована відповідь — повтор дасть той самий результат.
+        return _result(event.client_event_id, "rejected", "invalid_payload")
+    suspicious = batch.suspicious_skew or occurred_at > batch.received_at + batch.threshold
+    reason: str | None = None
+    payload: BaseModel | None = None
+    # У журнал іде перевірений payload (нормалізований схемою), а не сирий; невалідний — `{}`.
+    stored_payload: dict[str, Any] = {}
+    try:
+        payload = model.model_validate(event.payload)
+        stored_payload = payload.model_dump(mode="json")
+    except ValidationError:
+        payload = None
+    if payload is None or _has_nul(stored_payload):
+        payload, stored_payload, reason = None, {}, "invalid_payload"
+    try:
+        if isinstance(payload, ModuleProgressPayload):
+            await _check_module_progress(session, batch, payload)
+        elif isinstance(payload, TestAttemptPayload):
+            await _check_test_attempt(session, batch, payload)
+        elif isinstance(payload, RollCallStatusPayload):
+            await _check_rollcall(session, batch, occurred_at, payload)
+    except Rejected as exc:
+        reason = exc.reason
+
+    stored = await _insert_event(
+        session, batch, event, occurred_at, suspicious, stored_payload, reason
+    )
+    if stored is not None:
         return stored
     if reason:
         return _result(event.client_event_id, "rejected", reason)
@@ -500,11 +575,27 @@ async def receive_events(
         try:
             results[i] = await _process_event(session, batch, event)
             await session.commit()
-        except Exception:
+        except Exception as exc:
+            await session.rollback()
+            if _is_data_error(exc):
+                # Детермінована помилка даних: повтор впав би так само, і 500 блокував би outbox
+                # назавжди. Подія — `rejected`/`invalid_payload`. Текст помилки може містити
+                # значення payload, тож у лог — лише тип і SQLSTATE.
+                logger.error(
+                    "Sync event rejected after data error (type=%s, error=%s, sqlstate=%s)",
+                    event.type,
+                    type(exc).__name__,
+                    _sqlstate(exc),
+                )
+                try:
+                    results[i] = await _reject_after_data_error(session, batch, event)
+                    await session.commit()
+                    continue
+                except Exception:
+                    await session.rollback()
             # Інфраструктурна помилка (не правило протоколу): лише ця подія відкочується,
             # решта пакета обробляється; відповідь 500 — клієнт повторить пакет і отримає
             # `duplicate` для вже записаних подій. Payload у лог не пишемо.
-            await session.rollback()
             failed += 1
             logger.exception("Sync event processing failed (type=%s)", event.type)
     if any(r is not None and r.status == "accepted" for r in results):

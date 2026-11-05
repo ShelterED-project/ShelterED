@@ -538,6 +538,77 @@ async def test_failing_event_does_not_block_others_and_asks_for_retry(
     ]
 
 
+async def test_deterministic_bad_events_are_rejected_not_retried_forever(
+    client, db_session, world, c
+) -> None:
+    """NUL у payload (JSONB не приймає) і час поза діапазоном після переводу в UTC — не 500
+    назавжди, а `rejected`/`invalid_payload`; повтор дає те саме, решта пакета приймається."""
+    survey = {"survey_id": str(uuid.uuid4()), "question_id": "q\u00001", "value": 3}
+    nul = event("survey_answer", survey)
+    old = event("rollcall_status", {"session_id": str(c.rc.id), "status": "safe"})
+    old["occurred_at"] = "0001-01-01T00:30:00+01:00"
+    late = progress(c.module.id, 100)
+    late["payload"]["completed_at"] = "9999-12-31T23:00:00-05:00"
+    good = progress(c.module.id, 100.0)
+    body = batch(nul, old, late, good)
+    expected = [("rejected", "invalid_payload")] * 3 + [("accepted", None)]
+    assert statuses(await send(client, world.student_a, body)) == expected
+    again = await send(client, world.student_a, body)
+    assert statuses(again) == expected[:3] + [("duplicate", None)]
+    # Записано перевірений payload: `progress_pct` 100.0 -> 100, NUL-подія — без payload;
+    # подію з часом поза діапазоном записати не можна (як unknown_type).
+    stored = await db_session.get(SyncEvent, uuid.UUID(good["client_event_id"]))
+    assert stored.payload == {
+        "module_id": str(c.module.id),
+        "progress_pct": 100,
+        "completed_at": None,
+    }
+    rejected = await db_session.get(SyncEvent, uuid.UUID(nul["client_event_id"]))
+    assert rejected.payload == {} and rejected.reject_reason == "invalid_payload"
+    assert await db_session.get(SyncEvent, uuid.UUID(old["client_event_id"])) is None
+
+
+async def test_data_error_while_applying_is_rejected_infra_error_is_retried(
+    committed, monkeypatch
+) -> None:
+    """Помилка даних БД (SQLSTATE 22/23, DataError, ValueError) при застосуванні — подія
+    `rejected`/`invalid_payload` і повтор дає те саме; збій з'єднання — 500 і повтор."""
+    from sqlalchemy.exc import DBAPIError, OperationalError
+
+    class PgError(Exception):
+        def __init__(self, sqlstate: str) -> None:
+            self.sqlstate = sqlstate
+
+    w = await committed_world(committed)
+    headers = auth_header(w.student)
+    original = sync_service._apply_rollcall
+    error: list[Exception] = []
+
+    async def failing(*args):
+        raise error[0]
+
+    monkeypatch.setattr(sync_service, "_apply_rollcall", failing)
+    for exc in (DBAPIError("INSERT", {}, PgError("22021")), ValueError("bad"), OverflowError()):
+        error[:] = [exc]
+        body = batch(rollcall(w.c.rc.id, "safe", now()), progress(w.c.module.id, 10))
+        r = await committed.client.post("/sync/events", json=body, headers=headers)
+        assert r.status_code == 200, r.text
+        expected = [("rejected", "invalid_payload"), ("accepted", None)]
+        assert statuses(r.json()["results"]) == expected
+        r = await committed.client.post("/sync/events", json=body, headers=headers)
+        assert statuses(r.json()["results"]) == [("rejected", "invalid_payload")] + [
+            ("duplicate", None)
+        ]
+
+    error[:] = [OperationalError("INSERT", {}, PgError("08006"))]
+    body = batch(rollcall(w.c.rc.id, "safe", now()))
+    r = await committed.client.post("/sync/events", json=body, headers=headers)
+    assert r.status_code == 500
+    monkeypatch.setattr(sync_service, "_apply_rollcall", original)
+    r = await committed.client.post("/sync/events", json=body, headers=headers)
+    assert statuses(r.json()["results"]) == [("accepted", None)]
+
+
 async def changes(cm, user, cursor: str | None = None, limit: int = 200) -> dict:
     params: dict[str, Any] = {"limit": limit}
     if cursor is not None:

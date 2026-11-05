@@ -5,10 +5,19 @@
 (інакше одна погана подія назавжди заблокувала б outbox).
 """
 
+import datetime as dt
 import uuid
 from typing import Annotated, Any, Literal
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, StringConstraints, WithJsonSchema
+from pydantic import (
+    AfterValidator,
+    AwareDatetime,
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    WithJsonSchema,
+)
 
 DEVICE_ID = "0193a000-0000-7000-8000-000000000001"
 EVENT_ID = "0193a1b2-0000-7000-8000-000000000001"
@@ -24,6 +33,19 @@ RejectReason = Literal[
 RollCallStatusValue = Literal["safe", "in_shelter"]
 CreditStatus = Literal["credited", "not_credited_late", "not_credited_repeat"]
 
+
+def utc_representable(value: dt.datetime) -> dt.datetime:
+    """Час, який переводиться в UTC без виходу за межі datetime (рік 1..9999): інакше запис у
+    `timestamptz` падає однаково на кожному повторі."""
+    try:
+        value.astimezone(dt.UTC)
+    except OverflowError as exc:
+        raise ValueError("datetime is out of range in UTC") from exc
+    return value
+
+
+DeviceDatetime = Annotated[AwareDatetime, AfterValidator(utc_representable)]
+
 # Id варіанта відповіді, як Option.id у тестах.
 OptionId = Annotated[
     str, StringConstraints(min_length=1, max_length=16, pattern=r"^[A-Za-z0-9_-]+$")
@@ -38,7 +60,7 @@ class ModuleProgressPayload(BaseModel):
 
     module_id: uuid.UUID
     progress_pct: int = Field(ge=0, le=100)
-    completed_at: AwareDatetime | None = Field(
+    completed_at: DeviceDatetime | None = Field(
         default=None, description="-> module_progress.completed_at_client"
     )
 
@@ -54,7 +76,7 @@ class TestAttemptPayload(BaseModel):
     answers: dict[uuid.UUID, list[OptionId]] = Field(
         description="question_id -> id обраних варіантів", max_length=200
     )
-    completed_at: AwareDatetime = Field(
+    completed_at: DeviceDatetime = Field(
         description="-> attempt.completed_at_client; від нього рахується вікно тесту"
     )
 
