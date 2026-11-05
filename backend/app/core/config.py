@@ -59,6 +59,19 @@ class Settings(BaseSettings):
     # Ліміт пакета класу на день; той самий ліміт діє на один урок.
     pack_max_day_bytes: int = 50 * 1024 * 1024
 
+    # API тривог (alerts.in.ua). Порожній токен — опитування вимкнене, лишається ручна кнопка.
+    alerts_api_token: SecretStr | None = None
+    alerts_api_url: str = "https://api.alerts.in.ua/v1/alerts/active.json"
+    alerts_http_timeout_s: float = 10.0
+    # Інтервал опитування (ліміт alerts.in.ua — 8–10 запитів на хвилину з IP).
+    alerts_poll_interval_s: int = 30
+    # Без успішного опитування довше за це джерело вважається недоступним (B7.6).
+    alerts_source_stale_s: int = 300
+
+    @property
+    def alerts_polling_enabled(self) -> bool:
+        return bool(self.alerts_api_token and self.alerts_api_token.get_secret_value())
+
 
 @lru_cache
 def get_settings() -> Settings:

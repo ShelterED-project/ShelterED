@@ -1,4 +1,5 @@
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from functools import lru_cache
 
 from sqlalchemy.ext.asyncio import (
@@ -7,6 +8,7 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
     create_async_engine,
 )
+from sqlalchemy.pool import NullPool
 
 from app.core.config import get_settings
 
@@ -42,3 +44,23 @@ async def get_session() -> AsyncIterator[AsyncSession]:
     """FastAPI-залежність: одна сесія на запит, закривається після відповіді."""
     async with get_sessionmaker()() as session:
         yield session
+
+
+@asynccontextmanager
+async def standalone_session() -> AsyncIterator[AsyncSession]:
+    """Сесія для Celery-задачі. Кожна задача запускає власний event loop (asyncio.run),
+    тож спільний пул із get_engine() не годиться: свій engine без пулу на час задачі."""
+    settings = get_settings()
+    if settings.database_url is None:
+        raise RuntimeError("DATABASE_URL is not set")
+    engine = create_async_engine(
+        settings.database_url.get_secret_value(),
+        connect_args={"ssl": True} if settings.database_ssl else {},
+        poolclass=NullPool,
+        hide_parameters=True,
+    )
+    try:
+        async with AsyncSession(engine, expire_on_commit=False) as session:
+            yield session
+    finally:
+        await engine.dispose()

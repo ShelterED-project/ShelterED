@@ -19,6 +19,9 @@ os.environ["AUTH_CODE_TTL_S"] = "60"
 os.environ["PARENT_LINK_CODE_TTL_DAYS"] = "7"
 os.environ["OAUTH_CLIENT_IDS"] = '["sheltered-pwa"]'
 os.environ["CORS_ORIGINS"] = '["http://localhost:5173"]'
+# Опитування API тривог у тестах вимкнене; провайдер підміняють фейком.
+os.environ["ALERTS_API_TOKEN"] = ""
+os.environ["ALERTS_SOURCE_STALE_S"] = "300"
 
 import uuid  # noqa: E402
 from collections.abc import AsyncIterator  # noqa: E402
@@ -49,8 +52,33 @@ from app.models.school import (  # noqa: E402
     User,
 )
 from app.services.auth import name_key  # noqa: E402
+from app.workers.celery_app import celery_app  # noqa: E402
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent
+
+
+@pytest.fixture(autouse=True)
+def enqueued(monkeypatch: pytest.MonkeyPatch) -> list[SimpleNamespace]:
+    """Задачі, поставлені в чергу Celery (брокер у тестах не потрібен).
+
+    Кожен елемент: name, args, queue. Push — name == "push.send", args[0] — payload.
+    """
+    calls: list[SimpleNamespace] = []
+
+    def send_task(name, args=None, kwargs=None, queue=None, **options):
+        calls.append(SimpleNamespace(name=name, args=list(args or []), queue=queue))
+
+    monkeypatch.setattr(celery_app, "send_task", send_task)
+    return calls
+
+
+def pushes(calls: list[SimpleNamespace], push_type: str | None = None) -> list[dict]:
+    """Payload поставлених push (опційно лише одного типу)."""
+    return [
+        c.args[0]
+        for c in calls
+        if c.name == "push.send" and (push_type is None or c.args[0]["type"] == push_type)
+    ]
 
 
 @pytest.fixture(scope="session")
