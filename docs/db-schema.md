@@ -259,9 +259,12 @@ UNIQUE (`lesson_id`, `part`, `position`).
 | class_id | uuid FK → school_class ON DELETE CASCADE | пакет = клас + дата |
 | pack_date | date NOT NULL | |
 | version | integer NOT NULL | UNIQUE (class_id, pack_date, version); актуальна — найбільша |
-| content_hash | text NOT NULL | sha256 вмісту; він же ETag (B6.3) |
-| size_bytes | bigint NOT NULL | фактичний розмір (B6.5) |
+| content_hash | text NOT NULL | sha256 канонічного JSON вмісту без id, версії й часу збірки; він же ETag (B6.3) |
+| size_bytes | bigint NOT NULL | розмір JSON без стиснення (B6.5); медіа рахуються окремо |
 | built_at | timestamptz NOT NULL | |
+| content_gzip | bytea NOT NULL | готова відповідь `GET /packs/{id}`: канонічний JSON, gzip (B6, міграція `0edf076a683a`) |
+
+Версія пакета незмінна: новий вміст → нова версія, стара лишається доступною за id.
 
 ### `knowledge_pack_lesson`
 | Поле | Тип | Примітка |
