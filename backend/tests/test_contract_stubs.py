@@ -36,38 +36,6 @@ Body = Callable[[SimpleNamespace], Any] | None
 # (метод, шаблон у OpenAPI, шлях, тіло, роль із доступом, роль без доступу або None)
 STUBS: list[tuple[str, str, Path, Body, str, str | None]] = [
     (
-        "get",
-        "/classes/{class_id}/rollcall/current",
-        lambda w: f"/classes/{w.class_a.id}/rollcall/current",
-        None,
-        "teacher_a",
-        "teacher_b",
-    ),
-    (
-        "post",
-        "/classes/{class_id}/rollcall",
-        lambda w: f"/classes/{w.class_a.id}/rollcall",
-        lambda w: {"id": str(uuid.uuid4())},
-        "teacher_a",
-        "student_a",
-    ),
-    (
-        "post",
-        "/classes/{class_id}/rollcall/{session_id}/close",
-        lambda w: f"/classes/{w.class_a.id}/rollcall/{ANY_ID}/close",
-        None,
-        "teacher_a",
-        "admin",
-    ),
-    (
-        "get",
-        "/students/{student_id}/rollcall/current",
-        lambda w: f"/students/{w.student_a.id}/rollcall/current",
-        None,
-        "parent_a",
-        "parent_free",
-    ),
-    (
         "post",
         "/push/subscriptions",
         lambda w: "/push/subscriptions",

@@ -6389,7 +6389,7 @@
     },
     "/classes/{class_id}/rollcall": {
       "post": {
-        "description": "Вчитель класу відкриває перекличку вручну (без тривоги). При тривозі сесія\nвідкривається автоматично. Ідемпотентно за `id`; на клас — одна відкрита сесія.",
+        "description": "Вчитель класу відкриває перекличку вручну (без тривоги). При тривозі сесія\nвідкривається автоматично. Ідемпотентно за `id` (повтор — 200 з наявною сесією, навіть\nзакритою); на клас — одна відкрита сесія.",
         "operationId": "start_rollcall_classes__class_id__rollcall_post",
         "parameters": [
           {
@@ -6501,7 +6501,7 @@
                 }
               }
             },
-            "description": "ROLLCALL_ALREADY_OPEN (інша сесія)"
+            "description": "ROLLCALL_ALREADY_OPEN (інша відкрита сесія, її id у `details.session_id`) / ID_CONFLICT (id зайнятий сесією іншого класу)"
           },
           "422": {
             "content": {
@@ -6522,16 +6522,6 @@
               }
             },
             "description": "Internal Server Error"
-          },
-          "501": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "NOT_IMPLEMENTED: заглушка контракту"
           }
         },
         "security": [
@@ -6547,7 +6537,7 @@
     },
     "/classes/{class_id}/rollcall/current": {
       "get": {
-        "description": "Відкрита перекличка класу. Вчитель класу й адмін школи бачать статуси всіх учнів\n(з часом отримання, щоб було видно застарілі), учень — лише свій (і `id` сесії для події\n`rollcall_status`). Оновлення — опитуванням (кожні 10 с, коли є мережа).",
+        "description": "Відкрита перекличка класу. Вчитель класу й адмін школи бачать статуси всіх учнів\n(з часом отримання, щоб було видно застарілі), учень — лише свій (і `id` сесії для події\n`rollcall_status`). Оновлення — опитуванням (кожні 10 с, коли є мережа) з `If-None-Match`:\nбез змін — 304 без тіла. Батьки — `GET /students/{id}/rollcall/current`.",
         "operationId": "current_rollcall_classes__class_id__rollcall_current_get",
         "parameters": [
           {
@@ -6558,6 +6548,22 @@
               "format": "uuid",
               "title": "Class Id",
               "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "if-none-match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-None-Match"
             }
           }
         ],
@@ -6609,7 +6615,18 @@
                 }
               }
             },
-            "description": "Успішна відповідь"
+            "description": "Успішна відповідь",
+            "headers": {
+              "ETag": {
+                "description": "Хеш відповіді",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "Не змінилась (`If-None-Match` збігся з ETag)"
           },
           "401": {
             "content": {
@@ -6660,16 +6677,6 @@
               }
             },
             "description": "Internal Server Error"
-          },
-          "501": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "NOT_IMPLEMENTED: заглушка контракту"
           }
         },
         "security": [
@@ -6685,7 +6692,7 @@
     },
     "/classes/{class_id}/rollcall/{session_id}/close": {
       "post": {
-        "description": "Вчитель закриває перекличку (при відбої тривоги — автоматично). Ідемпотентно.",
+        "description": "Вчитель закриває перекличку (при відбої тривоги — автоматично). Ідемпотентно:\nзакрита сесія повертається як є. Сесія іншого класу — 404.",
         "operationId": "close_rollcall_classes__class_id__rollcall__session_id__close_post",
         "parameters": [
           {
@@ -6805,16 +6812,6 @@
               }
             },
             "description": "Internal Server Error"
-          },
-          "501": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "NOT_IMPLEMENTED: заглушка контракту"
           }
         },
         "security": [
@@ -10930,7 +10927,7 @@
     },
     "/students/{student_id}/rollcall/current": {
       "get": {
-        "description": "Статус дитини в поточній перекличці: батьки — лише своєї дитини, учень — свій,\nвчитель — учнів своїх класів, адмін — учнів школи.",
+        "description": "Статус дитини в поточній (відкритій) перекличці її класу: батьки — лише своєї дитини,\nучень — свій, вчитель — учнів своїх класів, адмін — учнів школи. Переклички немає —\n`session_id` і `status` = null.",
         "operationId": "student_rollcall_students__student_id__rollcall_current_get",
         "parameters": [
           {
@@ -11013,16 +11010,6 @@
               }
             },
             "description": "Internal Server Error"
-          },
-          "501": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "NOT_IMPLEMENTED: заглушка контракту"
           }
         },
         "security": [
