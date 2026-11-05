@@ -15,7 +15,12 @@ celery_app = Celery(
     broker=settings.redis_url,
     backend=settings.redis_result_url,
     # Модулі із задачами; новий домен додається сюди разом із файлом workers/<домен>.py.
-    include=["app.workers.system", "app.workers.push", "app.workers.alerts"],
+    include=[
+        "app.workers.system",
+        "app.workers.push",
+        "app.workers.alerts",
+        "app.workers.packs",
+    ],
 )
 
 celery_app.conf.update(
@@ -41,6 +46,11 @@ celery_app.conf.update(
             "task": "alerts.poll",
             "schedule": float(settings.alerts_poll_interval_s),
             "options": {"queue": "default", "expires": settings.alerts_poll_interval_s},
+        },
+        "packs-refresh": {
+            "task": "packs.refresh_all",
+            "schedule": float(settings.packs_refresh_interval_s),
+            "options": {"queue": "default", "expires": settings.packs_refresh_interval_s},
         },
     },
 )

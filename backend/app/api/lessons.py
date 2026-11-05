@@ -45,6 +45,7 @@ from app.schemas.lessons import (
     TestUpdate,
 )
 from app.services import lessons as service
+from app.workers.packs import enqueue_rebuild_for_lesson
 
 router = APIRouter(tags=["lessons"])
 
@@ -197,14 +198,19 @@ async def delete_lesson(lesson: EditableLesson, session: Session) -> Response:
 async def publish_lesson(lesson: OwnLesson, session: Session, settings: SettingsDep) -> LessonOut:
     """Публікація після серверних перевірок: є укриттєва частина, у кожного відео є VTT-субтитри,
     урок і пакети днів, де він уже стоїть, — у межах ліміту. Повторна публікація після правок
-    збільшує `version`. Ідемпотентно."""
-    return await service.lesson_out(session, await service.publish(session, lesson, settings))
+    збільшує `version`. Ідемпотентно. Пакети класів, де урок стоїть, перезбирає Celery."""
+    lesson = await service.publish(session, lesson, settings)
+    enqueue_rebuild_for_lesson(lesson.id)
+    return await service.lesson_out(session, lesson)
 
 
 @router.post("/lessons/{lesson_id}/unpublish", response_model=LessonOut, responses=ACCESS)
 async def unpublish_lesson(lesson: OwnLesson, session: Session) -> LessonOut:
-    """Повертає урок у чернетку для правок. Ідемпотентно."""
-    return await service.lesson_out(session, await service.unpublish(session, lesson))
+    """Повертає урок у чернетку для правок. Ідемпотентно. Урок зникає з нових версій пакетів;
+    уже завантажені версії лишаються на пристроях."""
+    lesson = await service.unpublish(session, lesson)
+    enqueue_rebuild_for_lesson(lesson.id)
+    return await service.lesson_out(session, lesson)
 
 
 # ---------- модулі ----------
