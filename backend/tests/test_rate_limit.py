@@ -191,3 +191,29 @@ async def test_redis_client_is_separate_from_celery_db() -> None:
     client = Redis.from_url(get_settings().rate_limit_redis_url)
     assert client.connection_pool.connection_kwargs["db"] == 2
     await client.aclose()
+
+
+async def test_client_ip_comes_from_trusted_proxy_header(app: FastAPI, world) -> None:
+    """За Nginx (довірений проксі uvicorn, Dockerfile: --proxy-headers + FORWARDED_ALLOW_IPS)
+    клієнти з різними X-Forwarded-For мають окремі лічильники, а не один на IP Nginx."""
+    from pathlib import Path
+
+    from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
+
+    dockerfile = (Path(__file__).resolve().parent.parent / "Dockerfile").read_text()
+    assert '"--proxy-headers"' in dockerfile and "ENV FORWARDED_ALLOW_IPS=" in dockerfile
+
+    proxied = ProxyHeadersMiddleware(app, trusted_hosts="172.18.0.2")
+    transport = ASGITransport(app=proxied, client=("172.18.0.2", 50000))
+    async with AsyncClient(transport=transport, base_url="http://test") as nginx:
+        attacker = {"X-Forwarded-For": "203.0.113.1"}
+        owner = {"X-Forwarded-For": "203.0.113.2"}
+        for _ in range(ACCOUNT_LIMIT):
+            r = await nginx.post(
+                "/auth/student/join", json=join(world.class_a, pin="9999"), headers=attacker
+            )
+            assert r.status_code == 401
+        r = await nginx.post("/auth/student/join", json=join(world.class_a), headers=attacker)
+        assert r.status_code == 429
+        r = await nginx.post("/auth/student/join", json=join(world.class_a), headers=owner)
+        assert r.status_code == 200

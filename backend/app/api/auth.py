@@ -58,7 +58,9 @@ _FAILED_LOGIN = {"INVALID_CREDENTIALS", "INVALID_JOIN_CODE"}
 
 
 def _client_ip(request: Request) -> str:
-    # За Nginx справжній IP дає uvicorn --proxy-headers (X-Forwarded-For від довіреного проксі).
+    # За Nginx `request.client` — це адреса клієнта з X-Forwarded-For лише тоді, коли uvicorn
+    # довіряє проксі: `--proxy-headers` + FORWARDED_ALLOW_IPS з IP/підмережею Nginx (Dockerfile).
+    # Інакше тут IP Nginx — один спільний лічильник «на IP» і «IP + акаунт» для всіх клієнтів.
     return request.client.host if request.client else "unknown"
 
 
