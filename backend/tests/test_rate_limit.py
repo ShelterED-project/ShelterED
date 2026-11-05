@@ -1,5 +1,6 @@
 """Rate limiting входу (B15.3): лише невдалі спроби, 429 + Retry-After для вичерпаного ключа,
-без блокування акаунта; Redis-реалізація й fail-open при недоступному Redis."""
+ключ акаунта = IP + акаунт (перебір з одного IP не блокує власника на іншому IP);
+Redis-реалізація й fail-open при недоступному Redis."""
 
 import logging
 import uuid
@@ -7,7 +8,7 @@ import uuid
 import pytest
 from conftest import PASSWORD, PIN
 from fastapi import FastAPI
-from httpx import AsyncClient
+from httpx import ASGITransport, AsyncClient
 from redis.asyncio import Redis
 
 from app.api.deps import get_rate_limiter
@@ -21,6 +22,11 @@ ACCOUNT_LIMIT = 10  # RATE_LIMIT_JOIN_ACCOUNT / RATE_LIMIT_LOGIN_ACCOUNT у conf
 
 def join(klass, name="Іван", last="Петренко", pin=PIN) -> dict:
     return {"join_code": klass.join_code, "display_name": name, "last_name": last, "pin": pin}
+
+
+def from_ip(app: FastAPI, ip: str) -> AsyncClient:
+    """Клієнт, запити якого приходять з адреси `ip` (той самий застосунок і rate limiter)."""
+    return AsyncClient(transport=ASGITransport(app=app, client=(ip, 50000)), base_url="http://test")
 
 
 def authorize(email: str, password: str) -> dict:
@@ -52,6 +58,52 @@ async def test_pin_guessing_is_limited_per_class_code_and_name(client: AsyncClie
     # Інший учень того ж класу входить: блокування акаунтів однокласників немає.
     second = await client.post("/auth/student/join", json=join(world.class_a, "Нова", "Учениця"))
     assert second.status_code == 200
+
+
+async def test_pin_guessing_from_one_ip_does_not_block_owner_on_another_ip(
+    app: FastAPI, world
+) -> None:
+    """Однокласник перебирає PIN з телефона (IP A) — блокує лише себе; власник з IP B входить."""
+    async with from_ip(app, "10.0.0.1") as attacker, from_ip(app, "10.0.0.2") as owner:
+        for _ in range(ACCOUNT_LIMIT):
+            r = await attacker.post("/auth/student/join", json=join(world.class_a, pin="9999"))
+            assert r.status_code == 401
+        r = await attacker.post("/auth/student/join", json=join(world.class_a))
+        assert r.status_code == 429
+        r = await owner.post("/auth/student/join", json=join(world.class_a))
+        assert r.status_code == 200
+        # Невдачі власника рахуються окремо від невдач нападника.
+        r = await owner.post("/auth/student/join", json=join(world.class_a, pin="9999"))
+        assert r.status_code == 401
+
+
+async def test_password_guessing_from_one_ip_does_not_block_owner_on_another_ip(
+    app: FastAPI, world
+) -> None:
+    email = world.teacher_a.email
+    async with from_ip(app, "10.0.0.1") as attacker, from_ip(app, "10.0.0.2") as owner:
+        for _ in range(ACCOUNT_LIMIT):
+            r = await attacker.post("/auth/authorize", json=authorize(email, "wrong-password-123"))
+            assert r.status_code == 401
+        r = await attacker.post("/auth/authorize", json=authorize(email, PASSWORD))
+        assert r.status_code == 429
+        r = await owner.post("/auth/authorize", json=authorize(email, PASSWORD))
+        assert r.status_code == 200
+
+
+async def test_ip_limit_is_high_enough_for_a_class_behind_one_nat(
+    client: AsyncClient, world
+) -> None:
+    """Уся школа за одним NAT: ліміт на IP (300) не менший за десятки помилок класу."""
+    settings = get_settings()
+    assert settings.rate_limit_join_ip >= 300 and settings.rate_limit_login_ip >= 300
+    for i in range(30):
+        r = await client.post(
+            "/auth/student/join", json=join(world.class_a, f"Учень{i}", pin="9999")
+        )
+        assert r.status_code in (200, 401)
+    r = await client.post("/auth/student/join", json=join(world.class_a))
+    assert r.status_code == 200
 
 
 async def test_successful_logins_are_not_counted(client: AsyncClient, world) -> None:

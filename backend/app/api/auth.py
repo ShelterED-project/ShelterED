@@ -102,13 +102,20 @@ async def authorize(
     """OAuth 2.0 Authorization Code + PKCE (S256) для вчителів, батьків, адміністрації.
 
     Форму входу малює PWA; відповідь — одноразовий `code` (60 с) для `POST /auth/token`.
-    Невдалі спроби обмежені на email і на IP (`RATE_LIMIT_LOGIN_*` за `RATE_LIMIT_WINDOW_S`);
-    понад ліміт — 429 з `Retry-After`. Акаунт не блокується.
+    Невдалі спроби обмежені на пару IP + email і на IP (`RATE_LIMIT_LOGIN_*` за
+    `RATE_LIMIT_WINDOW_S`); понад ліміт — 429 з `Retry-After`. Акаунт не блокується: перебір
+    з одного IP не заважає власнику входити з іншого.
     """
     window = settings.rate_limit_window_s
+    ip = _client_ip(request)
     rules = [
-        rule("login:acct", body.email.casefold(), settings.rate_limit_login_account, window),
-        rule("login:ip", _client_ip(request), settings.rate_limit_login_ip, window),
+        rule(
+            "login:acct",
+            f"{ip}\n{body.email.casefold()}",
+            settings.rate_limit_login_account,
+            window,
+        ),
+        rule("login:ip", ip, settings.rate_limit_login_ip, window),
     ]
     code = await _limited(
         limiter,
@@ -223,16 +230,18 @@ async def student_join(
     Прострочений код пускає лише наявних учнів із вірним PIN; для невідомого імені й хибного PIN
     відповідь однакова: 401 `INVALID_CREDENTIALS`.
 
-    Захист від перебору PIN: невдалі спроби обмежені на код класу + ім'я й на IP
+    Захист від перебору PIN: невдалі спроби обмежені на пару IP + (код класу + ім'я) і на IP
     (`RATE_LIMIT_JOIN_*` за `RATE_LIMIT_WINDOW_S`); понад ліміт — 429 з `Retry-After`.
-    Блокування акаунта немає (ліміт знімається сам після вікна).
+    Блокування акаунта немає: однокласник, що вводить чужий PIN, блокує лише себе (свій IP),
+    а справжній учень входить з іншого пристрою/IP; ліміт знімається сам після вікна.
     """
     window = settings.rate_limit_window_s
-    identity = normalize_link_code(body.join_code) + "\n"
+    ip = _client_ip(request)
+    identity = f"{ip}\n{normalize_link_code(body.join_code)}\n"
     identity += service.name_key(body.display_name, body.last_name)
     rules = [
         rule("join:acct", identity, settings.rate_limit_join_account, window),
-        rule("join:ip", _client_ip(request), settings.rate_limit_join_ip, window),
+        rule("join:ip", ip, settings.rate_limit_join_ip, window),
     ]
     return await _limited(
         limiter,

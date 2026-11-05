@@ -81,12 +81,15 @@ class Settings(BaseSettings):
     # Rate limiting входу (B15.3): рахуються лише невдалі спроби, фіксоване вікно, без
     # блокування акаунта. Redis БД 2 (0 і 1 — Celery); недоступний Redis — вхід дозволено.
     rate_limit_redis_url: str = "redis://localhost:6380/2"
-    # Вхід учня: на код класу + ім'я (перебір PIN) і на IP (уся школа може бути за одним NAT).
+    # Ліміт «на акаунт» рахується на пару (IP клієнта + акаунт): хто вводить хибні PIN чи паролі,
+    # блокує лише себе, а не справжнього власника на іншому пристрої/IP (діти не можуть заблокувати
+    # однокласника). Ліміт на IP високий: увесь клас чи школа часто за одним NAT.
+    # Вхід учня: IP + код класу + ім'я (перебір PIN) і окремо IP.
     rate_limit_join_account: int = 10
-    rate_limit_join_ip: int = 60
-    # Вхід дорослих (POST /auth/authorize): на email і на IP.
+    rate_limit_join_ip: int = 300
+    # Вхід дорослих (POST /auth/authorize): IP + email і окремо IP.
     rate_limit_login_account: int = 10
-    rate_limit_login_ip: int = 60
+    rate_limit_login_ip: int = 300
     rate_limit_window_s: int = 900
 
     @property
