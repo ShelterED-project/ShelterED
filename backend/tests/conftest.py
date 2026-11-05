@@ -22,6 +22,7 @@ os.environ["CORS_ORIGINS"] = '["http://localhost:5173"]'
 # Опитування API тривог у тестах вимкнене; провайдер підміняють фейком.
 os.environ["ALERTS_API_TOKEN"] = ""
 os.environ["ALERTS_SOURCE_STALE_S"] = "300"
+os.environ["SYNC_SUSPICIOUS_SKEW_S"] = "300"
 
 import uuid  # noqa: E402
 from collections.abc import AsyncIterator  # noqa: E402
@@ -264,3 +265,45 @@ def media_storage(app: FastAPI, tmp_path: Path) -> LocalMediaStorage:
     storage = LocalMediaStorage(tmp_path / "media", "/media")
     app.dependency_overrides[get_storage] = lambda: storage
     return storage
+
+
+# ---------- справжні commit-и (паралельні запити, збій посеред пакета, стрічка змін) ----------
+
+
+class Committed(SimpleNamespace):
+    """Дані закомічені, кожен HTTP-запит отримує власну сесію (окреме з'єднання)."""
+
+
+@pytest.fixture
+async def committed(migrated_db: str) -> AsyncIterator[Committed]:
+    """Режим без обгортки-транзакції: потрібен там, де важливі справжні commit-и й
+    паралельні з'єднання. Після тесту всі таблиці очищуються (TRUNCATE ... CASCADE)."""
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    from app.models import Base
+
+    engine = create_async_engine(migrated_db, poolclass=NullPool)
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+    application = create_app()
+
+    async def override_session() -> AsyncIterator[AsyncSession]:
+        async with maker() as session:
+            yield session
+
+    application.dependency_overrides[get_session] = override_session
+    setup = maker()
+    try:
+        async with AsyncClient(
+            transport=ASGITransport(app=application, raise_app_exceptions=False),
+            base_url="http://test",
+        ) as http:
+            yield Committed(
+                app=application, client=http, maker=maker, session=setup, factory=Factory(setup)
+            )
+    finally:
+        await setup.close()
+        tables = ", ".join(t.name for t in Base.metadata.sorted_tables)
+        async with engine.begin() as conn:
+            await conn.execute(text(f"TRUNCATE {tables} CASCADE"))
+        await engine.dispose()

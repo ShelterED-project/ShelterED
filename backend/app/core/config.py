@@ -74,6 +74,10 @@ class Settings(BaseSettings):
     # Без успішного опитування довше за це джерело вважається недоступним (B7.6).
     alerts_source_stale_s: int = 300
 
+    # Синхронізація (docs/sync-protocol.md, розділ 6): подія «підозріла», якщо `occurred_at`
+    # пізніше часу сервера або |зсув годинника пакета| більше за цей поріг. Позначка, не блокування.
+    sync_suspicious_skew_s: int = 300
+
     @property
     def alerts_polling_enabled(self) -> bool:
         return bool(self.alerts_api_token and self.alerts_api_token.get_secret_value())

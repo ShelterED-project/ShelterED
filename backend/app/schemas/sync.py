@@ -278,7 +278,7 @@ class SyncChangesOut(BaseModel):
                             "occurred_at": "2026-11-05T10:20:00Z",
                         },
                     ],
-                    "next_cursor": "1042",
+                    "next_cursor": "771.1042",
                     "has_more": False,
                 }
             ]

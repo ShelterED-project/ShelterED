@@ -3680,7 +3680,7 @@
               }
             ],
             "has_more": false,
-            "next_cursor": "1042"
+            "next_cursor": "771.1042"
           }
         ],
         "properties": {
@@ -11197,7 +11197,7 @@
     },
     "/sync/changes": {
       "get": {
-        "description": "Зміни для поточного учня після `cursor` (без нього — з початку): результати спроб,\nпідсумковий прогрес модулів, статуси переклички. Курсор монотонний, без пропусків;\nповтор із тим самим курсором повертає ті самі зміни.",
+        "description": "Зміни для поточного учня після `cursor` (без нього — з початку): результати спроб,\nпідсумковий прогрес модулів, статуси переклички — актуальний стан кожного зміненого рядка.\nКурсор непрозорий, монотонний, без пропусків (віддаються лише точно закомічені зміни);\nповтор із тим самим курсором повертає ті самі зміни (або новіший стан тих самих рядків).\nНевідомий формат курсора — 422 `INVALID_CURSOR`.",
         "operationId": "get_changes_sync_changes_get",
         "parameters": [
           {
@@ -11260,7 +11260,7 @@
                     }
                   ],
                   "has_more": false,
-                  "next_cursor": "1042"
+                  "next_cursor": "771.1042"
                 },
                 "schema": {
                   "$ref": "#/components/schemas/SyncChangesOut"
@@ -11297,7 +11297,7 @@
                 }
               }
             },
-            "description": "Unprocessable Content"
+            "description": "INVALID_CURSOR"
           },
           "500": {
             "content": {
@@ -11308,16 +11308,6 @@
               }
             },
             "description": "Internal Server Error"
-          },
-          "501": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "NOT_IMPLEMENTED: заглушка контракту"
           }
         },
         "security": [
@@ -11333,7 +11323,7 @@
     },
     "/sync/events": {
       "post": {
-        "description": "Пакет 1–100 подій. Кожна подія приймається один раз за `client_event_id`: повтор дає\n`duplicate`, нічого не дублюючи. Погана подія отримує `rejected` з причиною й не блокує\nрешту пакета. Статус відповіді 200, якщо конверт пакета валідний.",
+        "description": "Пакет 1–100 подій. Кожна подія приймається один раз за `client_event_id`: повтор\nприйнятої дає `duplicate`, повтор відхиленої — той самий `rejected` з причиною; нічого не\nдублюється. Погана подія отримує `rejected` і не блокує решту пакета. Події обробляються\nв порядку `occurred_at`, кожна у своїй транзакції; результати — у порядку запиту.\nСтатус 200, якщо конверт пакета валідний; 500 — частину подій не записано (повторити\nпакет: записані дадуть `duplicate`). Вчитель (QR, B10) поки отримує 501.",
         "operationId": "post_events_sync_events_post",
         "requestBody": {
           "content": {
@@ -11422,7 +11412,7 @@
                 }
               }
             },
-            "description": "Internal Server Error"
+            "description": "INTERNAL_ERROR: частину подій не оброблено — повторити пакет"
           },
           "501": {
             "content": {
@@ -11432,7 +11422,7 @@
                 }
               }
             },
-            "description": "NOT_IMPLEMENTED: заглушка контракту"
+            "description": "NOT_IMPLEMENTED: QR-ретрансляція вчителем (B10) ще не реалізована"
           }
         },
         "security": [
