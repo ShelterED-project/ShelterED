@@ -142,6 +142,9 @@ class PackOut(BaseModel):
     schedule: list[ScheduleItem]
     lessons: list[PackLesson]
     explanations: list[PackExplanation]
+    media: list[uuid.UUID] = Field(
+        description="id медіа уроків пакета разом із субтитрами (файли — за URL з маніфесту)"
+    )
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -226,6 +229,7 @@ class PackOut(BaseModel):
                             "text": "Дріб показує, на скільки частин поділили ціле.",
                         }
                     ],
+                    "media": [MEDIA_ID, "0192f0a0-0000-7000-8000-000000000502"],
                 }
             ]
         }

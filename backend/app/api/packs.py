@@ -65,6 +65,32 @@ def _etag_matches(if_none_match: str, etag: str) -> bool:
     return False
 
 
+def _accepts_gzip(accept_encoding: str | None) -> bool:
+    """Чи приймає клієнт gzip за `Accept-Encoding` (RFC 9110, з q-значеннями): явний `gzip`
+    (`x-gzip`) з q > 0, інакше `*` з q > 0. `gzip;q=0` — відмова."""
+    if not accept_encoding:
+        return False
+    weights: dict[str, float] = {}
+    for part in accept_encoding.split(","):
+        coding, *params = (p.strip() for p in part.split(";"))
+        coding = coding.lower()
+        if not coding:
+            continue
+        q = 1.0
+        for param in params:
+            name, _, value = param.partition("=")
+            if name.strip().lower() == "q":
+                try:
+                    q = float(value.strip())
+                except ValueError:
+                    q = 0.0
+        weights[coding] = q
+    for coding in ("gzip", "x-gzip", "*"):
+        if coding in weights:
+            return weights[coding] > 0
+    return False
+
+
 @router.get(
     "/packs/{pack_id}",
     response_model=PackOut,
@@ -104,7 +130,7 @@ async def get_pack(
     headers = {"ETag": etag, **CACHE_HEADERS}
     if if_none_match and _etag_matches(if_none_match, etag):
         return Response(status_code=304, headers=headers)
-    if accept_encoding and "gzip" in accept_encoding.lower():
+    if _accepts_gzip(accept_encoding):
         return Response(
             content=pack.content_gzip,
             media_type="application/json",

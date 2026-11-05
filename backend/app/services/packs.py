@@ -16,11 +16,13 @@ import json
 import logging
 import uuid
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import distinct_on
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import defer
 
 from app.core.config import Settings
 from app.core.errors import AppError
@@ -38,8 +40,9 @@ from app.schemas.packs import (
     PackTest,
 )
 from app.schemas.school import ScheduleItem
+from app.services import lessons as lessons_service
 from app.services import school as school_service
-from app.services.schedule import local_date
+from app.services.schedule import ResolvedItem, local_date
 from app.workers.push import enqueue_push
 
 logger = logging.getLogger(__name__)
@@ -47,6 +50,11 @@ logger = logging.getLogger(__name__)
 # Текст і тести — на 7 днів, медіа — на «сьогодні + завтра».
 HORIZON_DAYS = 7
 MEDIA_HORIZON_DAYS = 2
+# Скільки разів перезбирати пакет, якщо паралельна збірка зайняла ту саму версію.
+BUILD_ATTEMPTS = 3
+
+# Розклад дня, уже розв'язаний для класу: (пояс школи, уроки дня).
+DaySchedule = tuple[ZoneInfo, list[ResolvedItem]]
 
 
 def _now() -> dt.datetime:
@@ -152,12 +160,15 @@ async def _lesson_content(
 
 
 async def build_content(
-    session: AsyncSession, klass: SchoolClass, day: dt.date
+    session: AsyncSession, klass: SchoolClass, day: dt.date, resolved: DaySchedule | None = None
 ) -> tuple[dict[str, Any], dict[uuid.UUID, int], set[uuid.UUID]]:
     """(вміст без id/версії/часу збірки, {lesson_id: version}, id медіа). Лише опубліковані
-    уроки: якщо призначений урок знято з публікації, у розкладі пакета `lesson_id = null`."""
-    tz, days = await school_service.class_schedule(session, klass, day, 1)
-    items = days[0][1]
+    уроки: якщо призначений урок знято з публікації, у розкладі пакета `lesson_id = null`.
+    `resolved` — уже розв'язаний розклад дня (інакше читається з БД)."""
+    if resolved is None:
+        tz, days = await school_service.class_schedule(session, klass, day, 1)
+        resolved = (tz, days[0][1])
+    tz, items = resolved
     wanted = list(dict.fromkeys(i.lesson_id for i in items if i.lesson_id is not None))
     lessons = {
         lesson.id: lesson
@@ -191,26 +202,45 @@ async def build_content(
         "lessons": pack_lessons,
         # Закешовані пояснення ШІ (B13.3): сховища ще немає.
         "explanations": [],
+        # Медіа й субтитри: заміна субтитрів відео змінює хеш, а отже й версію пакета.
+        "media": sorted(str(m) for m in media),
     }
     return body, versions, media
+
+
+# Метадані пакета без вмісту: стиснутий JSON читає лише `GET /packs/{id}`.
+_NO_CONTENT = defer(KnowledgePack.content_gzip, raiseload=True)
 
 
 async def latest_pack(
     session: AsyncSession, class_id: uuid.UUID, day: dt.date
 ) -> KnowledgePack | None:
+    """Найновіша версія пакета дня (без `content_gzip`)."""
     return await session.scalar(
         select(KnowledgePack)
+        .options(_NO_CONTENT)
         .where(KnowledgePack.class_id == class_id, KnowledgePack.pack_date == day)
         .order_by(KnowledgePack.version.desc())
         .limit(1)
     )
 
 
-async def _media_size(session: AsyncSession, media_ids: set[uuid.UUID]) -> int:
-    if not media_ids:
-        return 0
-    sizes = await session.scalars(select(MediaAsset.size_bytes).where(MediaAsset.id.in_(media_ids)))
-    return sum(sizes)
+async def _latest_packs(
+    session: AsyncSession, class_id: uuid.UUID, start: dt.date, end: dt.date
+) -> list[KnowledgePack]:
+    """Найновіша версія кожного дня `start`..`end` (без `content_gzip`), за датою."""
+    rows = await session.scalars(
+        select(KnowledgePack)
+        .options(_NO_CONTENT)
+        .where(
+            KnowledgePack.class_id == class_id,
+            KnowledgePack.pack_date >= start,
+            KnowledgePack.pack_date <= end,
+        )
+        .order_by(KnowledgePack.pack_date, KnowledgePack.version.desc())
+        .ext(distinct_on(KnowledgePack.pack_date))
+    )
+    return list(rows)
 
 
 async def build_pack(
@@ -219,19 +249,40 @@ async def build_pack(
     day: dt.date,
     settings: Settings,
     now: dt.datetime | None = None,
+    resolved: DaySchedule | None = None,
 ) -> tuple[KnowledgePack | None, bool]:
     """Збирає пакет класу на дату. (пакет, True) — нова версія; (актуальний, False) — вміст
     не змінився; (None, False) — дня без уроків у розкладі ще не було в пакетах.
+    Якщо паралельна збірка зайняла ту саму версію, дані перечитуються й пакет збирається
+    знову (до BUILD_ATTEMPTS разів): виграють найсвіжіші дані, а не те, що встигло першим.
     Commit робить викликач."""
-    body, versions, media = await build_content(session, klass, day)
+    now = now or _now()
+    for _ in range(BUILD_ATTEMPTS):
+        pack, created, conflict = await _try_build(session, klass, day, settings, now, resolved)
+        if not conflict:
+            return pack, created
+        resolved = None  # розклад теж міг змінитися — перечитуємо все
+    logger.warning("Pack build gave up after version conflicts: class=%s date=%s", klass.id, day)
+    return await latest_pack(session, klass.id, day), False
+
+
+async def _try_build(
+    session: AsyncSession,
+    klass: SchoolClass,
+    day: dt.date,
+    settings: Settings,
+    now: dt.datetime,
+    resolved: DaySchedule | None,
+) -> tuple[KnowledgePack | None, bool, bool]:
+    """Одна спроба збірки: (пакет, створено, конфлікт версії)."""
+    body, versions, media = await build_content(session, klass, day, resolved)
     latest = await latest_pack(session, klass.id, day)
     if latest is None and not body["schedule"]:
-        return None, False
+        return None, False, False
     digest = content_hash(body)
     if latest is not None and latest.content_hash == digest:
-        return latest, False
+        return latest, False, False
 
-    now = now or _now()
     pack_id = uuid.uuid4()
     version = (latest.version if latest else 0) + 1
     full = {
@@ -258,8 +309,8 @@ async def build_pack(
         .returning(KnowledgePack.id)
     )
     if inserted is None:
-        # Паралельна збірка вже створила цю версію.
-        return await latest_pack(session, klass.id, day), False
+        # Паралельна збірка вже створила цю версію (можливо, зі старіших даних).
+        return None, False, True
     if versions:
         await session.execute(
             pg_insert(KnowledgePackLesson).values(
@@ -275,7 +326,7 @@ async def build_pack(
                 [{"pack_id": pack_id, "media_asset_id": m} for m in sorted(media)]
             )
         )
-    media_bytes = await _media_size(session, media)
+    media_bytes = await lessons_service.media_size(session, media)
     logger.info(
         "Pack built: class=%s date=%s version=%d json_bytes=%d media_bytes=%d",
         klass.id,
@@ -293,20 +344,13 @@ async def build_pack(
             settings.pack_max_day_bytes,
         )
     pack = await session.get(KnowledgePack, pack_id)
-    return pack, True
+    return pack, True, False
 
 
 async def _week_size(
     session: AsyncSession, class_id: uuid.UUID, start: dt.date, end: dt.date
 ) -> int:
-    packs = [
-        p
-        for p in [
-            await latest_pack(session, class_id, start + dt.timedelta(days=n))
-            for n in range((end - start).days + 1)
-        ]
-        if p is not None
-    ]
+    packs = await _latest_packs(session, class_id, start, end)
     if not packs:
         return 0
     media = set(
@@ -316,7 +360,7 @@ async def _week_size(
             )
         )
     )
-    return sum(p.size_bytes for p in packs) + await _media_size(session, media)
+    return sum(p.size_bytes for p in packs) + await lessons_service.media_size(session, media)
 
 
 async def rebuild_class(
@@ -336,9 +380,10 @@ async def rebuild_class(
     if start is None:
         start = local_date(now, await school_service.school_tz(session, klass.school_id))
     built: list[KnowledgePack] = []
-    for n in range(HORIZON_DAYS):
-        day = start + dt.timedelta(days=n)
-        pack, created = await build_pack(session, klass, day, settings, now)
+    # Розклад тижня — одним читанням, а не на кожен день.
+    tz, days = await school_service.class_schedule(session, klass, start, HORIZON_DAYS)
+    for day, items in days:
+        pack, created = await build_pack(session, klass, day, settings, now, (tz, items))
         if created and pack is not None:
             built.append(pack)
     await session.commit()
@@ -422,17 +467,7 @@ async def manifest(
     if (end - start).days >= HORIZON_DAYS:
         raise _bad_range(f"Range must not exceed {HORIZON_DAYS} days")
 
-    rows = await session.scalars(
-        select(KnowledgePack)
-        .where(
-            KnowledgePack.class_id == klass.id,
-            KnowledgePack.pack_date >= start,
-            KnowledgePack.pack_date <= end,
-        )
-        .order_by(KnowledgePack.pack_date, KnowledgePack.version.desc())
-        .ext(distinct_on(KnowledgePack.pack_date))
-    )
-    packs = list(rows)
+    packs = await _latest_packs(session, klass.id, start, end)
 
     media_from = max(start, today)
     media_to = min(end, today + dt.timedelta(days=MEDIA_HORIZON_DAYS - 1))

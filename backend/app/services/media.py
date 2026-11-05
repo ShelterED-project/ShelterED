@@ -217,20 +217,24 @@ async def get_readable_media(session: AsyncSession, user: User, media_id: uuid.U
     raise AppError("FORBIDDEN", "No access to this media", status_code=403)
 
 
-async def _in_published_lesson(session: AsyncSession, media_id: uuid.UUID) -> bool:
-    found = await session.scalar(
-        select(Card.id)
-        .join(Module, Module.id == Card.module_id)
-        .join(Lesson, Lesson.id == Module.lesson_id)
+async def _published_lessons(session: AsyncSession, media_id: uuid.UUID) -> list[uuid.UUID]:
+    """Опубліковані уроки, картки яких використовують медіа."""
+    rows = await session.scalars(
+        select(Lesson.id)
+        .join(Module, Module.lesson_id == Lesson.id)
+        .join(Card, Card.module_id == Module.id)
         .where(Card.media_asset_id == media_id, Lesson.status == "published")
-        .limit(1)
+        .distinct()
+        .order_by(Lesson.id)
     )
-    return found is not None
+    return list(rows)
 
 
 async def set_subtitles(
     session: AsyncSession, user: User, media_id: uuid.UUID, subtitles_id: uuid.UUID | None
-) -> MediaAsset:
+) -> tuple[MediaAsset, list[uuid.UUID]]:
+    """(медіа, опубліковані уроки з цим відео, якщо субтитри змінились — їхні пакети треба
+    перезібрати). Повтор без змін — порожній список."""
     media = await get_readable_media(session, user, media_id)
     if media.uploaded_by != user.id:
         raise AppError("FORBIDDEN", "Only the uploader can change media", status_code=403)
@@ -242,9 +246,12 @@ async def set_subtitles(
             raise AppError("NOT_FOUND", "Subtitles not found", status_code=404)
         if subtitles.kind != "subtitles":
             raise _invalid("subtitles_id must reference a VTT file")
-    elif media.subtitles_id is not None and await _in_published_lesson(session, media.id):
+    elif media.subtitles_id is not None and await _published_lessons(session, media.id):
         # Опублікований урок пройшов перевірку субтитрів — не ламаємо її заднім числом.
         raise AppError("LESSON_PUBLISHED", "Video is used in a published lesson", status_code=409)
+    if media.subtitles_id == subtitles_id:
+        return media, []
     media.subtitles_id = subtitles_id
+    lessons = await _published_lessons(session, media.id)
     await session.commit()
-    return media
+    return media, lessons

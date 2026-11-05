@@ -11,13 +11,14 @@ from zoneinfo import ZoneInfo
 import pytest
 from conftest import auth_header, pushes
 from httpx import AsyncClient
-from sqlalchemy import func, select
+from sqlalchemy import func, inspect, select
 
 from app.core.config import get_settings
 from app.models.lessons import Card, Lesson, MediaAsset, Module, Question, Test
 from app.models.packs import KnowledgePack, KnowledgePackLesson, KnowledgePackMedia
-from app.models.school import LessonAssignment, ScheduleSlot
+from app.models.school import LessonAssignment, ScheduleOverride, ScheduleSlot
 from app.services import packs as service
+from app.services import school as school_service
 
 pytestmark = pytest.mark.anyio
 
@@ -433,3 +434,138 @@ async def test_get_pack_not_found(client: AsyncClient, world) -> None:
     resp = await client.get(f"/packs/{uuid.uuid4()}", headers=auth_header(world.teacher_a))
     assert resp.status_code == 404
     assert resp.json()["error"]["code"] == "NOT_FOUND"
+
+
+# ---------- регресії ----------
+
+
+async def test_subtitle_change_rebuilds_packs_of_published_lessons(
+    client: AsyncClient, db_session, world, course, enqueued
+) -> None:
+    (v1, _) = sorted(await rebuild(db_session, world), key=lambda p: p.pack_date)
+    new_vtt = await media(db_session, world, "subtitles", "text/vtt", 1200)
+    url = f"/media/{course.video.id}"
+    body = {"subtitles_id": str(new_vtt.id)}
+    resp = await client.patch(url, json=body, headers=auth_header(world.teacher_a))
+    assert resp.status_code == 200, resp.text
+    assert tasks(enqueued, "packs.rebuild_for_lesson") == [[str(course.lesson.id)]]
+    # Повтор того самого запиту нічого не змінює й перезбірку не ставить.
+    again = await client.patch(url, json=body, headers=auth_header(world.teacher_a))
+    assert again.status_code == 200
+    assert len(tasks(enqueued, "packs.rebuild_for_lesson")) == 1
+
+    # Нові субтитри змінюють хеш → нова версія з новим файлом.
+    built = await rebuild(db_session, world)
+    v2 = next(p for p in built if p.pack_date == course.day)
+    assert v2.version == 2 and v2.content_hash != v1.content_hash
+    assert str(new_vtt.id) in content(v2)["media"]
+    assert str(course.vtt.id) not in content(v2)["media"]
+
+
+async def test_version_conflict_rebuilds_from_latest_data(
+    db_session, world, course, monkeypatch
+) -> None:
+    (v1, _) = sorted(await rebuild(db_session, world), key=lambda p: p.pack_date)
+    course.lesson.title = "Дроби (новіше)"
+    course.lesson.version = 2
+    await db_session.flush()
+
+    # Емулюємо гонку: перше читання «не бачить» v1, тож спроба вставити v1 дає конфлікт.
+    real = service.latest_pack
+    calls = {"n": 0}
+
+    async def stale_once(session, class_id, day):
+        calls["n"] += 1
+        return None if calls["n"] == 1 else await real(session, class_id, day)
+
+    monkeypatch.setattr(service, "latest_pack", stale_once)
+    pack, created = await service.build_pack(db_session, world.class_a, course.day, get_settings())
+    assert created is True and pack.version == 2
+    assert content(pack)["lessons"][0]["title"] == "Дроби (новіше)"
+    assert pack.content_hash != v1.content_hash
+
+
+async def test_rebuild_reads_schedule_once(db_session, world, course, monkeypatch) -> None:
+    real = service.school_service.class_schedule
+    calls: list[int] = []
+
+    async def counting(session, klass, start, days):
+        calls.append(days)
+        return await real(session, klass, start, days)
+
+    monkeypatch.setattr(service.school_service, "class_schedule", counting)
+    await rebuild(db_session, world)
+    assert calls == [service.HORIZON_DAYS]
+
+
+async def test_pack_metadata_queries_skip_content(db_session, world, course) -> None:
+    await rebuild(db_session, world)
+    db_session.expunge_all()
+    latest = await service.latest_pack(db_session, world.class_a.id, course.day)
+    assert "content_gzip" in inspect(latest).unloaded
+    week = await service._latest_packs(
+        db_session, world.class_a.id, course.day, course.day + dt.timedelta(days=6)
+    )
+    assert len(week) == 2 and all("content_gzip" in inspect(p).unloaded for p in week)
+    assert await service._week_size(db_session, world.class_a.id, course.day, course.day) > 0
+
+
+@pytest.mark.parametrize(
+    ("accept", "gzipped"),
+    [
+        ("gzip", True),
+        ("br, gzip;q=0.5", True),
+        ("GZIP; q=1.0", True),
+        ("gzip;q=0", False),
+        ("gzip;q=0.0, identity", False),
+        ("*", True),
+        ("*;q=0", False),
+        ("identity, *;q=0", False),
+        ("gzip;q=0, *", False),
+        ("x-gzip", True),
+        ("deflate, br", False),
+        ("notgzip", False),
+    ],
+)
+async def test_get_pack_accept_encoding_q_values(
+    client: AsyncClient, db_session, world, course, accept, gzipped
+) -> None:
+    pack = (await rebuild(db_session, world))[0]
+    headers = {**auth_header(world.student_a), "Accept-Encoding": accept}
+    resp = await client.get(f"/packs/{pack.id}", headers=headers)
+    assert resp.status_code == 200
+    assert (resp.headers.get("content-encoding") == "gzip") is gzipped
+    assert resp.json()["id"] == str(pack.id)
+
+
+async def test_day_lesson_ids_counts_only_effective_assignments(db_session, world, course) -> None:
+    db = db_session
+    assert await school_service.day_lesson_ids(db, world.class_a, course.day) == {course.lesson.id}
+
+    # Прив'язка до слота, який цього дня не діє (інший день тижня), не рахується.
+    other_day = ScheduleSlot(
+        class_id=world.class_a.id,
+        subject_id=course.subject.id,
+        weekday=(course.day + dt.timedelta(days=1)).isoweekday(),
+        starts_at=dt.time(11, 0),
+        ends_at=dt.time(11, 45),
+        valid_from=course.day - dt.timedelta(days=7),
+    )
+    db.add(other_day)
+    await db.flush()
+    db.add(LessonAssignment(slot_id=other_day.id, date=course.day, lesson_id=course.lesson2.id))
+    # Скасований цього дня слот — теж.
+    db.add(
+        ScheduleOverride(
+            class_id=world.class_a.id, slot_id=course.slots[0].id, date=course.day, kind="cancel"
+        )
+    )
+    await db.flush()
+    assert await school_service.day_lesson_ids(db, world.class_a, course.day) == set()
+    tomorrow = course.day + dt.timedelta(days=1)
+    assert (
+        await school_service.day_lesson_ids(
+            db, world.class_a, tomorrow, exclude_slot_id=course.slots[1].id
+        )
+        == set()
+    )

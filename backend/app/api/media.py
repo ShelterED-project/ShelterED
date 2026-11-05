@@ -9,6 +9,7 @@ from app.api.deps import Session, SettingsDep, Staff, Storage, Teacher
 from app.schemas.errors import ErrorResponse
 from app.schemas.lessons import MediaOut, MediaUpdate
 from app.services import media as service
+from app.workers.packs import enqueue_rebuild_for_lesson
 
 router = APIRouter(tags=["media"])
 
@@ -94,6 +95,9 @@ async def get_media(
 async def update_media(
     media_id: uuid.UUID, body: MediaUpdate, teacher: Teacher, session: Session, storage: Storage
 ) -> MediaOut:
-    """Прив'язує власні VTT-субтитри до власного відео. Ідемпотентно."""
-    media = await service.set_subtitles(session, teacher, media_id, body.subtitles_id)
+    """Прив'язує власні VTT-субтитри до власного відео. Ідемпотентно. Якщо відео вже в
+    опублікованих уроках, їхні пакети перезбирає Celery."""
+    media, lessons = await service.set_subtitles(session, teacher, media_id, body.subtitles_id)
+    for lesson_id in lessons:
+        enqueue_rebuild_for_lesson(lesson_id)
     return service.media_out(media, storage)

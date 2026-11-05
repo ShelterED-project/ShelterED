@@ -2086,6 +2086,10 @@
                 "version": 2
               }
             ],
+            "media": [
+              "0192f0a0-0000-7000-8000-000000000501",
+              "0192f0a0-0000-7000-8000-000000000502"
+            ],
             "pack_date": "2026-11-09",
             "schedule": [
               {
@@ -2137,6 +2141,15 @@
             "title": "Lessons",
             "type": "array"
           },
+          "media": {
+            "description": "id медіа уроків пакета разом із субтитрами (файли — за URL з маніфесту)",
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Media",
+            "type": "array"
+          },
           "pack_date": {
             "format": "date",
             "title": "Pack Date",
@@ -2168,7 +2181,8 @@
           "timezone",
           "schedule",
           "lessons",
-          "explanations"
+          "explanations",
+          "media"
         ],
         "title": "PackOut",
         "type": "object"
@@ -9298,7 +9312,7 @@
         ]
       },
       "patch": {
-        "description": "Прив'язує власні VTT-субтитри до власного відео. Ідемпотентно.",
+        "description": "Прив'язує власні VTT-субтитри до власного відео. Ідемпотентно. Якщо відео вже в\nопублікованих уроках, їхні пакети перезбирає Celery.",
         "operationId": "update_media_media__media_id__patch",
         "parameters": [
           {
@@ -10199,6 +10213,10 @@
                       "title": "Звичайні дроби",
                       "version": 2
                     }
+                  ],
+                  "media": [
+                    "0192f0a0-0000-7000-8000-000000000501",
+                    "0192f0a0-0000-7000-8000-000000000502"
                   ],
                   "pack_date": "2026-11-09",
                   "schedule": [
