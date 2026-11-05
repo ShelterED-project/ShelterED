@@ -50,6 +50,34 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6380/0"
     redis_result_url: str = "redis://localhost:6380/1"
 
+    # Медіа: локальний том (у Docker — volume, роздає Nginx за MEDIA_URL_PREFIX).
+    media_root: str = "media"
+    media_url_prefix: str = "/media"
+    media_max_video_bytes: int = 30 * 1024 * 1024
+    media_max_image_bytes: int = 2 * 1024 * 1024
+    media_max_subtitles_bytes: int = 200 * 1024
+    # Ліміт пакета класу на день; той самий ліміт діє на один урок.
+    pack_max_day_bytes: int = 50 * 1024 * 1024
+    # Ліміт «Рюкзака» класу на 7 днів (пакети + унікальні медіа). Перевищення лише логується:
+    # блокує ліміт дня при прив'язці уроку (B5), а пакет із опублікованих уроків збирається завжди.
+    pack_max_week_bytes: int = 200 * 1024 * 1024
+    # Як часто Celery beat перезбирає пакети всіх класів на 7 днів наперед (новий день,
+    # зміни розкладу, які не поставили перезбірку).
+    packs_refresh_interval_s: int = 3600
+
+    # API тривог (alerts.in.ua). Порожній токен — опитування вимкнене, лишається ручна кнопка.
+    alerts_api_token: SecretStr | None = None
+    alerts_api_url: str = "https://api.alerts.in.ua/v1/alerts/active.json"
+    alerts_http_timeout_s: float = 10.0
+    # Інтервал опитування (ліміт alerts.in.ua — 8–10 запитів на хвилину з IP).
+    alerts_poll_interval_s: int = 30
+    # Без успішного опитування довше за це джерело вважається недоступним (B7.6).
+    alerts_source_stale_s: int = 300
+
+    @property
+    def alerts_polling_enabled(self) -> bool:
+        return bool(self.alerts_api_token and self.alerts_api_token.get_secret_value())
+
 
 @lru_cache
 def get_settings() -> Settings:

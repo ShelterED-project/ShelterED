@@ -1,14 +1,18 @@
 import datetime as dt
 import uuid
 
-from sqlalchemy import BigInteger, Date, ForeignKey, Integer, UniqueConstraint
+from sqlalchemy import BigInteger, Date, ForeignKey, Integer, LargeBinary, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, uuid_pk
 
 
 class KnowledgePack(Base):
-    """Пакет «Рюкзак»: клас + дата + версія. Актуальна версія — найбільша."""
+    """Пакет «Рюкзак»: клас + дата + версія. Актуальна версія — найбільша.
+
+    Версія незмінна: зміна вмісту дає нову версію, стара лишається доступною за id
+    (учень, що почав урок за старою версією, не втрачає її).
+    """
 
     __tablename__ = "knowledge_pack"
     __table_args__ = (
@@ -19,10 +23,13 @@ class KnowledgePack(Base):
     class_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("school_class.id", ondelete="CASCADE"))
     pack_date: Mapped[dt.date] = mapped_column(Date)
     version: Mapped[int] = mapped_column(Integer)
-    # sha256 вмісту; він же ETag.
+    # sha256 канонічного JSON вмісту (без id/версії/часу збірки); він же ETag.
     content_hash: Mapped[str]
+    # Розмір JSON пакета без стиснення (медіа — окремо, у knowledge_pack_media).
     size_bytes: Mapped[int] = mapped_column(BigInteger)
     built_at: Mapped[dt.datetime]
+    # Готова відповідь GET /packs/{id}: канонічний JSON, стиснутий gzip.
+    content_gzip: Mapped[bytes] = mapped_column(LargeBinary)
 
 
 class KnowledgePackLesson(Base):
