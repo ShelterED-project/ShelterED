@@ -35,15 +35,6 @@ Body = Callable[[SimpleNamespace], Any] | None
 
 # (метод, шаблон у OpenAPI, шлях, тіло, роль із доступом, роль без доступу або None)
 STUBS: list[tuple[str, str, Path, Body, str, str | None]] = [
-    (
-        "get",
-        "/packs/manifest",
-        lambda w: f"/packs/manifest?class_id={w.class_a.id}",
-        None,
-        "student_a",
-        "parent_a",
-    ),
-    ("get", "/packs/{pack_id}", lambda w: f"/packs/{ANY_ID}", None, "teacher_a", "parent_a"),
     ("post", "/sync/events", lambda w: "/sync/events", lambda w: sync_body(), "student_a", "admin"),
     ("get", "/sync/changes", lambda w: "/sync/changes?cursor=0", None, "student_a", "teacher_a"),
     (

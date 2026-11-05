@@ -270,3 +270,166 @@ async def test_schedule_change_enqueues_class_rebuild(
     resp = await client.delete(url, headers=auth_header(world.teacher_a))
     assert resp.status_code == 204
     assert tasks(enqueued, "packs.rebuild_class") == [[str(world.class_a.id)]]
+
+
+# ---------- маніфест ----------
+
+
+async def test_manifest(client: AsyncClient, db_session, world, course, media_storage) -> None:
+    built = await rebuild(db_session, world)
+    resp = await client.get(
+        f"/packs/manifest?class_id={world.class_a.id}", headers=auth_header(world.student_a)
+    )
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["date_from"] == course.day.isoformat()
+    assert data["date_to"] == (course.day + dt.timedelta(days=6)).isoformat()
+    by_date = {p["pack_date"]: p for p in data["packs"]}
+    for pack in built:
+        item = by_date[pack.pack_date.isoformat()]
+        assert item["id"] == str(pack.id) and item["version"] == pack.version
+        assert item["content_hash"] == pack.content_hash
+        assert item["size_bytes"] == pack.size_bytes
+    # Медіа сьогоднішнього уроку: відео й субтитри окремими URL.
+    media = {m["id"]: m for m in data["media"]}
+    assert set(media) == {str(course.video.id), str(course.vtt.id)}
+    video = media[str(course.video.id)]
+    assert video["url"] == f"/media/{course.video.storage_key}"
+    assert video["subtitles_id"] == str(course.vtt.id)
+    assert video["needed_on"] == course.day.isoformat() and video["size_bytes"] == 5000
+
+
+async def test_manifest_returns_latest_version(
+    client: AsyncClient, db_session, world, course, media_storage
+) -> None:
+    await rebuild(db_session, world)
+    course.lesson.version = 2
+    await db_session.flush()
+    (v2,) = await rebuild(db_session, world)
+    resp = await client.get(
+        f"/packs/manifest?class_id={world.class_a.id}&from={course.day}&to={course.day}",
+        headers=auth_header(world.teacher_a),
+    )
+    assert [p["id"] for p in resp.json()["packs"]] == [str(v2.id)]
+
+
+async def test_manifest_media_horizon(
+    client: AsyncClient, db_session, world, course, media_storage
+) -> None:
+    # Відео стоїть післязавтра: текст пакета вже в маніфесті, медіа — ще ні.
+    later = course.day + dt.timedelta(days=2)
+    await db_session.execute(
+        LessonAssignment.__table__.update()
+        .where(LessonAssignment.lesson_id == course.lesson.id)
+        .values(date=later)
+    )
+    slot = course.slots[0]
+    slot.weekday = later.isoweekday()
+    await db_session.flush()
+    await rebuild(db_session, world)
+    resp = await client.get(
+        f"/packs/manifest?class_id={world.class_a.id}", headers=auth_header(world.admin)
+    )
+    data = resp.json()
+    assert later.isoformat() in {p["pack_date"] for p in data["packs"]}
+    assert data["media"] == []
+
+
+@pytest.mark.parametrize(
+    "query",
+    ["from=2026-11-10&to=2026-11-09", "from=2026-11-01&to=2026-11-08"],
+)
+async def test_manifest_invalid_range(client: AsyncClient, world, query) -> None:
+    resp = await client.get(
+        f"/packs/manifest?class_id={world.class_a.id}&{query}",
+        headers=auth_header(world.teacher_a),
+    )
+    assert resp.status_code == 422
+    assert resp.json()["error"]["code"] == "VALIDATION_ERROR"
+
+
+@pytest.mark.parametrize(
+    ("role", "status"),
+    [
+        ("student_a", 200),
+        ("teacher_a", 200),
+        ("admin", 200),
+        ("student_b", 403),
+        ("teacher_b", 403),
+        ("other_admin", 403),
+        ("parent_a", 403),
+    ],
+)
+async def test_manifest_access(client: AsyncClient, world, media_storage, role, status) -> None:
+    resp = await client.get(
+        f"/packs/manifest?class_id={world.class_a.id}", headers=auth_header(getattr(world, role))
+    )
+    assert resp.status_code == status
+
+
+# ---------- завантаження пакета ----------
+
+
+async def test_get_pack_etag_and_gzip(client: AsyncClient, db_session, world, course) -> None:
+    pack = next(p for p in await rebuild(db_session, world) if p.pack_date == course.day)
+    headers = auth_header(world.student_a)
+    resp = await client.get(f"/packs/{pack.id}", headers=headers)
+    assert resp.status_code == 200
+    # httpx сам розпаковує gzip: тіло — JSON пакета.
+    assert resp.headers["content-encoding"] == "gzip"
+    assert resp.headers["etag"] == f'"{pack.content_hash}"'
+    assert "Accept-Encoding" in resp.headers["vary"]
+    body = resp.json()
+    assert body["id"] == str(pack.id) and body["version"] == 1
+    assert body["lessons"][0]["id"] == str(course.lesson.id)
+
+    plain = await client.get(
+        f"/packs/{pack.id}", headers={**headers, "Accept-Encoding": "identity"}
+    )
+    assert "content-encoding" not in plain.headers and plain.json() == body
+
+    cached = await client.get(
+        f"/packs/{pack.id}", headers={**headers, "If-None-Match": resp.headers["etag"]}
+    )
+    assert cached.status_code == 304 and cached.content == b""
+    assert cached.headers["etag"] == resp.headers["etag"]
+
+    stale = await client.get(f"/packs/{pack.id}", headers={**headers, "If-None-Match": '"x"'})
+    assert stale.status_code == 200
+
+
+async def test_old_pack_version_still_downloadable(
+    client: AsyncClient, db_session, world, course
+) -> None:
+    v1 = next(p for p in await rebuild(db_session, world) if p.pack_date == course.day)
+    course.lesson.version = 2
+    await db_session.flush()
+    await rebuild(db_session, world)
+    resp = await client.get(f"/packs/{v1.id}", headers=auth_header(world.student_a))
+    assert resp.status_code == 200 and resp.json()["version"] == 1
+
+
+@pytest.mark.parametrize(
+    ("role", "status"),
+    [
+        ("student_a", 200),
+        ("teacher_a", 200),
+        ("admin", 200),
+        ("student_b", 403),
+        ("teacher_b", 403),
+        ("other_admin", 403),
+        ("parent_a", 403),
+    ],
+)
+async def test_get_pack_access(
+    client: AsyncClient, db_session, world, course, role, status
+) -> None:
+    pack = (await rebuild(db_session, world))[0]
+    resp = await client.get(f"/packs/{pack.id}", headers=auth_header(getattr(world, role)))
+    assert resp.status_code == status
+
+
+async def test_get_pack_not_found(client: AsyncClient, world) -> None:
+    resp = await client.get(f"/packs/{uuid.uuid4()}", headers=auth_header(world.teacher_a))
+    assert resp.status_code == 404
+    assert resp.json()["error"]["code"] == "NOT_FOUND"

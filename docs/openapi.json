@@ -9924,7 +9924,7 @@
     },
     "/packs/manifest": {
       "get": {
-        "description": "Актуальні пакети класу на дні `from`..`to` (до 7 днів): версії, хеші, розміри.\nМедіа — окремим списком з горизонтом «сьогодні + завтра». Учень — свого класу,\nвчитель — своїх класів, адмін — класів школи. `class_id` — query-параметр.",
+        "description": "Актуальні (найновіші) версії пакетів класу на дні `from`..`to` (до 7 днів): версії,\nхеші, розміри. Дні без уроків у розкладі пакета не мають. Медіа — окремим списком з\nгоризонтом «сьогодні + завтра» (за часом школи) у межах діапазону. Учень — свого класу,\nвчитель — своїх класів, адмін — класів школи; батьки — ні. `class_id` — query-параметр.",
         "operationId": "pack_manifest_packs_manifest_get",
         "parameters": [
           {
@@ -10052,7 +10052,7 @@
                 }
               }
             },
-            "description": "Unprocessable Content"
+            "description": "Діапазон: `to` < `from` або > 7 днів"
           },
           "500": {
             "content": {
@@ -10063,16 +10063,6 @@
               }
             },
             "description": "Internal Server Error"
-          },
-          "501": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "NOT_IMPLEMENTED: заглушка контракту"
           }
         },
         "security": [
@@ -10088,7 +10078,7 @@
     },
     "/packs/{pack_id}": {
       "get": {
-        "description": "Вміст пакета з `ETag`, стиснутий gzip/brotli. Медіа — за URL з маніфесту.\nДоступ — як до класу пакета.",
+        "description": "Вміст версії пакета з `ETag` (= `content_hash` у лапках), стиснутий gzip (brotli —\nні: окремої залежності не додаємо). Версія незмінна: стара версія лишається доступною за\nсвоїм id. Медіа — за URL з маніфесту. Доступ — як до класу пакета.",
         "operationId": "get_pack_packs__pack_id__get",
         "parameters": [
           {
@@ -10115,6 +10105,22 @@
                 }
               ],
               "title": "If-None-Match"
+            }
+          },
+          {
+            "in": "header",
+            "name": "accept-encoding",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Accept-Encoding"
             }
           }
         ],
@@ -10217,8 +10223,14 @@
             },
             "description": "Успішна відповідь",
             "headers": {
+              "Content-Encoding": {
+                "description": "`gzip`, якщо клієнт його приймає (`Accept-Encoding`)",
+                "schema": {
+                  "type": "string"
+                }
+              },
               "ETag": {
-                "description": "content_hash пакета",
+                "description": "`content_hash` пакета в лапках",
                 "schema": {
                   "type": "string"
                 }
@@ -10277,16 +10289,6 @@
               }
             },
             "description": "Internal Server Error"
-          },
-          "501": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "NOT_IMPLEMENTED: заглушка контракту"
           }
         },
         "security": [
