@@ -20,6 +20,7 @@ from app.models.rollcall import RollCallSession
 from app.models.school import LessonAssignment, ScheduleSlot, School
 from app.services import alerts as service
 from app.services.alert_provider import (
+    ActiveAlerts,
     AlertProvider,
     AlertProviderError,
     AlertsInUaProvider,
@@ -39,11 +40,12 @@ class FakeProvider(AlertProvider):
     def __init__(self, alerts: list[ProviderAlert] | None = None) -> None:
         self.alerts = alerts or []
         self.error: str | None = None
+        self.complete = True
 
-    async def active_alerts(self) -> list[ProviderAlert]:
+    async def active_alerts(self) -> ActiveAlerts:
         if self.error:
             raise AlertProviderError(self.error)
-        return list(self.alerts)
+        return ActiveAlerts(list(self.alerts), complete=self.complete)
 
 
 def now() -> dt.datetime:
@@ -171,6 +173,63 @@ async def test_alert_end_closes_rollcall_once(db_session, factory, world, enqueu
     assert len(pushes(enqueued, "all_clear")) == 1
 
 
+async def test_incomplete_response_does_not_end_alerts(
+    db_session, factory, world, enqueued
+) -> None:
+    await lesson_now(factory, world, world.class_a)
+    provider = FakeProvider([api_alert()])
+    await service.poll(db_session, provider)
+
+    # Запис тривоги не пройшов валідацію: її немає серед активних, але це не відбій.
+    provider.alerts, provider.complete = [], False
+    for _ in range(2):  # і повтор опитування теж
+        result = await service.poll(db_session, provider)
+        assert result["ended"] == 0
+    assert await count(db_session, AlertEvent, AlertEvent.ended_at.is_(None)) == 2
+    assert await count(db_session, RollCallSession, RollCallSession.closed_at.is_(None)) == 1
+    assert pushes(enqueued, "all_clear") == []
+
+    provider.complete = True  # повна відповідь без тривоги — відбій
+    assert (await service.poll(db_session, provider))["ended"] == 2
+    assert len(pushes(enqueued, "all_clear")) == 1
+
+
+async def test_rollcall_stays_open_while_another_alert_covers_class(
+    client: AsyncClient, db_session, factory, world, enqueued
+) -> None:
+    await lesson_now(factory, world, world.class_a)
+    provider = FakeProvider([api_alert()])
+    await service.poll(db_session, provider)
+    api_alert_id = await db_session.scalar(
+        select(AlertEvent.id).where(AlertEvent.school_id == world.school.id)
+    )
+    body = {"id": str(uuid.uuid4()), "class_id": str(world.class_a.id), "is_drill": False}
+    resp = await client.post("/alerts/manual", json=body, headers=auth_header(world.teacher_a))
+    assert resp.status_code == 201
+
+    # Тривога з API (до якої прив'язана сесія) закінчилась, ручна ще триває.
+    provider.alerts = []
+    await service.poll(db_session, provider)
+    session_row = await db_session.scalar(
+        select(RollCallSession).execution_options(populate_existing=True)
+    )
+    assert session_row.closed_at is None
+    assert session_row.alert_event_id == uuid.UUID(body["id"])
+    assert session_row.alert_event_id != api_alert_id
+    assert pushes(enqueued, "all_clear") == []
+    assert (await service.poll(db_session, provider))["ended"] == 0  # повтор нічого не міняє
+
+    # Відбій останньої тривоги закриває перекличку й шле один «відбій».
+    url = f"/alerts/{body['id']}/end"
+    assert (await client.post(url, headers=auth_header(world.teacher_a))).status_code == 200
+    assert (await client.post(url, headers=auth_header(world.teacher_a))).status_code == 200
+    await db_session.refresh(session_row)
+    assert session_row.closed_at is not None
+    assert pushes(enqueued, "all_clear") == [
+        {"type": "all_clear", "class_id": str(world.class_a.id), "alert_id": body["id"]}
+    ]
+
+
 async def test_provider_failure_keeps_alerts_and_marks_source(
     db_session, world, app, enabled_settings
 ) -> None:
@@ -230,11 +289,39 @@ def test_parse_alerts_in_ua_filters_and_validates() -> None:
             {"id": 1, "location_type": "oblast"},  # невалідний запис пропускається
         ]
     }
-    assert parse_alerts_in_ua(data) == [
-        ProviderAlert("8757", "31", dt.datetime(2026, 11, 5, 9, 30, tzinfo=dt.UTC))
-    ]
+    assert parse_alerts_in_ua(data) == ActiveAlerts(
+        [ProviderAlert("8757", "31", dt.datetime(2026, 11, 5, 9, 30, tzinfo=dt.UTC))],
+        complete=False,
+    )
     with pytest.raises(AlertProviderError):
         parse_alerts_in_ua({"unexpected": True})
+
+
+def test_parse_alerts_in_ua_accepts_region_cities_only() -> None:
+    def record(id_: int, location_type: str, uid: str) -> dict:
+        return {
+            "id": id_,
+            "location_type": location_type,
+            "location_uid": uid,
+            "started_at": "2026-11-05T09:30:00Z",
+        }
+
+    data = {
+        "alerts": [
+            record(1, "city", "31"),  # м. Київ — окремий регіон
+            record(2, "city", "30"),  # м. Севастополь — окремий регіон
+            record(3, "city", "1293"),  # звичайне місто — частина області
+            record(4, "hromada", "1500"),
+            record(5, "oblast", "14"),
+        ]
+    }
+    result = parse_alerts_in_ua(data)
+    assert result.complete is True
+    assert [(a.external_id, a.region_code) for a in result.alerts] == [
+        ("1", "31"),
+        ("2", "30"),
+        ("5", "14"),
+    ]
 
 
 async def test_alerts_in_ua_provider_http(enabled_settings) -> None:
@@ -245,7 +332,7 @@ async def test_alerts_in_ua_provider_http(enabled_settings) -> None:
         return httpx.Response(200, json={"alerts": []})
 
     provider = AlertsInUaProvider(enabled_settings, transport=httpx.MockTransport(handler))
-    assert await provider.active_alerts() == []
+    assert await provider.active_alerts() == ActiveAlerts([])
     assert seen[0].headers["Authorization"] == "Bearer t0ken"
     assert str(seen[0].url) == enabled_settings.alerts_api_url
 

@@ -28,6 +28,15 @@ class ProviderAlert:
     started_at: dt.datetime
 
 
+@dataclass(frozen=True)
+class ActiveAlerts:
+    """Відповідь провайдера. `complete = False` — частину записів не вдалося розібрати:
+    відсутність тривоги у списку тоді не означає відбою."""
+
+    alerts: list[ProviderAlert]
+    complete: bool = True
+
+
 class AlertProviderError(Exception):
     """Провайдер недоступний або змінив формат. `reason` — безпечний для логів код
     (без URL і тексту відповіді: там може бути токен)."""
@@ -41,7 +50,7 @@ class AlertProvider(ABC):
     name: str
 
     @abstractmethod
-    async def active_alerts(self) -> list[ProviderAlert]:
+    async def active_alerts(self) -> ActiveAlerts:
         """Усі активні тривоги рівня області. Помилка → AlertProviderError."""
 
 
@@ -57,11 +66,22 @@ class _InUaAlert(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
 
-def parse_alerts_in_ua(data: Any) -> list[ProviderAlert]:
-    """Розбір `GET /v1/alerts/active.json`. Беремо тривоги рівня області (`location_type ==
-    "oblast"`) будь-якого типу (`air_raid`, `artillery_shelling`, ...): школа прив'язана до
-    області. Тривоги районів і громад не вмикають тривогу для всієї області. Невалідні
-    записи пропускаються (лічильник у лог), невалідна відповідь цілком — помилка."""
+# Міста зі спеціальним статусом — окремі регіони alerts.in.ua (`location_type == "city"`):
+# 30 — м. Севастополь, 31 — м. Київ. Інші міста — частини областей.
+REGION_CITY_UIDS = frozenset({"30", "31"})
+
+
+def _is_region(location_type: str, uid: str) -> bool:
+    return location_type == "oblast" or (location_type == "city" and uid in REGION_CITY_UIDS)
+
+
+def parse_alerts_in_ua(data: Any) -> ActiveAlerts:
+    """Розбір `GET /v1/alerts/active.json`. Беремо тривоги рівня регіону (`location_type ==
+    "oblast"` або місто зі спеціальним статусом, `REGION_CITY_UIDS`) будь-якого типу
+    (`air_raid`, `artillery_shelling`, ...): школа прив'язана до регіону. Тривоги районів,
+    громад і звичайних міст не вмикають тривогу для всього регіону. Невалідні записи
+    пропускаються (лічильник у лог) і роблять відповідь неповною (`complete = False`),
+    невалідна відповідь цілком — помилка."""
     if not isinstance(data, dict) or not isinstance(data.get("alerts"), list):
         raise AlertProviderError("invalid_response")
     result: list[ProviderAlert] = []
@@ -72,18 +92,19 @@ def parse_alerts_in_ua(data: Any) -> list[ProviderAlert]:
         except ValidationError:
             skipped += 1
             continue
-        if item.location_type != "oblast" or item.finished_at is not None:
+        uid = str(item.location_uid)
+        if not _is_region(item.location_type, uid) or item.finished_at is not None:
             continue
         result.append(
             ProviderAlert(
                 external_id=str(item.id),
-                region_code=str(item.location_uid),
+                region_code=uid,
                 started_at=item.started_at.astimezone(dt.UTC),
             )
         )
     if skipped:
         logger.warning("alerts.in.ua: skipped %d invalid alert records", skipped)
-    return result
+    return ActiveAlerts(result, complete=skipped == 0)
 
 
 class AlertsInUaProvider(AlertProvider):
@@ -100,7 +121,7 @@ class AlertsInUaProvider(AlertProvider):
         self._timeout = settings.alerts_http_timeout_s
         self._transport = transport
 
-    async def active_alerts(self) -> list[ProviderAlert]:
+    async def active_alerts(self) -> ActiveAlerts:
         headers = {"Authorization": f"Bearer {self._token.get_secret_value()}"}
         try:
             async with httpx.AsyncClient(

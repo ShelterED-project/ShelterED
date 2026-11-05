@@ -2,7 +2,8 @@
 
 Реакція на початок тривоги: класи, у яких зараз урок → сесія переклички (B12, лише рядок) +
 push «тривога, відкрий урок» з id уроку (B8, лише постановка в чергу). Відбій закриває
-сесії переклички цієї тривоги й ставить push «відбій».
+сесії переклички цієї тривоги й ставить push «відбій», якщо клас не покриває інша активна
+тривога (тоді сесія переходить до неї й лишається відкритою).
 
 Усі кроки ідемпотентні: повтор опитування, паралельні опитування й повтор ручної тривоги
 не створюють дублів (унікальні індекси + ON CONFLICT DO NOTHING, UPDATE ... WHERE ended_at
@@ -89,19 +90,58 @@ async def open_rollcall(
     return await session.scalar(stmt) is not None
 
 
+async def _covering_alert(
+    session: AsyncSession, class_id: uuid.UUID, school_id: uuid.UUID
+) -> AlertEvent | None:
+    """Найраніша активна тривога, що покриває клас: ручна цього класу або з API його школи."""
+    return await session.scalar(
+        select(AlertEvent)
+        .where(
+            AlertEvent.ended_at.is_(None),
+            or_(
+                AlertEvent.class_id == class_id,
+                and_(AlertEvent.class_id.is_(None), AlertEvent.school_id == school_id),
+            ),
+        )
+        .order_by(AlertEvent.started_at, AlertEvent.id)
+        .limit(1)
+    )
+
+
 async def _close_rollcalls(
     session: AsyncSession, alert_ids: list[uuid.UUID], at: dt.datetime
 ) -> list[tuple[uuid.UUID, uuid.UUID]]:
-    """Закриває відкриті сесії переклички тривог; повертає (class_id, alert_id) закритих."""
+    """Відкриті сесії переклички завершених тривог: якщо клас покриває інша активна тривога —
+    сесія переходить до неї (лишається відкритою, push «відбій» немає); інакше закривається.
+    Повертає (class_id, alert_id) закритих. Викликати після запису `ended_at`."""
     if not alert_ids:
         return []
     rows = await session.execute(
-        update(RollCallSession)
+        select(RollCallSession.id, RollCallSession.class_id, SchoolClass.school_id)
+        .join(SchoolClass, SchoolClass.id == RollCallSession.class_id)
         .where(RollCallSession.alert_event_id.in_(alert_ids), RollCallSession.closed_at.is_(None))
-        .values(closed_at=at)
-        .returning(RollCallSession.class_id, RollCallSession.alert_event_id)
+        .order_by(RollCallSession.id)
+        .with_for_update(of=RollCallSession)
     )
-    return [(r.class_id, r.alert_event_id) for r in rows]
+    closed: list[tuple[uuid.UUID, uuid.UUID]] = []
+    for session_id, class_id, school_id in rows.all():
+        other = await _covering_alert(session, class_id, school_id)
+        if other is not None:
+            await session.execute(
+                update(RollCallSession)
+                .where(RollCallSession.id == session_id)
+                .values(alert_event_id=other.id, is_drill=other.is_drill)
+            )
+            continue
+        alert_id = await session.scalar(
+            update(RollCallSession)
+            .where(RollCallSession.id == session_id)
+            .values(closed_at=at)
+            .returning(RollCallSession.alert_event_id)
+        )
+        assert alert_id is not None
+        closed.append((class_id, alert_id))
+    return closed
 
 
 async def react_school_alert(
@@ -158,16 +198,18 @@ async def poll(
     session: AsyncSession, provider: AlertProvider, now: dt.datetime | None = None
 ) -> dict[str, int | str]:
     """Один цикл опитування. Стан-орієнтований: тривога, якої немає серед активних, —
-    відбій. Ідемпотентний: повторний запуск з тими самими даними нічого не змінює."""
+    відбій (лише якщо відповідь повна: усі записи розібрано). Ідемпотентний: повторний
+    запуск з тими самими даними нічого не змінює."""
     now = now or _now()
     try:
-        active = await provider.active_alerts()
+        response = await provider.active_alerts()
     except AlertProviderError as exc:
         logger.warning("Alert provider %s failed: %s", provider.name, exc.reason)
         await _record_attempt(session, provider.name, now, exc.reason)
         await session.commit()
         return {"error": exc.reason}
 
+    active = response.alerts
     pushes = Pushes()
     started = reopened = 0
     regions = {a.region_code for a in active}
@@ -220,14 +262,19 @@ async def poll(
             assert alert is not None
             await react_school_alert(session, alert, now, pushes)
 
-    active_keys = {(a.region_code, a.external_id) for a in active}
-    open_rows = await session.execute(
-        select(AlertEvent.id, AlertEvent.region_code, AlertEvent.external_id).where(
-            AlertEvent.source == "api", AlertEvent.ended_at.is_(None)
+    ended: list[uuid.UUID] = []
+    if response.complete:
+        active_keys = {(a.region_code, a.external_id) for a in active}
+        open_rows = await session.execute(
+            select(AlertEvent.id, AlertEvent.region_code, AlertEvent.external_id).where(
+                AlertEvent.source == "api", AlertEvent.ended_at.is_(None)
+            )
         )
-    )
-    to_end = [r.id for r in open_rows if (r.region_code, r.external_id) not in active_keys]
-    ended = await _end_alerts(session, to_end, now, pushes)
+        to_end = [r.id for r in open_rows if (r.region_code, r.external_id) not in active_keys]
+        ended = await _end_alerts(session, to_end, now, pushes)
+    else:
+        # Невалідний запис міг бути активною тривогою: його відсутність — не відбій.
+        logger.warning("Alert provider %s: incomplete response, ending skipped", provider.name)
 
     await _record_attempt(session, provider.name, now, None)
     await session.commit()
