@@ -173,7 +173,8 @@ def upgrade() -> None:
         "module_progress", sa.Column("full_at", postgresql.TIMESTAMP(timezone=True), nullable=True)
     )
     # ### end Alembic commands ###
-    # MATERIALIZED: приведення типів лише над прийнятими (валідними) payload.
+    # MATERIALIZED: приведення типів лише над прийнятими (валідними) payload. ::numeric, а не
+    # ::int: старі події зберігали сирий payload, де ціле могло прийти як 100.0.
     op.execute(
         """
         WITH ev AS MATERIALIZED (
@@ -181,7 +182,7 @@ def upgrade() -> None:
             WHERE type = 'module_progress' AND status = 'accepted'
         ), full_events AS (
             SELECT user_id, (payload->>'module_id')::uuid AS module_id, min(occurred_at) AS at
-            FROM ev WHERE (payload->>'progress_pct')::int = 100
+            FROM ev WHERE (payload->>'progress_pct')::numeric = 100
             GROUP BY 1, 2
         )
         UPDATE module_progress mp SET full_at = f.at
