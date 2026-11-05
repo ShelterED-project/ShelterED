@@ -157,3 +157,56 @@ async def test_practice_test_has_no_window(client, db_session, world, c) -> None
         ),
     )
     assert await attempts(db_session, world.student_a, c) == [("credited", 100.0)]
+
+
+@pytest.fixture
+def worker_session(db_session, monkeypatch):
+    """Задача Celery бачить тестову транзакцію замість власної сесії."""
+    from contextlib import asynccontextmanager
+
+    from app.workers import sync as sync_worker
+
+    @asynccontextmanager
+    async def session():
+        yield db_session
+
+    monkeypatch.setattr(sync_worker, "standalone_session", session)
+
+
+async def test_teacher_edits_regrade_and_recredit_existing_attempts(
+    client, db_session, world, c, enqueued, worker_session
+) -> None:
+    """Вчитель (unpublish -> правка) міняє ключ питання й вікно тесту після спроб: задача
+    переоцінює спроби й перераховує зарахування, а не чекає наступної події учня."""
+    from app.workers import sync as sync_worker
+
+    done = now() - dt.timedelta(days=3)
+    half_right = {c.q1.id: ["a"], c.q2.id: ["a"]}  # q1 (1 бал) так, q2 (3 бали) ні
+    body = batch(
+        progress(c.module.id, 100, done),
+        attempt(c.test.id, half_right, done + dt.timedelta(hours=30)),
+    )
+    await send(client, world.student_a, body)
+    assert await attempts(db_session, world.student_a, c) == [("credited", 25.0)]
+
+    c.lesson.status = "draft"
+    await db_session.flush()
+    h = auth_header(world.teacher_a)
+    r = await client.patch(f"/questions/{c.q2.id}", json={"answer_key": ["a"]}, headers=h)
+    assert r.status_code == 200, r.text
+    r = await client.patch(f"/tests/{c.test.id}", json={"window_hours": 24}, headers=h)
+    assert r.status_code == 200, r.text
+    r = await client.patch(f"/tests/{c.test.id}", json={"title": "Новий"}, headers=h)
+    assert r.status_code == 200, r.text
+    tasks = [e for e in enqueued if e.name == "sync.regrade_test"]
+    assert [(t.args, t.queue) for t in tasks] == [([str(c.test.id)], "sync")] * 2
+
+    enqueued.clear()
+    assert await sync_worker._regrade_test(c.test.id) == 1
+    assert await attempts(db_session, world.student_a, c) == [("not_credited_late", 100.0)]
+    assert [e.args for e in enqueued if e.name == "stats.recompute_student"] == [
+        [str(world.student_a.id)]
+    ]
+    # Повтор задачі нічого не змінює.
+    await sync_worker._regrade_test(c.test.id)
+    assert await attempts(db_session, world.student_a, c) == [("not_credited_late", 100.0)]

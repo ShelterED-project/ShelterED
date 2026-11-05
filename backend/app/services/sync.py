@@ -306,6 +306,40 @@ async def _recredit(session: AsyncSession, student_id: uuid.UUID, test: Test) ->
         )
 
 
+async def regrade_test(session: AsyncSession, test_id: uuid.UUID) -> list[uuid.UUID]:
+    """Вчитель змінив вікно тесту, ключ чи бали питань: переоцінити всі спроби тесту й
+    перерахувати їхнє зарахування (`_recredit`). Ідемпотентно (лише змінені рядки оновлюються
+    й потрапляють у стрічку змін); commit на кожного учня. Повертає учнів зі спробами."""
+    test = await session.get(Test, test_id)
+    if test is None:
+        return []
+    students = list(
+        await session.scalars(
+            select(Attempt.student_id)
+            .where(Attempt.test_id == test_id)
+            .distinct()
+            .order_by(Attempt.student_id)
+        )
+    )
+    for student_id in students:
+        await _lock_attempts(session, student_id, test_id)
+        rows = await session.execute(
+            select(Attempt.id, Attempt.answers, Attempt.score).where(
+                Attempt.student_id == student_id, Attempt.test_id == test_id
+            )
+        )
+        for attempt_id, answers, score in rows.all():
+            parsed = {uuid.UUID(k): v for k, v in (answers or {}).items()}
+            new_score = await grade(session, test_id, parsed)
+            if new_score != score:
+                await session.execute(
+                    update(Attempt).where(Attempt.id == attempt_id).values(score=new_score)
+                )
+        await _recredit(session, student_id, test)
+        await session.commit()
+    return students
+
+
 async def _recredit_window_tests(
     session: AsyncSession, student_id: uuid.UUID, module_id: uuid.UUID
 ) -> None:

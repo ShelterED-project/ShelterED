@@ -23,6 +23,7 @@ celery_app = Celery(
         "app.workers.alerts",
         "app.workers.packs",
         "app.workers.stats",
+        "app.workers.sync",
     ],
 )
 

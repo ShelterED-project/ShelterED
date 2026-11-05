@@ -12258,6 +12258,7 @@
         ]
       },
       "patch": {
+        "description": "Зміна ключа, балів, варіантів чи типу переоцінює наявні спроби тесту (Celery, черга\n`sync`): оцінка й зарахування оновлюються в `GET /sync/changes` і кабінетах.",
         "operationId": "update_question_questions__question_id__patch",
         "parameters": [
           {
@@ -13270,6 +13271,7 @@
         ]
       },
       "patch": {
+        "description": "Зміна вікна (`window_enabled`, `window_hours`) після спроб учнів перераховує їхнє\nзарахування (Celery, черга `sync`); результат учні бачать у `GET /sync/changes`.",
         "operationId": "update_test_tests__test_id__patch",
         "parameters": [
           {
@@ -13378,6 +13380,7 @@
     },
     "/tests/{test_id}/questions": {
       "post": {
+        "description": "Нове питання змінює максимум балів: наявні спроби переоцінюються (Celery).",
         "operationId": "create_question_tests__test_id__questions_post",
         "parameters": [
           {

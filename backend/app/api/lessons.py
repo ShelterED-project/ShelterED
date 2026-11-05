@@ -46,6 +46,11 @@ from app.schemas.lessons import (
 )
 from app.services import lessons as service
 from app.workers.packs import enqueue_rebuild_for_lesson
+from app.workers.sync import enqueue_regrade_test
+
+# Поля, від яких залежать оцінка й зарахування наявних спроб тесту.
+_GRADING_TEST_FIELDS = {"window_enabled", "window_hours"}
+_GRADING_QUESTION_FIELDS = {"answer_key", "points", "options", "kind"}
 
 router = APIRouter(tags=["lessons"])
 
@@ -295,7 +300,12 @@ async def create_test(
 
 @router.patch("/tests/{test_id}", response_model=TestOut, responses=WRITE)
 async def update_test(body: TestUpdate, test: EditableTest, session: Session) -> TestOut:
-    return TestOut.model_validate(await service.update_test(session, test, body))
+    """Зміна вікна (`window_enabled`, `window_hours`) після спроб учнів перераховує їхнє
+    зарахування (Celery, черга `sync`); результат учні бачать у `GET /sync/changes`."""
+    test = await service.update_test(session, test, body)
+    if body.model_fields_set & _GRADING_TEST_FIELDS:
+        await enqueue_regrade_test(test.id)
+    return TestOut.model_validate(test)
 
 
 @router.delete("/tests/{test_id}", status_code=status.HTTP_204_NO_CONTENT, responses=WRITE)
@@ -313,8 +323,11 @@ async def delete_test(test: EditableTest, session: Session) -> Response:
 async def create_question(
     body: QuestionCreate, test: EditableTest, session: Session, response: Response
 ) -> QuestionOut:
+    """Нове питання змінює максимум балів: наявні спроби переоцінюються (Celery)."""
     question, created = await service.create_question(session, test, body)
     _created(response, created)
+    if created:
+        await enqueue_regrade_test(test.id)
     return QuestionOut.model_validate(question)
 
 
@@ -322,10 +335,17 @@ async def create_question(
 async def update_question(
     body: QuestionUpdate, question: EditableQuestion, session: Session
 ) -> QuestionOut:
-    return QuestionOut.model_validate(await service.update_question(session, question, body))
+    """Зміна ключа, балів, варіантів чи типу переоцінює наявні спроби тесту (Celery, черга
+    `sync`): оцінка й зарахування оновлюються в `GET /sync/changes` і кабінетах."""
+    question = await service.update_question(session, question, body)
+    if body.model_fields_set & _GRADING_QUESTION_FIELDS:
+        await enqueue_regrade_test(question.test_id)
+    return QuestionOut.model_validate(question)
 
 
 @router.delete("/questions/{question_id}", status_code=status.HTTP_204_NO_CONTENT, responses=WRITE)
 async def delete_question(question: EditableQuestion, session: Session) -> Response:
+    test_id = question.test_id
     await service.delete_child(session, question)
+    await enqueue_regrade_test(test_id)
     return _no_content()

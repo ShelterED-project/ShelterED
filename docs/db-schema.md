@@ -545,7 +545,7 @@ UNIQUE (`lesson_id`, `part`, `position`).
 - **Підозрілий час** (B9.4) -- лише `attempt.is_suspicious`, позначка для вчителя в `GET /classes/{id}/tests`; зарахування не блокується.
 - **Оцінювання** -- на сервері за `answer_key` (у пакеті тесту з вікном ключа немає).
 - **Статус для вчителя** (`GET /classes/{id}/tests`): `passed` / `not_passed` / `closing_soon` (до дедлайну < 6 год і спроби немає) / `pending`. Дедлайн для кабінету -- з агрегатів (`student_lesson_stat.completed_at` + `window_hours`).
-- Зміна `window_hours` після спроб (unpublish → правка → publish) не перераховує статуси наявних спроб одразу -- лише з наступною подією учня з цього уроку.
+- Зміна вікна тесту (`window_enabled`, `window_hours`), ключа, балів, варіантів чи типу питання, додавання чи видалення питання після спроб (unpublish → правка → publish) ставить після commit задачу `sync.regrade_test` (черга `sync`): переоцінка всіх спроб тесту за поточним ключем і `_recredit` кожного учня під тим самим advisory lock, потім `stats.recompute_student` для цих учнів. Ідемпотентно; змінені спроби з'являються в `GET /sync/changes`.
 
 ## Рішення B15.3 «Rate limiting входу» (05.11.2026)
 
