@@ -21,6 +21,7 @@
 
 import datetime as dt
 import logging
+import re
 import uuid
 from dataclasses import dataclass
 from decimal import Decimal
@@ -634,14 +635,22 @@ def _bad_cursor() -> AppError:
     return AppError("INVALID_CURSOR", "Invalid sync cursor", status_code=422)
 
 
+# Лише ASCII-цифри (`str.isdigit()` пропускає '²' тощо) і в межах bigint.
+_CURSOR_RE = re.compile(r"^([0-9]{1,19})\.([0-9]{1,19})$")
+_BIGINT_MAX = 2**63 - 1
+
+
 def parse_cursor(cursor: str | None) -> tuple[int, int]:
     """Курсор `"<xid>.<seq>"` (для клієнта непрозорий). Без курсора — з початку."""
     if not cursor:
         return (0, 0)
-    xid, sep, seq = cursor.partition(".")
-    if not sep or not xid.isdigit() or not seq.isdigit():
+    match = _CURSOR_RE.fullmatch(cursor)
+    if match is None:
         raise _bad_cursor()
-    return (int(xid), int(seq))
+    xid, seq = int(match[1]), int(match[2])
+    if xid > _BIGINT_MAX or seq > _BIGINT_MAX:
+        raise _bad_cursor()
+    return (xid, seq)
 
 
 async def changes(

@@ -766,6 +766,14 @@ async def _event_row(cm, student) -> uuid.UUID:
 
 
 async def test_invalid_cursor_is_422(client, world) -> None:
-    for bad in ("abc", "12", "1.x", "-1.2"):
-        r = await client.get(f"/sync/changes?cursor={bad}", headers=auth_header(world.student_a))
-        assert r.status_code == 422 and r.json()["error"]["code"] == "INVALID_CURSOR"
+    """Лише ASCII-цифри в межах bigint: '²' чи арабські цифри проходять `str.isdigit()`, а
+    завеликі числа ламали запит до БД — обидва давали 500."""
+    headers = auth_header(world.student_a)
+    huge = str(2**63)
+    bad_cursors = ["abc", "12", "1.x", "-1.2", "1.2.3", " 1.2", "1.2\n"]
+    bad_cursors += ["².1", "1.²", "١.1", f"{huge}.1", f"1.{huge}", "1" * 20 + ".1"]
+    for bad in bad_cursors:
+        r = await client.get("/sync/changes", params={"cursor": bad}, headers=headers)
+        assert r.status_code == 422 and r.json()["error"]["code"] == "INVALID_CURSOR", bad
+    r = await client.get("/sync/changes", params={"cursor": f"{2**63 - 1}.0"}, headers=headers)
+    assert r.status_code == 200 and r.json()["changes"] == []
