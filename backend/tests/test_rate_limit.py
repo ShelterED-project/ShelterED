@@ -217,3 +217,30 @@ async def test_client_ip_comes_from_trusted_proxy_header(app: FastAPI, world) ->
         assert r.status_code == 429
         r = await nginx.post("/auth/student/join", json=join(world.class_a), headers=owner)
         assert r.status_code == 200
+
+
+async def test_redis_limiter_never_leaves_a_key_without_ttl() -> None:
+    """Ключ без TTL (старий неатомарний SET NX + INCR) не блокує назавжди: `hit` ставить
+    вікно атомарно, а `retry_after` не обмежує за ключем без строку й повертає йому вікно."""
+    settings = get_settings()
+    limiter = RedisRateLimiter(settings.rate_limit_redis_url)
+    try:
+        await limiter.redis.ping()
+    except Exception:
+        await limiter.close()
+        pytest.skip("Redis is not available")
+    stuck = rule("test", uuid.uuid4().hex, 3, 30)
+    fresh = rule("test", uuid.uuid4().hex, 3, 30)
+    try:
+        await limiter.redis.set(stuck.key, 99)  # без EX: TTL -1
+        assert await limiter.retry_after([stuck]) is None
+        assert 0 < await limiter.redis.ttl(stuck.key) <= 30
+        await limiter.redis.set(stuck.key, 1)
+        await limiter.hit([stuck, fresh])
+        assert int(await limiter.redis.get(stuck.key)) == 2
+        assert int(await limiter.redis.get(fresh.key)) == 1
+        assert 0 < await limiter.redis.ttl(stuck.key) <= 30
+        assert 0 < await limiter.redis.ttl(fresh.key) <= 30
+    finally:
+        await limiter.redis.delete(stuck.key, fresh.key)
+        await limiter.close()
