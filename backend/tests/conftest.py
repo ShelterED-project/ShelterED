@@ -29,6 +29,8 @@ os.environ["RATE_LIMIT_JOIN_ACCOUNT"] = "10"
 os.environ["RATE_LIMIT_JOIN_IP"] = "300"
 os.environ["RATE_LIMIT_LOGIN_ACCOUNT"] = "10"
 os.environ["RATE_LIMIT_LOGIN_IP"] = "300"
+os.environ["RATE_LIMIT_JOIN_ACCOUNT_ALL_IPS"] = "100"
+os.environ["RATE_LIMIT_LOGIN_ACCOUNT_ALL_IPS"] = "100"
 os.environ["RATE_LIMIT_WINDOW_S"] = "900"
 
 import uuid  # noqa: E402

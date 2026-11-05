@@ -244,3 +244,34 @@ async def test_redis_limiter_never_leaves_a_key_without_ttl() -> None:
     finally:
         await limiter.redis.delete(stuck.key, fresh.key)
         await limiter.close()
+
+
+async def test_account_wide_limit_stops_guessing_with_rotating_ips(app: FastAPI, world) -> None:
+    """Перебір PIN зі зміною IP (по 9 спроб з адреси, нижче ліміту пари IP + акаунт) упирається
+    в загальний ліміт акаунта; інший учень класу входить, акаунт не блокується назавжди."""
+    limit = get_settings().rate_limit_join_account_all_ips
+    assert limit >= 100  # однокласник руками стільки не набере
+    per_ip = ACCOUNT_LIMIT - 1
+    for n in range(0, limit, per_ip):
+        async with from_ip(app, f"10.1.{n // 250}.{n % 250 + 1}") as bot:
+            for _ in range(min(per_ip, limit - n)):
+                r = await bot.post("/auth/student/join", json=join(world.class_a, pin="9999"))
+                assert r.status_code == 401
+    async with from_ip(app, "10.9.9.9") as owner:
+        r = await owner.post("/auth/student/join", json=join(world.class_a))
+        assert r.status_code == 429
+        r = await owner.post("/auth/student/join", json=join(world.class_a, "Нова", "Учениця"))
+        assert r.status_code == 200
+
+
+async def test_account_wide_limit_for_adult_logins(app: FastAPI, world) -> None:
+    email = world.teacher_a.email
+    limit = get_settings().rate_limit_login_account_all_ips
+    for n in range(0, limit, ACCOUNT_LIMIT - 1):
+        async with from_ip(app, f"10.2.0.{n + 1}") as bot:
+            for _ in range(min(ACCOUNT_LIMIT - 1, limit - n)):
+                r = await bot.post("/auth/authorize", json=authorize(email, "wrong-password-123"))
+                assert r.status_code == 401
+    async with from_ip(app, "10.9.9.9") as owner:
+        r = await owner.post("/auth/authorize", json=authorize(email, PASSWORD))
+        assert r.status_code == 429

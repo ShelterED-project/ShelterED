@@ -98,6 +98,10 @@ class Settings(BaseSettings):
     # Вхід дорослих (POST /auth/authorize): IP + email і окремо IP.
     rate_limit_login_account: int = 10
     rate_limit_login_ip: int = 300
+    # Загальний ліміт на акаунт (з усіх IP разом) проти перебору зі зміною IP. Високий: однокласник
+    # руками стільки не набере; тимчасове обмеження на вікно, а не блокування акаунта.
+    rate_limit_join_account_all_ips: int = 100
+    rate_limit_login_account_all_ips: int = 100
     rate_limit_window_s: int = 900
 
     @property
