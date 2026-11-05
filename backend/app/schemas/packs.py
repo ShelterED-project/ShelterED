@@ -89,7 +89,9 @@ class PackManifestOut(BaseModel):
 
 
 class PackQuestion(BaseModel):
-    """Питання тесту в пакеті. Ключа відповідей немає (відкрите питання B11.4)."""
+    """Питання тесту в пакеті. `answer_key` (id правильних варіантів) є лише в тренувальному
+    тесті (`window_enabled = false`) для миттєвої перевірки офлайн; в оцінюваному тесті з
+    вікном поля немає зовсім — оцінює сервер після синхронізації."""
 
     id: uuid.UUID
     position: int
@@ -97,13 +99,19 @@ class PackQuestion(BaseModel):
     prompt: str
     options: list[Option]
     points: int
+    answer_key: list[str] | None = Field(default=None, exclude_if=lambda v: v is None)
 
 
 class PackTest(BaseModel):
+    """Тест уроку. Тест із вікном (B11) пристрій закриває сам, без мережі: дедлайн =
+    `occurred_at` події, що довела останній модуль уроку до 100%, + `window_hours`."""
+
     id: uuid.UUID
     title: str
-    window_enabled: bool
-    window_hours: int | None
+    window_enabled: bool = Field(description="Оцінюваний тест із вікном (оцінює сервер)")
+    window_hours: int | None = Field(
+        description="Тривалість вікна (24/48/72 год) від завершення останнього модуля уроку"
+    )
     questions: list[PackQuestion]
 
 
@@ -217,7 +225,27 @@ class PackOut(BaseModel):
                                             "points": 1,
                                         }
                                     ],
-                                }
+                                },
+                                {
+                                    "id": "0192f0a0-0000-7000-8000-000000000332",
+                                    "title": "Тренування",
+                                    "window_enabled": False,
+                                    "window_hours": None,
+                                    "questions": [
+                                        {
+                                            "id": "0192f0a0-0000-7000-8000-000000000342",
+                                            "position": 1,
+                                            "kind": "single",
+                                            "prompt": "Що більше: 1/2 чи 1/3?",
+                                            "options": [
+                                                {"id": "a", "text": "1/2"},
+                                                {"id": "b", "text": "1/3"},
+                                            ],
+                                            "points": 1,
+                                            "answer_key": ["a"],
+                                        }
+                                    ],
+                                },
                             ],
                         }
                     ],

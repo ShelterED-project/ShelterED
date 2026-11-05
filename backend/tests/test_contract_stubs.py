@@ -35,40 +35,6 @@ Body = Callable[[SimpleNamespace], Any] | None
 
 # (метод, шаблон у OpenAPI, шлях, тіло, роль із доступом, роль без доступу або None)
 STUBS: list[tuple[str, str, Path, Body, str, str | None]] = [
-    ("post", "/sync/events", lambda w: "/sync/events", lambda w: sync_body(), "student_a", "admin"),
-    ("get", "/sync/changes", lambda w: "/sync/changes?cursor=0", None, "student_a", "teacher_a"),
-    (
-        "get",
-        "/classes/{class_id}/rollcall/current",
-        lambda w: f"/classes/{w.class_a.id}/rollcall/current",
-        None,
-        "teacher_a",
-        "teacher_b",
-    ),
-    (
-        "post",
-        "/classes/{class_id}/rollcall",
-        lambda w: f"/classes/{w.class_a.id}/rollcall",
-        lambda w: {"id": str(uuid.uuid4())},
-        "teacher_a",
-        "student_a",
-    ),
-    (
-        "post",
-        "/classes/{class_id}/rollcall/{session_id}/close",
-        lambda w: f"/classes/{w.class_a.id}/rollcall/{ANY_ID}/close",
-        None,
-        "teacher_a",
-        "admin",
-    ),
-    (
-        "get",
-        "/students/{student_id}/rollcall/current",
-        lambda w: f"/students/{w.student_a.id}/rollcall/current",
-        None,
-        "parent_a",
-        "parent_free",
-    ),
     (
         "post",
         "/push/subscriptions",
@@ -153,7 +119,9 @@ async def test_sync_events_rejects_bad_envelope_but_not_unknown_type(
     body = sync_body()
     body["events"][0]["type"] = "future_type"
     body["events"][0]["payload"] = {"anything": 1}
-    assert (await client.post("/sync/events", json=body, headers=headers)).status_code == 501
+    response = await client.post("/sync/events", json=body, headers=headers)
+    assert response.status_code == 200
+    assert response.json()["results"][0]["reason"] == "unknown_type"
     # Час без часового поясу — невалідний конверт.
     body = sync_body()
     body["events"][0]["occurred_at"] = "2026-11-05T09:54:10"

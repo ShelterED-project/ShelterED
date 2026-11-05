@@ -10,12 +10,12 @@ from app.services import packs as packs_service
 from app.workers.celery_app import celery_app, enqueue
 
 
-def enqueue_rebuild_class(class_id: uuid.UUID) -> None:
-    enqueue("packs.rebuild_class", args=[str(class_id)])
+async def enqueue_rebuild_class(class_id: uuid.UUID) -> None:
+    await enqueue("packs.rebuild_class", args=[str(class_id)])
 
 
-def enqueue_rebuild_for_lesson(lesson_id: uuid.UUID) -> None:
-    enqueue("packs.rebuild_for_lesson", args=[str(lesson_id)])
+async def enqueue_rebuild_for_lesson(lesson_id: uuid.UUID) -> None:
+    await enqueue("packs.rebuild_for_lesson", args=[str(lesson_id)])
 
 
 async def _rebuild_class(class_id: uuid.UUID) -> int:

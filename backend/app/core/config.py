@@ -74,6 +74,42 @@ class Settings(BaseSettings):
     # Без успішного опитування довше за це джерело вважається недоступним (B7.6).
     alerts_source_stale_s: int = 300
 
+    # Синхронізація (docs/sync-protocol.md, розділ 6): подія «підозріла», якщо `occurred_at`
+    # пізніше часу сервера або |зсув годинника пакета| більше за цей поріг. Позначка, не блокування.
+    sync_suspicious_skew_s: int = 300
+    # Допуск для `session_closed`: відмітка відхиляється, лише якщо і час пристрою, і час,
+    # виправлений на зсув годинника пакета, пізніші за закриття переклички більш ніж на N с.
+    sync_rollcall_close_grace_s: int = 120
+
+    # Кабінети й агрегати (B14): тест «складено», якщо оцінка зарахованої спроби ≥ порогу (%);
+    # «вікно закривається», якщо до дедлайну менше за N год; періодичний перерахунок (beat).
+    stats_pass_score: int = 60
+    stats_closing_soon_h: int = 6
+    stats_refresh_interval_s: int = 3600
+    # Перерахунок класу після синхронізації відкладається на N с і не дублюється: коли клас
+    # синхронізується разом, задачі учнів ставлять один перерахунок класу.
+    stats_class_debounce_s: int = 30
+    # Навчання під час тривог (дашборд адміністрації): перераховуються тривоги за N днів.
+    stats_alert_lookback_days: int = 14
+
+    # Rate limiting входу (B15.3): рахуються лише невдалі спроби, фіксоване вікно, без
+    # блокування акаунта. Redis БД 2 (0 і 1 — Celery); недоступний Redis — вхід дозволено.
+    rate_limit_redis_url: str = "redis://localhost:6380/2"
+    # Ліміт «на акаунт» рахується на пару (IP клієнта + акаунт): хто вводить хибні PIN чи паролі,
+    # блокує лише себе, а не справжнього власника на іншому пристрої/IP (діти не можуть заблокувати
+    # однокласника). Ліміт на IP високий: увесь клас чи школа часто за одним NAT.
+    # Вхід учня: IP + код класу + ім'я (перебір PIN) і окремо IP.
+    rate_limit_join_account: int = 10
+    rate_limit_join_ip: int = 300
+    # Вхід дорослих (POST /auth/authorize): IP + email і окремо IP.
+    rate_limit_login_account: int = 10
+    rate_limit_login_ip: int = 300
+    # Загальний ліміт на акаунт (з усіх IP разом) проти перебору зі зміною IP. Високий: однокласник
+    # руками стільки не набере; тимчасове обмеження на вікно, а не блокування акаунта.
+    rate_limit_join_account_all_ips: int = 100
+    rate_limit_login_account_all_ips: int = 100
+    rate_limit_window_s: int = 900
+
     @property
     def alerts_polling_enabled(self) -> bool:
         return bool(self.alerts_api_token and self.alerts_api_token.get_secret_value())

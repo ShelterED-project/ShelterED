@@ -117,7 +117,8 @@ async def _lesson_content(
             title=t.title,
             window_enabled=t.window_enabled,
             window_hours=t.window_hours,
-            # Ключа відповідей у пакеті немає (B11.4 не вирішено): перевіряє сервер.
+            # Ключ відповідей лише в тренувальному тесті (без вікна): миттєва перевірка
+            # офлайн. Тест із вікном оцінюється — ключ не покидає сервер.
             questions=[
                 PackQuestion(
                     id=q.id,
@@ -126,6 +127,7 @@ async def _lesson_content(
                     prompt=q.prompt,
                     options=[Option.model_validate(o) for o in q.options],
                     points=q.points,
+                    answer_key=None if t.window_enabled else list(q.answer_key),
                 )
                 for q in questions
                 if q.test_id == t.id
@@ -399,7 +401,9 @@ async def rebuild_class(
                 settings.pack_max_week_bytes,
             )
         first = min(built, key=lambda p: p.pack_date)
-        enqueue_push("pack_updated", class_id=klass.id, pack_id=first.id, pack_date=first.pack_date)
+        await enqueue_push(
+            "pack_updated", class_id=klass.id, pack_id=first.id, pack_date=first.pack_date
+        )
     return built
 
 

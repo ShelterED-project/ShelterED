@@ -1,5 +1,6 @@
 import uuid
 from collections.abc import Awaitable, Callable
+from functools import lru_cache
 from typing import Annotated
 
 from fastapi import Depends
@@ -9,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import Settings, get_settings
 from app.core.db import get_session
 from app.core.errors import AppError
+from app.core.rate_limit import RateLimiter, RedisRateLimiter
 from app.core.security import decode_access_token
 from app.core.storage import LocalMediaStorage, MediaStorage
 from app.models.lessons import Card, Lesson, Module, Question, Test
@@ -85,9 +87,20 @@ async def get_accessible_student(
     return student
 
 
+async def get_cabinet_student(
+    student_id: uuid.UUID,
+    user: Annotated[User, Depends(require_roles("student", "parent", "teacher"))],
+    session: Session,
+) -> User:
+    """Кабінет учня (прогрес, мапа знань): учень — себе, батьки — свою дитину, вчитель — учнів
+    своїх класів; адміністрація — ні (навчальні дані учня їй не потрібні)."""
+    return await get_accessible_student(student_id, user, session)
+
+
 AccessibleClass = Annotated[SchoolClass, Depends(get_accessible_class)]
 StaffClass = Annotated[SchoolClass, Depends(get_staff_class)]
 AccessibleStudent = Annotated[User, Depends(get_accessible_student)]
+CabinetStudent = Annotated[User, Depends(get_cabinet_student)]
 
 
 async def get_admin_class(class_id: uuid.UUID, user: Admin, session: Session) -> SchoolClass:
@@ -154,3 +167,16 @@ def get_storage(settings: SettingsDep) -> MediaStorage:
 
 
 Storage = Annotated[MediaStorage, Depends(get_storage)]
+
+
+@lru_cache
+def _redis_rate_limiter(url: str) -> RedisRateLimiter:
+    return RedisRateLimiter(url)
+
+
+def get_rate_limiter(settings: SettingsDep) -> RateLimiter:
+    """Rate limiter входу; у тестах підміняється через dependency_overrides."""
+    return _redis_rate_limiter(settings.rate_limit_redis_url)
+
+
+Limiter = Annotated[RateLimiter, Depends(get_rate_limiter)]

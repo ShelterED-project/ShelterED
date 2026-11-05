@@ -148,7 +148,8 @@ async def test_build_pack_content(db_session, world, course, enqueued) -> None:
     assert [m["part"] for m in lesson["modules"]] == ["shelter", "main"]
     assert lesson["modules"][0]["cards"][0]["media_asset_id"] == str(course.video.id)
     question = lesson["tests"][0]["questions"][0]
-    assert "answer_key" not in question and question["options"][0] == {"id": "a", "text": "3/4"}
+    # Тест без вікна — тренувальний: ключ у пакеті для миттєвої перевірки офлайн.
+    assert question["answer_key"] == ["a"] and question["options"][0] == {"id": "a", "text": "3/4"}
 
     media_ids = set(
         await db_session.scalars(
@@ -174,6 +175,71 @@ async def test_build_pack_content(db_session, world, course, enqueued) -> None:
             "pack_date": course.day.isoformat(),
         }
     ]
+
+
+def keys(data) -> set[str]:
+    """Усі ключі словників на будь-якій глибині."""
+    if isinstance(data, dict):
+        return set(data) | {k for v in data.values() for k in keys(v)}
+    if isinstance(data, list):
+        return {k for v in data for k in keys(v)}
+    return set()
+
+
+async def graded_test(db, course) -> Test:
+    test = Test(
+        lesson_id=course.lesson.id, title="Контрольна", window_enabled=True, window_hours=48
+    )
+    db.add(test)
+    await db.flush()
+    db.add(
+        Question(
+            test_id=test.id,
+            position=1,
+            kind="multiple",
+            prompt="Які дроби дорівнюють 1/2?",
+            options=[
+                {"id": "a", "text": "2/4"},
+                {"id": "b", "text": "3/6"},
+                {"id": "c", "text": "1/3"},
+            ],
+            answer_key=["a", "b"],
+        )
+    )
+    await db.flush()
+    return test
+
+
+async def test_answer_key_only_for_practice_tests(db_session, world, course) -> None:
+    graded = await graded_test(db_session, course)
+    body, _, _ = await service.build_content(db_session, world.class_a, course.day)
+    tests = {t["id"]: t for t in body["lessons"][0]["tests"]}
+    practice = tests[str(course.test.id)]
+    assert [q["answer_key"] for q in practice["questions"]] == [["a"]]
+    # Оцінюваний тест із вікном: жодного поля з правильними відповідями на будь-якій глибині.
+    graded_part = tests[str(graded.id)]
+    assert len(graded_part["questions"]) == 1
+    assert not keys(graded_part) & {"answer_key", "correct", "is_correct", "answers", "score"}
+    assert b"answer_key" not in service.canonical_json(graded_part)
+
+
+async def test_answer_key_change_changes_hash_only_for_practice(db_session, world, course) -> None:
+    graded = await graded_test(db_session, course)
+    body, _, _ = await service.build_content(db_session, world.class_a, course.day)
+    digest = service.content_hash(body)
+    # Ключ оцінюваного тесту в пакет не йде — хеш не змінюється.
+    question = await db_session.scalar(select(Question).where(Question.test_id == graded.id))
+    question.answer_key = ["a"]
+    await db_session.flush()
+    body, _, _ = await service.build_content(db_session, world.class_a, course.day)
+    assert service.content_hash(body) == digest
+    # Виправлений ключ тренувального тесту — новий хеш, а отже нова версія пакета.
+    course.question.answer_key = ["b"]
+    await db_session.flush()
+    body, _, _ = await service.build_content(db_session, world.class_a, course.day)
+    assert service.content_hash(body) != digest
+    practice = next(t for t in body["lessons"][0]["tests"] if t["id"] == str(course.test.id))
+    assert practice["questions"][0]["answer_key"] == ["b"]
 
 
 async def test_rebuild_without_changes_is_idempotent(db_session, world, course, enqueued) -> None:

@@ -184,6 +184,158 @@
         "title": "AlertOut",
         "type": "object"
       },
+      "AlertStudyItem": {
+        "properties": {
+          "alert_id": {
+            "format": "uuid",
+            "title": "Alert Id",
+            "type": "string"
+          },
+          "class_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Лише для ручної тривоги класу",
+            "title": "Class Id"
+          },
+          "duration_minutes": {
+            "description": "Тривалість (триває — до зараз)",
+            "title": "Duration Minutes",
+            "type": "integer"
+          },
+          "ended_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ended At"
+          },
+          "is_drill": {
+            "title": "Is Drill",
+            "type": "boolean"
+          },
+          "source": {
+            "enum": [
+              "api",
+              "manual"
+            ],
+            "title": "Source",
+            "type": "string"
+          },
+          "started_at": {
+            "format": "date-time",
+            "title": "Started At",
+            "type": "string"
+          },
+          "students": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Учні, що завершували модулі під час тривоги",
+            "title": "Students"
+          },
+          "study_minutes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Плановий час модулів, завершених під час тривоги; null — ще не пораховано",
+            "title": "Study Minutes"
+          }
+        },
+        "required": [
+          "alert_id",
+          "source",
+          "is_drill",
+          "class_id",
+          "started_at",
+          "ended_at",
+          "duration_minutes",
+          "students",
+          "study_minutes"
+        ],
+        "title": "AlertStudyItem",
+        "type": "object"
+      },
+      "AlertStudyOut": {
+        "description": "Журнал тривог школи з навчанням, що на них припало (дашборд адміністрації, P2).",
+        "examples": [
+          {
+            "alert_minutes": 75,
+            "alerts": [
+              {
+                "alert_id": "0192f0a0-0000-7000-8000-000000000901",
+                "duration_minutes": 75,
+                "ended_at": "2026-11-05T10:45:00Z",
+                "is_drill": false,
+                "source": "api",
+                "started_at": "2026-11-05T09:30:00Z",
+                "students": 12,
+                "study_minutes": 96
+              }
+            ],
+            "computed_at": "2026-11-05T11:00:00Z",
+            "study_minutes": 96
+          }
+        ],
+        "properties": {
+          "alert_minutes": {
+            "title": "Alert Minutes",
+            "type": "integer"
+          },
+          "alerts": {
+            "items": {
+              "$ref": "#/components/schemas/AlertStudyItem"
+            },
+            "title": "Alerts",
+            "type": "array"
+          },
+          "computed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Computed At"
+          },
+          "study_minutes": {
+            "title": "Study Minutes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "computed_at",
+          "alert_minutes",
+          "study_minutes",
+          "alerts"
+        ],
+        "title": "AlertStudyOut",
+        "type": "object"
+      },
       "AssignmentOut": {
         "examples": [
           {
@@ -594,6 +746,131 @@
         "title": "ClassCreate",
         "type": "object"
       },
+      "ClassGapsOut": {
+        "examples": [
+          {
+            "class_id": "0192f0a0-0000-7000-8000-000000000001",
+            "pass_score": 60,
+            "topics": [
+              {
+                "avg_score": 48.0,
+                "is_gap": true,
+                "lesson_id": "0192f0a0-0000-7000-8000-000000000101",
+                "questions": [
+                  {
+                    "answered": 10,
+                    "correct": 3,
+                    "correct_pct": 30,
+                    "prompt": "1/2 + 1/4 = ?",
+                    "question_id": "0192f0a0-0000-7000-8000-000000000401",
+                    "test_id": "0192f0a0-0000-7000-8000-000000000301"
+                  }
+                ],
+                "subject_name": "Математика",
+                "tests_passed": 3,
+                "tests_scored": 10,
+                "title": "Дроби"
+              }
+            ]
+          }
+        ],
+        "properties": {
+          "class_id": {
+            "format": "uuid",
+            "title": "Class Id",
+            "type": "string"
+          },
+          "pass_score": {
+            "title": "Pass Score",
+            "type": "integer"
+          },
+          "topics": {
+            "description": "Тема = урок; від найнижчої середньої оцінки",
+            "items": {
+              "$ref": "#/components/schemas/GapTopic"
+            },
+            "title": "Topics",
+            "type": "array"
+          }
+        },
+        "required": [
+          "class_id",
+          "pass_score",
+          "topics"
+        ],
+        "title": "ClassGapsOut",
+        "type": "object"
+      },
+      "ClassLessonProgress": {
+        "properties": {
+          "avg_progress_pct": {
+            "title": "Avg Progress Pct",
+            "type": "integer"
+          },
+          "avg_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Score"
+          },
+          "first_date": {
+            "description": "Перша дата уроку в розкладі класу",
+            "format": "date",
+            "title": "First Date",
+            "type": "string"
+          },
+          "lesson_id": {
+            "format": "uuid",
+            "title": "Lesson Id",
+            "type": "string"
+          },
+          "students_completed": {
+            "description": "Учні, що завершили всі модулі уроку",
+            "title": "Students Completed",
+            "type": "integer"
+          },
+          "students_total": {
+            "title": "Students Total",
+            "type": "integer"
+          },
+          "subject_name": {
+            "title": "Subject Name",
+            "type": "string"
+          },
+          "tests_passed": {
+            "title": "Tests Passed",
+            "type": "integer"
+          },
+          "tests_scored": {
+            "description": "Пари (учень, тест уроку) із зарахованою спробою",
+            "title": "Tests Scored",
+            "type": "integer"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "lesson_id",
+          "title",
+          "subject_name",
+          "first_date",
+          "students_total",
+          "students_completed",
+          "avg_progress_pct",
+          "tests_scored",
+          "tests_passed",
+          "avg_score"
+        ],
+        "title": "ClassLessonProgress",
+        "type": "object"
+      },
       "ClassOut": {
         "examples": [
           {
@@ -668,6 +945,176 @@
           "join_code_expires_at"
         ],
         "title": "ClassOut",
+        "type": "object"
+      },
+      "ClassProgressOut": {
+        "examples": [
+          {
+            "class_id": "0192f0a0-0000-7000-8000-000000000001",
+            "computed_at": "2026-11-05T10:00:00Z",
+            "lessons": [
+              {
+                "avg_progress_pct": 81,
+                "avg_score": 74.5,
+                "first_date": "2026-11-05",
+                "lesson_id": "0192f0a0-0000-7000-8000-000000000101",
+                "students_completed": 18,
+                "students_total": 25,
+                "subject_name": "Математика",
+                "tests_passed": 12,
+                "tests_scored": 15,
+                "title": "Дроби"
+              }
+            ]
+          }
+        ],
+        "properties": {
+          "class_id": {
+            "format": "uuid",
+            "title": "Class Id",
+            "type": "string"
+          },
+          "computed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Computed At"
+          },
+          "lessons": {
+            "items": {
+              "$ref": "#/components/schemas/ClassLessonProgress"
+            },
+            "title": "Lessons",
+            "type": "array"
+          }
+        },
+        "required": [
+          "class_id",
+          "computed_at",
+          "lessons"
+        ],
+        "title": "ClassProgressOut",
+        "type": "object"
+      },
+      "ClassTestOut": {
+        "properties": {
+          "counts": {
+            "$ref": "#/components/schemas/TestStatusCounts"
+          },
+          "lesson_id": {
+            "format": "uuid",
+            "title": "Lesson Id",
+            "type": "string"
+          },
+          "lesson_title": {
+            "title": "Lesson Title",
+            "type": "string"
+          },
+          "students": {
+            "items": {
+              "$ref": "#/components/schemas/StudentTestResult"
+            },
+            "title": "Students",
+            "type": "array"
+          },
+          "test_id": {
+            "format": "uuid",
+            "title": "Test Id",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "window_hours": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Тривалість вікна; null — тест без вікна",
+            "title": "Window Hours"
+          }
+        },
+        "required": [
+          "test_id",
+          "lesson_id",
+          "lesson_title",
+          "title",
+          "window_hours",
+          "counts",
+          "students"
+        ],
+        "title": "ClassTestOut",
+        "type": "object"
+      },
+      "ClassTestsOut": {
+        "examples": [
+          {
+            "class_id": "0192f0a0-0000-7000-8000-000000000001",
+            "pass_score": 60,
+            "tests": [
+              {
+                "counts": {
+                  "closing_soon": 1,
+                  "not_passed": 0,
+                  "passed": 0,
+                  "pending": 0
+                },
+                "lesson_id": "0192f0a0-0000-7000-8000-000000000101",
+                "lesson_title": "Дроби",
+                "students": [
+                  {
+                    "attempts": 0,
+                    "deadline": "2026-11-07T09:41:00Z",
+                    "display_name": "Іван",
+                    "is_suspicious": false,
+                    "last_name": "Петренко",
+                    "status": "closing_soon",
+                    "student_id": "0192f0a0-0000-7000-8000-0000000000cc"
+                  }
+                ],
+                "test_id": "0192f0a0-0000-7000-8000-000000000301",
+                "title": "Перевір себе",
+                "window_hours": 48
+              }
+            ]
+          }
+        ],
+        "properties": {
+          "class_id": {
+            "format": "uuid",
+            "title": "Class Id",
+            "type": "string"
+          },
+          "pass_score": {
+            "description": "Поріг «склав», %",
+            "title": "Pass Score",
+            "type": "integer"
+          },
+          "tests": {
+            "items": {
+              "$ref": "#/components/schemas/ClassTestOut"
+            },
+            "title": "Tests",
+            "type": "array"
+          }
+        },
+        "required": [
+          "class_id",
+          "pass_score",
+          "tests"
+        ],
+        "title": "ClassTestsOut",
         "type": "object"
       },
       "ClassUpdate": {
@@ -792,6 +1239,107 @@
         "title": "ErrorResponse",
         "type": "object"
       },
+      "GapQuestion": {
+        "properties": {
+          "answered": {
+            "title": "Answered",
+            "type": "integer"
+          },
+          "correct": {
+            "title": "Correct",
+            "type": "integer"
+          },
+          "correct_pct": {
+            "title": "Correct Pct",
+            "type": "integer"
+          },
+          "prompt": {
+            "title": "Prompt",
+            "type": "string"
+          },
+          "question_id": {
+            "format": "uuid",
+            "title": "Question Id",
+            "type": "string"
+          },
+          "test_id": {
+            "format": "uuid",
+            "title": "Test Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "question_id",
+          "test_id",
+          "prompt",
+          "answered",
+          "correct",
+          "correct_pct"
+        ],
+        "title": "GapQuestion",
+        "type": "object"
+      },
+      "GapTopic": {
+        "properties": {
+          "avg_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Score"
+          },
+          "is_gap": {
+            "description": "Середня оцінка класу нижча за поріг «склав»",
+            "title": "Is Gap",
+            "type": "boolean"
+          },
+          "lesson_id": {
+            "format": "uuid",
+            "title": "Lesson Id",
+            "type": "string"
+          },
+          "questions": {
+            "description": "Від найгірше засвоєного",
+            "items": {
+              "$ref": "#/components/schemas/GapQuestion"
+            },
+            "title": "Questions",
+            "type": "array"
+          },
+          "subject_name": {
+            "title": "Subject Name",
+            "type": "string"
+          },
+          "tests_passed": {
+            "title": "Tests Passed",
+            "type": "integer"
+          },
+          "tests_scored": {
+            "title": "Tests Scored",
+            "type": "integer"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "lesson_id",
+          "title",
+          "subject_name",
+          "avg_score",
+          "tests_scored",
+          "tests_passed",
+          "is_gap",
+          "questions"
+        ],
+        "title": "GapTopic",
+        "type": "object"
+      },
       "HealthResponse": {
         "properties": {
           "status": {
@@ -828,6 +1376,90 @@
           }
         },
         "title": "JoinCodeRequest",
+        "type": "object"
+      },
+      "KnowledgeMapOut": {
+        "examples": [
+          {
+            "student_id": "0192f0a0-0000-7000-8000-0000000000cc",
+            "subjects": [
+              {
+                "avg_score": 72.5,
+                "is_gap": false,
+                "lessons_completed": 3,
+                "lessons_total": 4,
+                "name": "Математика",
+                "subject_id": "0192f0a0-0000-7000-8000-000000000051"
+              }
+            ]
+          }
+        ],
+        "properties": {
+          "student_id": {
+            "format": "uuid",
+            "title": "Student Id",
+            "type": "string"
+          },
+          "subjects": {
+            "items": {
+              "$ref": "#/components/schemas/KnowledgeMapSubject"
+            },
+            "title": "Subjects",
+            "type": "array"
+          }
+        },
+        "required": [
+          "student_id",
+          "subjects"
+        ],
+        "title": "KnowledgeMapOut",
+        "type": "object"
+      },
+      "KnowledgeMapSubject": {
+        "properties": {
+          "avg_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Score"
+          },
+          "is_gap": {
+            "description": "Середня оцінка тестів предмета нижча за поріг «склав»",
+            "title": "Is Gap",
+            "type": "boolean"
+          },
+          "lessons_completed": {
+            "title": "Lessons Completed",
+            "type": "integer"
+          },
+          "lessons_total": {
+            "title": "Lessons Total",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "subject_id": {
+            "format": "uuid",
+            "title": "Subject Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "subject_id",
+          "name",
+          "lessons_total",
+          "lessons_completed",
+          "avg_score",
+          "is_gap"
+        ],
+        "title": "KnowledgeMapSubject",
         "type": "object"
       },
       "LessonCreate": {
@@ -2080,6 +2712,33 @@
                     "title": "Перевір себе",
                     "window_enabled": true,
                     "window_hours": 48
+                  },
+                  {
+                    "id": "0192f0a0-0000-7000-8000-000000000332",
+                    "questions": [
+                      {
+                        "answer_key": [
+                          "a"
+                        ],
+                        "id": "0192f0a0-0000-7000-8000-000000000342",
+                        "kind": "single",
+                        "options": [
+                          {
+                            "id": "a",
+                            "text": "1/2"
+                          },
+                          {
+                            "id": "b",
+                            "text": "1/3"
+                          }
+                        ],
+                        "points": 1,
+                        "position": 1,
+                        "prompt": "Що більше: 1/2 чи 1/3?"
+                      }
+                    ],
+                    "title": "Тренування",
+                    "window_enabled": false
                   }
                 ],
                 "title": "Звичайні дроби",
@@ -2188,8 +2847,22 @@
         "type": "object"
       },
       "PackQuestion": {
-        "description": "Питання тесту в пакеті. Ключа відповідей немає (відкрите питання B11.4).",
+        "description": "Питання тесту в пакеті. `answer_key` (id правильних варіантів) є лише в тренувальному\nтесті (`window_enabled = false`) для миттєвої перевірки офлайн; в оцінюваному тесті з\nвікном поля немає зовсім — оцінює сервер після синхронізації.",
         "properties": {
+          "answer_key": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Answer Key"
+          },
           "id": {
             "format": "uuid",
             "title": "Id",
@@ -2235,6 +2908,7 @@
         "type": "object"
       },
       "PackTest": {
+        "description": "Тест уроку. Тест із вікном (B11) пристрій закриває сам, без мережі: дедлайн =\n`occurred_at` події, що довела останній модуль уроку до 100%, + `window_hours`.",
         "properties": {
           "id": {
             "format": "uuid",
@@ -2253,6 +2927,7 @@
             "type": "string"
           },
           "window_enabled": {
+            "description": "Оцінюваний тест із вікном (оцінює сервер)",
             "title": "Window Enabled",
             "type": "boolean"
           },
@@ -2265,6 +2940,7 @@
                 "type": "null"
               }
             ],
+            "description": "Тривалість вікна (24/48/72 год) від завершення останнього модуля уроку",
             "title": "Window Hours"
           }
         },
@@ -3442,6 +4118,150 @@
         "title": "StudentJoinRequest",
         "type": "object"
       },
+      "StudentLessonProgress": {
+        "properties": {
+          "completed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Завершення уроку (годинник пристрою)",
+            "title": "Completed At"
+          },
+          "lesson_id": {
+            "format": "uuid",
+            "title": "Lesson Id",
+            "type": "string"
+          },
+          "modules_done": {
+            "title": "Modules Done",
+            "type": "integer"
+          },
+          "modules_total": {
+            "title": "Modules Total",
+            "type": "integer"
+          },
+          "progress_pct": {
+            "title": "Progress Pct",
+            "type": "integer"
+          },
+          "study_minutes": {
+            "title": "Study Minutes",
+            "type": "integer"
+          },
+          "subject_name": {
+            "title": "Subject Name",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "lesson_id",
+          "title",
+          "subject_name",
+          "progress_pct",
+          "modules_done",
+          "modules_total",
+          "completed_at",
+          "study_minutes"
+        ],
+        "title": "StudentLessonProgress",
+        "type": "object"
+      },
+      "StudentProgressOut": {
+        "examples": [
+          {
+            "computed_at": "2026-11-05T10:00:00Z",
+            "lessons": [
+              {
+                "completed_at": "2026-11-05T09:41:00Z",
+                "lesson_id": "0192f0a0-0000-7000-8000-000000000101",
+                "modules_done": 3,
+                "modules_total": 3,
+                "progress_pct": 100,
+                "study_minutes": 12,
+                "subject_name": "Математика",
+                "title": "Дроби"
+              }
+            ],
+            "student_id": "0192f0a0-0000-7000-8000-0000000000cc",
+            "study": {
+              "days": [
+                {
+                  "day": "2026-11-05",
+                  "minutes": 12
+                }
+              ],
+              "last_7_days_minutes": 12,
+              "total_minutes": 12
+            },
+            "tests": [
+              {
+                "attempts": 0,
+                "deadline": "2026-11-07T09:41:00Z",
+                "lesson_id": "0192f0a0-0000-7000-8000-000000000101",
+                "status": "pending",
+                "test_id": "0192f0a0-0000-7000-8000-000000000301",
+                "title": "Перевір себе",
+                "window_hours": 48
+              }
+            ]
+          }
+        ],
+        "properties": {
+          "computed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Computed At"
+          },
+          "lessons": {
+            "items": {
+              "$ref": "#/components/schemas/StudentLessonProgress"
+            },
+            "title": "Lessons",
+            "type": "array"
+          },
+          "student_id": {
+            "format": "uuid",
+            "title": "Student Id",
+            "type": "string"
+          },
+          "study": {
+            "$ref": "#/components/schemas/StudyTime"
+          },
+          "tests": {
+            "items": {
+              "$ref": "#/components/schemas/StudentTestOut"
+            },
+            "title": "Tests",
+            "type": "array"
+          }
+        },
+        "required": [
+          "student_id",
+          "computed_at",
+          "lessons",
+          "tests",
+          "study"
+        ],
+        "title": "StudentProgressOut",
+        "type": "object"
+      },
       "StudentRollCallOut": {
         "description": "Статус дитини в поточній перекличці її класу (для батьків).",
         "examples": [
@@ -3551,6 +4371,211 @@
         "title": "StudentRollCallOut",
         "type": "object"
       },
+      "StudentTestOut": {
+        "properties": {
+          "attempts": {
+            "title": "Attempts",
+            "type": "integer"
+          },
+          "deadline": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Кінець вікна тесту: завершення уроку (годинник пристрою) + `window_hours`; null — тест без вікна або урок ще не завершено",
+            "title": "Deadline"
+          },
+          "lesson_id": {
+            "format": "uuid",
+            "title": "Lesson Id",
+            "type": "string"
+          },
+          "score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score"
+          },
+          "status": {
+            "enum": [
+              "passed",
+              "not_passed",
+              "closing_soon",
+              "pending"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "test_id": {
+            "format": "uuid",
+            "title": "Test Id",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "window_hours": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Window Hours"
+          }
+        },
+        "required": [
+          "test_id",
+          "lesson_id",
+          "title",
+          "window_hours",
+          "status",
+          "score",
+          "attempts",
+          "deadline"
+        ],
+        "title": "StudentTestOut",
+        "type": "object"
+      },
+      "StudentTestResult": {
+        "properties": {
+          "attempts": {
+            "title": "Attempts",
+            "type": "integer"
+          },
+          "deadline": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Кінець вікна тесту: завершення уроку (годинник пристрою) + `window_hours`; null — тест без вікна або урок ще не завершено",
+            "title": "Deadline"
+          },
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "is_suspicious": {
+            "description": "Час пристрою підозрілий — перевірити (не блокується)",
+            "title": "Is Suspicious",
+            "type": "boolean"
+          },
+          "last_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Name"
+          },
+          "score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score"
+          },
+          "status": {
+            "enum": [
+              "passed",
+              "not_passed",
+              "closing_soon",
+              "pending"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "student_id": {
+            "format": "uuid",
+            "title": "Student Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "student_id",
+          "display_name",
+          "last_name",
+          "status",
+          "score",
+          "attempts",
+          "deadline",
+          "is_suspicious"
+        ],
+        "title": "StudentTestResult",
+        "type": "object"
+      },
+      "StudyDay": {
+        "properties": {
+          "day": {
+            "format": "date",
+            "title": "Day",
+            "type": "string"
+          },
+          "minutes": {
+            "title": "Minutes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "day",
+          "minutes"
+        ],
+        "title": "StudyDay",
+        "type": "object"
+      },
+      "StudyTime": {
+        "description": "Час навчання = плановий час (`duration_min`) завершених модулів, день — за поясом школи.",
+        "properties": {
+          "days": {
+            "description": "Останні 7 днів, включно з сьогодні",
+            "items": {
+              "$ref": "#/components/schemas/StudyDay"
+            },
+            "title": "Days",
+            "type": "array"
+          },
+          "last_7_days_minutes": {
+            "title": "Last 7 Days Minutes",
+            "type": "integer"
+          },
+          "total_minutes": {
+            "title": "Total Minutes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total_minutes",
+          "last_7_days_minutes",
+          "days"
+        ],
+        "title": "StudyTime",
+        "type": "object"
+      },
       "SubjectCreate": {
         "examples": [
           {
@@ -3639,7 +4664,7 @@
               }
             ],
             "has_more": false,
-            "next_cursor": "1042"
+            "next_cursor": "771.1042"
           }
         ],
         "properties": {
@@ -4121,6 +5146,34 @@
           "window_hours"
         ],
         "title": "TestOut",
+        "type": "object"
+      },
+      "TestStatusCounts": {
+        "properties": {
+          "closing_soon": {
+            "title": "Closing Soon",
+            "type": "integer"
+          },
+          "not_passed": {
+            "title": "Not Passed",
+            "type": "integer"
+          },
+          "passed": {
+            "title": "Passed",
+            "type": "integer"
+          },
+          "pending": {
+            "title": "Pending",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "passed",
+          "not_passed",
+          "closing_soon",
+          "pending"
+        ],
+        "title": "TestStatusCounts",
         "type": "object"
       },
       "TestUpdate": {
@@ -4977,6 +6030,148 @@
         ]
       }
     },
+    "/alerts/study": {
+      "get": {
+        "description": "Дашборд адміністрації (P2): тривоги своєї школи (найновіші першими, `from`/`to` — дати\nза поясом школи, включно) і скільки навчання на них припало — без даних окремих учнів.\nАгрегат перераховує beat раз на `STATS_REFRESH_INTERVAL_S`. Лише адміністрація.",
+        "operationId": "alert_study_alerts_study_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "From"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "To"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "alert_minutes": 75,
+                  "alerts": [
+                    {
+                      "alert_id": "0192f0a0-0000-7000-8000-000000000901",
+                      "duration_minutes": 75,
+                      "ended_at": "2026-11-05T10:45:00Z",
+                      "is_drill": false,
+                      "source": "api",
+                      "started_at": "2026-11-05T09:30:00Z",
+                      "students": 12,
+                      "study_minutes": 96
+                    }
+                  ],
+                  "computed_at": "2026-11-05T11:00:00Z",
+                  "study_minutes": 96
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/AlertStudyOut"
+                }
+              }
+            },
+            "description": "Успішна відповідь"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Не автентифіковано"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Недостатньо прав"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Не знайдено"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Alert Study",
+        "tags": [
+          "cabinets"
+        ]
+      }
+    },
     "/alerts/{alert_id}/end": {
       "post": {
         "description": "Відбій ручної тривоги вчителем її класу або адміністрацією школи; закриває\nперекличку й ставить push «відбій». Ідемпотентно. Тривога з API закінчується лише\nз API (409 `ALERT_NOT_MANUAL`).",
@@ -5088,7 +6283,7 @@
     },
     "/auth/authorize": {
       "post": {
-        "description": "OAuth 2.0 Authorization Code + PKCE (S256) для вчителів, батьків, адміністрації.\n\nФорму входу малює PWA; відповідь — одноразовий `code` (60 с) для `POST /auth/token`.",
+        "description": "OAuth 2.0 Authorization Code + PKCE (S256) для вчителів, батьків, адміністрації.\n\nФорму входу малює PWA; відповідь — одноразовий `code` (60 с) для `POST /auth/token`.\nНевдалі спроби обмежені на пару IP + email, на IP і високим загальним лімітом на email з\nусіх IP (`RATE_LIMIT_LOGIN_*` за `RATE_LIMIT_WINDOW_S`); понад ліміт — 429 з `Retry-After`.\nАкаунт не блокується: перебір з одного IP не заважає власнику входити з іншого.",
         "operationId": "authorize_auth_authorize_post",
         "requestBody": {
           "content": {
@@ -5140,6 +6335,23 @@
               }
             },
             "description": "Unprocessable Content"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RATE_LIMITED: забагато невдалих спроб; повторити після `Retry-After` с",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
           },
           "500": {
             "content": {
@@ -5261,7 +6473,7 @@
     },
     "/auth/student/join": {
       "post": {
-        "description": "Вхід учня: код класу + імʼя + прізвище + PIN (4–6 цифр).\n\nЯкщо учня з таким імʼям у класі ще немає — його створюють, інакше перевіряють PIN.\nКод класу нормалізується (лише A-Z і 0-9; кириличні двійники латиниці замінюються).\nПрострочений код пускає лише наявних учнів із вірним PIN; для невідомого імені й хибного PIN\nвідповідь однакова: 401 `INVALID_CREDENTIALS`.",
+        "description": "Вхід учня: код класу + імʼя + прізвище + PIN (4–6 цифр).\n\nЯкщо учня з таким імʼям у класі ще немає — його створюють, інакше перевіряють PIN.\nКод класу нормалізується (лише A-Z і 0-9; кириличні двійники латиниці замінюються).\nПрострочений код пускає лише наявних учнів із вірним PIN; для невідомого імені й хибного PIN\nвідповідь однакова: 401 `INVALID_CREDENTIALS`.\n\nЗахист від перебору PIN: невдалі спроби обмежені на пару IP + (код класу + ім'я), на IP і\nвисоким загальним лімітом на (код класу + ім'я) з усіх IP (`RATE_LIMIT_JOIN_*` за\n`RATE_LIMIT_WINDOW_S`); понад ліміт — 429 з `Retry-After`.\nБлокування акаунта немає: однокласник, що вводить чужий PIN, блокує лише себе (свій IP),\nа справжній учень входить з іншого пристрою/IP; ліміт знімається сам після вікна.",
         "operationId": "student_join_auth_student_join_post",
         "parameters": [
           {
@@ -5331,6 +6543,23 @@
               }
             },
             "description": "Unprocessable Content"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RATE_LIMITED: забагато невдалих спроб; повторити після `Retry-After` с",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
           },
           "500": {
             "content": {
@@ -6240,6 +7469,120 @@
         ]
       }
     },
+    "/classes/{class_id}/gaps": {
+      "get": {
+        "description": "Прогалини по темах (тема = урок): середня оцінка класу й частка правильних відповідей\nна кожне питання за зарахованими спробами. Лише вчитель цього класу.",
+        "operationId": "class_gaps_classes__class_id__gaps_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "class_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Class Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "class_id": "0192f0a0-0000-7000-8000-000000000001",
+                  "pass_score": 60,
+                  "topics": [
+                    {
+                      "avg_score": 48.0,
+                      "is_gap": true,
+                      "lesson_id": "0192f0a0-0000-7000-8000-000000000101",
+                      "questions": [
+                        {
+                          "answered": 10,
+                          "correct": 3,
+                          "correct_pct": 30,
+                          "prompt": "1/2 + 1/4 = ?",
+                          "question_id": "0192f0a0-0000-7000-8000-000000000401",
+                          "test_id": "0192f0a0-0000-7000-8000-000000000301"
+                        }
+                      ],
+                      "subject_name": "Математика",
+                      "tests_passed": 3,
+                      "tests_scored": 10,
+                      "title": "Дроби"
+                    }
+                  ]
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ClassGapsOut"
+                }
+              }
+            },
+            "description": "Успішна відповідь"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Не автентифіковано"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Недостатньо прав"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Не знайдено"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Class Gaps",
+        "tags": [
+          "cabinets"
+        ]
+      }
+    },
     "/classes/{class_id}/join-code": {
       "post": {
         "description": "Новий код класу для входу учнів; старий одразу перестає діяти.\nНаявні учні входять і далі (код потрібен лише для першого входу).",
@@ -6346,9 +7689,116 @@
         ]
       }
     },
+    "/classes/{class_id}/progress": {
+      "get": {
+        "description": "Прогрес класу по уроках (уроки розкладу з датою ≤ сьогодні): скільки учнів завершили\nурок, середній прогрес, результати тестів уроку. Лише вчитель цього класу.",
+        "operationId": "class_progress_classes__class_id__progress_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "class_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Class Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "class_id": "0192f0a0-0000-7000-8000-000000000001",
+                  "computed_at": "2026-11-05T10:00:00Z",
+                  "lessons": [
+                    {
+                      "avg_progress_pct": 81,
+                      "avg_score": 74.5,
+                      "first_date": "2026-11-05",
+                      "lesson_id": "0192f0a0-0000-7000-8000-000000000101",
+                      "students_completed": 18,
+                      "students_total": 25,
+                      "subject_name": "Математика",
+                      "tests_passed": 12,
+                      "tests_scored": 15,
+                      "title": "Дроби"
+                    }
+                  ]
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ClassProgressOut"
+                }
+              }
+            },
+            "description": "Успішна відповідь"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Не автентифіковано"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Недостатньо прав"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Не знайдено"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Class Progress",
+        "tags": [
+          "cabinets"
+        ]
+      }
+    },
     "/classes/{class_id}/rollcall": {
       "post": {
-        "description": "Вчитель класу відкриває перекличку вручну (без тривоги). При тривозі сесія\nвідкривається автоматично. Ідемпотентно за `id`; на клас — одна відкрита сесія.",
+        "description": "Вчитель класу відкриває перекличку вручну (без тривоги). При тривозі сесія\nвідкривається автоматично. Ідемпотентно за `id` (повтор — 200 з наявною сесією, навіть\nзакритою); на клас — одна відкрита сесія.",
         "operationId": "start_rollcall_classes__class_id__rollcall_post",
         "parameters": [
           {
@@ -6460,7 +7910,7 @@
                 }
               }
             },
-            "description": "ROLLCALL_ALREADY_OPEN (інша сесія)"
+            "description": "ROLLCALL_ALREADY_OPEN (інша відкрита сесія, її id у `details.session_id`) / ID_CONFLICT (id зайнятий сесією іншого класу)"
           },
           "422": {
             "content": {
@@ -6481,16 +7931,6 @@
               }
             },
             "description": "Internal Server Error"
-          },
-          "501": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "NOT_IMPLEMENTED: заглушка контракту"
           }
         },
         "security": [
@@ -6506,7 +7946,7 @@
     },
     "/classes/{class_id}/rollcall/current": {
       "get": {
-        "description": "Відкрита перекличка класу. Вчитель класу й адмін школи бачать статуси всіх учнів\n(з часом отримання, щоб було видно застарілі), учень — лише свій (і `id` сесії для події\n`rollcall_status`). Оновлення — опитуванням (кожні 10 с, коли є мережа).",
+        "description": "Відкрита перекличка класу. Вчитель класу й адмін школи бачать статуси всіх учнів\n(з часом отримання, щоб було видно застарілі), учень — лише свій (і `id` сесії для події\n`rollcall_status`). Оновлення — опитуванням (кожні 10 с, коли є мережа) з `If-None-Match`:\nбез змін — 304 без тіла. Батьки — `GET /students/{id}/rollcall/current`.",
         "operationId": "current_rollcall_classes__class_id__rollcall_current_get",
         "parameters": [
           {
@@ -6517,6 +7957,22 @@
               "format": "uuid",
               "title": "Class Id",
               "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "if-none-match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-None-Match"
             }
           }
         ],
@@ -6568,7 +8024,18 @@
                 }
               }
             },
-            "description": "Успішна відповідь"
+            "description": "Успішна відповідь",
+            "headers": {
+              "ETag": {
+                "description": "Хеш відповіді",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "Не змінилась (`If-None-Match` збігся з ETag)"
           },
           "401": {
             "content": {
@@ -6619,16 +8086,6 @@
               }
             },
             "description": "Internal Server Error"
-          },
-          "501": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "NOT_IMPLEMENTED: заглушка контракту"
           }
         },
         "security": [
@@ -6644,7 +8101,7 @@
     },
     "/classes/{class_id}/rollcall/{session_id}/close": {
       "post": {
-        "description": "Вчитель закриває перекличку (при відбої тривоги — автоматично). Ідемпотентно.",
+        "description": "Вчитель закриває перекличку (при відбої тривоги — автоматично). Ідемпотентно:\nзакрита сесія повертається як є. Сесія іншого класу — 404.",
         "operationId": "close_rollcall_classes__class_id__rollcall__session_id__close_post",
         "parameters": [
           {
@@ -6764,16 +8221,6 @@
               }
             },
             "description": "Internal Server Error"
-          },
-          "501": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "NOT_IMPLEMENTED: заглушка контракту"
           }
         },
         "security": [
@@ -8227,6 +9674,125 @@
         "summary": "Assign Teacher",
         "tags": [
           "school"
+        ]
+      }
+    },
+    "/classes/{class_id}/tests": {
+      "get": {
+        "description": "Тести уроків класу зі статусом кожного учня: `passed` / `not_passed` / `closing_soon`\n(вікно закривається менш ніж за `STATS_CLOSING_SOON_H` год) / `pending`, з позначкою\nпідозрілого часу пристрою. Лише вчитель цього класу.",
+        "operationId": "class_tests_classes__class_id__tests_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "class_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Class Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "class_id": "0192f0a0-0000-7000-8000-000000000001",
+                  "pass_score": 60,
+                  "tests": [
+                    {
+                      "counts": {
+                        "closing_soon": 1,
+                        "not_passed": 0,
+                        "passed": 0,
+                        "pending": 0
+                      },
+                      "lesson_id": "0192f0a0-0000-7000-8000-000000000101",
+                      "lesson_title": "Дроби",
+                      "students": [
+                        {
+                          "attempts": 0,
+                          "deadline": "2026-11-07T09:41:00Z",
+                          "display_name": "Іван",
+                          "is_suspicious": false,
+                          "last_name": "Петренко",
+                          "status": "closing_soon",
+                          "student_id": "0192f0a0-0000-7000-8000-0000000000cc"
+                        }
+                      ],
+                      "test_id": "0192f0a0-0000-7000-8000-000000000301",
+                      "title": "Перевір себе",
+                      "window_hours": 48
+                    }
+                  ]
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ClassTestsOut"
+                }
+              }
+            },
+            "description": "Успішна відповідь"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Не автентифіковано"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Недостатньо прав"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Не знайдено"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Class Tests",
+        "tags": [
+          "cabinets"
         ]
       }
     },
@@ -10208,6 +11774,33 @@
                           "title": "Перевір себе",
                           "window_enabled": true,
                           "window_hours": 48
+                        },
+                        {
+                          "id": "0192f0a0-0000-7000-8000-000000000332",
+                          "questions": [
+                            {
+                              "answer_key": [
+                                "a"
+                              ],
+                              "id": "0192f0a0-0000-7000-8000-000000000342",
+                              "kind": "single",
+                              "options": [
+                                {
+                                  "id": "a",
+                                  "text": "1/2"
+                                },
+                                {
+                                  "id": "b",
+                                  "text": "1/3"
+                                }
+                              ],
+                              "points": 1,
+                              "position": 1,
+                              "prompt": "Що більше: 1/2 чи 1/3?"
+                            }
+                          ],
+                          "title": "Тренування",
+                          "window_enabled": false
                         }
                       ],
                       "title": "Звичайні дроби",
@@ -10665,6 +12258,7 @@
         ]
       },
       "patch": {
+        "description": "Зміна ключа, балів, варіантів чи типу переоцінює наявні спроби тесту (Celery, черга\n`sync`): оцінка й зарахування оновлюються в `GET /sync/changes` і кабінетах.",
         "operationId": "update_question_questions__question_id__patch",
         "parameters": [
           {
@@ -10771,6 +12365,108 @@
         ]
       }
     },
+    "/students/{student_id}/knowledge-map": {
+      "get": {
+        "description": "Мапа знань: по предметах — уроки завершено / усього, середня оцінка тестів, прогалина.\nТі самі права, що й прогрес учня.",
+        "operationId": "knowledge_map_students__student_id__knowledge_map_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "student_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Student Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "student_id": "0192f0a0-0000-7000-8000-0000000000cc",
+                  "subjects": [
+                    {
+                      "avg_score": 72.5,
+                      "is_gap": false,
+                      "lessons_completed": 3,
+                      "lessons_total": 4,
+                      "name": "Математика",
+                      "subject_id": "0192f0a0-0000-7000-8000-000000000051"
+                    }
+                  ]
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/KnowledgeMapOut"
+                }
+              }
+            },
+            "description": "Успішна відповідь"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Не автентифіковано"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Недостатньо прав"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Не знайдено"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Knowledge Map",
+        "tags": [
+          "cabinets"
+        ]
+      }
+    },
     "/students/{student_id}/parent-link-codes": {
       "post": {
         "description": "Одноразовий код для прив'язки батьків до дитини (7 днів).",
@@ -10860,9 +12556,135 @@
         ]
       }
     },
+    "/students/{student_id}/progress": {
+      "get": {
+        "description": "Прогрес учня по уроках, тести (з вікном і дедлайном), час навчання (усього й за 7 днів).\nУчень — себе, батьки — свою дитину, вчитель — учнів своїх класів. Статус переклички\nдитини — `GET /students/{id}/rollcall/current`.",
+        "operationId": "student_progress_students__student_id__progress_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "student_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Student Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "computed_at": "2026-11-05T10:00:00Z",
+                  "lessons": [
+                    {
+                      "completed_at": "2026-11-05T09:41:00Z",
+                      "lesson_id": "0192f0a0-0000-7000-8000-000000000101",
+                      "modules_done": 3,
+                      "modules_total": 3,
+                      "progress_pct": 100,
+                      "study_minutes": 12,
+                      "subject_name": "Математика",
+                      "title": "Дроби"
+                    }
+                  ],
+                  "student_id": "0192f0a0-0000-7000-8000-0000000000cc",
+                  "study": {
+                    "days": [
+                      {
+                        "day": "2026-11-05",
+                        "minutes": 12
+                      }
+                    ],
+                    "last_7_days_minutes": 12,
+                    "total_minutes": 12
+                  },
+                  "tests": [
+                    {
+                      "attempts": 0,
+                      "deadline": "2026-11-07T09:41:00Z",
+                      "lesson_id": "0192f0a0-0000-7000-8000-000000000101",
+                      "status": "pending",
+                      "test_id": "0192f0a0-0000-7000-8000-000000000301",
+                      "title": "Перевір себе",
+                      "window_hours": 48
+                    }
+                  ]
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/StudentProgressOut"
+                }
+              }
+            },
+            "description": "Успішна відповідь"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Не автентифіковано"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Недостатньо прав"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Не знайдено"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Student Progress",
+        "tags": [
+          "cabinets"
+        ]
+      }
+    },
     "/students/{student_id}/rollcall/current": {
       "get": {
-        "description": "Статус дитини в поточній перекличці: батьки — лише своєї дитини, учень — свій,\nвчитель — учнів своїх класів, адмін — учнів школи.",
+        "description": "Статус дитини в поточній (відкритій) перекличці її класу: батьки — лише своєї дитини,\nучень — свій, вчитель — учнів своїх класів, адмін — учнів школи. Переклички немає —\n`session_id` і `status` = null.",
         "operationId": "student_rollcall_students__student_id__rollcall_current_get",
         "parameters": [
           {
@@ -10945,16 +12767,6 @@
               }
             },
             "description": "Internal Server Error"
-          },
-          "501": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "NOT_IMPLEMENTED: заглушка контракту"
           }
         },
         "security": [
@@ -11129,7 +12941,7 @@
     },
     "/sync/changes": {
       "get": {
-        "description": "Зміни для поточного учня після `cursor` (без нього — з початку): результати спроб,\nпідсумковий прогрес модулів, статуси переклички. Курсор монотонний, без пропусків;\nповтор із тим самим курсором повертає ті самі зміни.",
+        "description": "Зміни для поточного учня після `cursor` (без нього — з початку): результати спроб,\nпідсумковий прогрес модулів, статуси переклички — актуальний стан кожного зміненого рядка.\nКурсор непрозорий, монотонний, без пропусків (віддаються лише точно закомічені зміни);\nповтор із тим самим курсором повертає ті самі зміни (або новіший стан тих самих рядків).\nНевідомий формат курсора — 422 `INVALID_CURSOR`.",
         "operationId": "get_changes_sync_changes_get",
         "parameters": [
           {
@@ -11192,7 +13004,7 @@
                     }
                   ],
                   "has_more": false,
-                  "next_cursor": "1042"
+                  "next_cursor": "771.1042"
                 },
                 "schema": {
                   "$ref": "#/components/schemas/SyncChangesOut"
@@ -11229,7 +13041,7 @@
                 }
               }
             },
-            "description": "Unprocessable Content"
+            "description": "INVALID_CURSOR"
           },
           "500": {
             "content": {
@@ -11240,16 +13052,6 @@
               }
             },
             "description": "Internal Server Error"
-          },
-          "501": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "NOT_IMPLEMENTED: заглушка контракту"
           }
         },
         "security": [
@@ -11265,7 +13067,7 @@
     },
     "/sync/events": {
       "post": {
-        "description": "Пакет 1–100 подій. Кожна подія приймається один раз за `client_event_id`: повтор дає\n`duplicate`, нічого не дублюючи. Погана подія отримує `rejected` з причиною й не блокує\nрешту пакета. Статус відповіді 200, якщо конверт пакета валідний.",
+        "description": "Пакет 1–100 подій. Кожна подія приймається один раз за `client_event_id`: повтор\nприйнятої дає `duplicate`, повтор відхиленої — той самий `rejected` з причиною; нічого не\nдублюється. Погана подія отримує `rejected` і не блокує решту пакета. Події обробляються\nв порядку `occurred_at`, кожна у своїй транзакції; результати — у порядку запиту.\nСтатус 200, якщо конверт пакета валідний; 500 — частину подій не записано (повторити\nпакет: записані дадуть `duplicate`). Вчитель (QR, B10) поки отримує 501.",
         "operationId": "post_events_sync_events_post",
         "requestBody": {
           "content": {
@@ -11354,7 +13156,7 @@
                 }
               }
             },
-            "description": "Internal Server Error"
+            "description": "INTERNAL_ERROR: частину подій не оброблено — повторити пакет"
           },
           "501": {
             "content": {
@@ -11364,7 +13166,7 @@
                 }
               }
             },
-            "description": "NOT_IMPLEMENTED: заглушка контракту"
+            "description": "NOT_IMPLEMENTED: QR-ретрансляція вчителем (B10) ще не реалізована"
           }
         },
         "security": [
@@ -11469,6 +13271,7 @@
         ]
       },
       "patch": {
+        "description": "Зміна вікна (`window_enabled`, `window_hours`) після спроб учнів перераховує їхнє\nзарахування (Celery, черга `sync`); результат учні бачать у `GET /sync/changes`.",
         "operationId": "update_test_tests__test_id__patch",
         "parameters": [
           {
@@ -11577,6 +13380,7 @@
     },
     "/tests/{test_id}/questions": {
       "post": {
+        "description": "Нове питання змінює максимум балів: наявні спроби переоцінюються (Celery).",
         "operationId": "create_question_tests__test_id__questions_post",
         "parameters": [
           {

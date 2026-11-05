@@ -99,5 +99,5 @@ async def update_media(
     опублікованих уроках, їхні пакети перезбирає Celery."""
     media, lessons = await service.set_subtitles(session, teacher, media_id, body.subtitles_id)
     for lesson_id in lessons:
-        enqueue_rebuild_for_lesson(lesson_id)
+        await enqueue_rebuild_for_lesson(lesson_id)
     return service.media_out(media, storage)

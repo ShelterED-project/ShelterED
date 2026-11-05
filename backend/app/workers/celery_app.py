@@ -1,6 +1,8 @@
 import logging
+from functools import partial
 from typing import Any
 
+import anyio
 from celery import Celery
 from kombu import Queue
 
@@ -20,6 +22,8 @@ celery_app = Celery(
         "app.workers.push",
         "app.workers.alerts",
         "app.workers.packs",
+        "app.workers.stats",
+        "app.workers.sync",
     ],
 )
 
@@ -52,20 +56,42 @@ celery_app.conf.update(
             "schedule": float(settings.packs_refresh_interval_s),
             "options": {"queue": "default", "expires": settings.packs_refresh_interval_s},
         },
+        "stats-refresh": {
+            "task": "stats.refresh_all",
+            "schedule": float(settings.stats_refresh_interval_s),
+            "options": {"queue": "default", "expires": settings.stats_refresh_interval_s},
+        },
     },
 )
 
 
-def enqueue(
+# Публікація задачі: кілька коротких повторів замість типових (до ~хвилини), щоб недоступний
+# брокер не тримав запит API.
+PUBLISH_RETRY_POLICY = {
+    "max_retries": 2,
+    "interval_start": 0,
+    "interval_step": 0.2,
+    "interval_max": 0.5,
+}
+
+
+def _send(name: str, args: list[Any], queue: str, options: dict[str, Any]) -> None:
+    options.setdefault("retry", True)
+    options.setdefault("retry_policy", PUBLISH_RETRY_POLICY)
+    celery_app.send_task(name, args=args, queue=queue, **options)
+
+
+async def enqueue(
     name: str, *, args: list[Any] | None = None, queue: str = "default", **options: Any
 ) -> None:
     """Ставить задачу в чергу за іменем (без імпорту модуля задачі).
 
-    Викликається ПІСЛЯ commit. Недоступний брокер не ламає вже збережену зміну: помилка
+    Викликається ПІСЛЯ commit. `send_task` блокує (мережа до Redis, повтори), тож іде в пулі
+    потоків, а не в циклі подій. Недоступний брокер не ламає вже збережену зміну: помилка
     логується, а наслідки підбирає повтор (ідемпотентні задачі, періодичні перезбірки,
     `GET /alerts/active` як запасний шлях для push).
     """
     try:
-        celery_app.send_task(name, args=args or [], queue=queue, **options)
+        await anyio.to_thread.run_sync(partial(_send, name, args or [], queue, options))
     except Exception:
         logger.exception("Failed to enqueue task %s", name)

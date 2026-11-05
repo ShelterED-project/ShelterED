@@ -1,3 +1,8 @@
+import threading
+
+import pytest
+
+from app.workers import celery_app as celery_module
 from app.workers.celery_app import celery_app
 from app.workers.system import ping
 
@@ -16,3 +21,24 @@ def test_reliability_settings():
 def test_ping_runs_locally():
     # Виклик як звичайної функції — без брокера; з брокером перевіряється вручну.
     assert ping() == "pong"
+
+
+@pytest.mark.anyio
+async def test_enqueue_publishes_off_the_event_loop_with_short_retries(monkeypatch):
+    """`send_task` блокує (Redis, повтори публікації): з async-обробника він іде в потоці, а
+    повтори короткі, тож недоступний брокер не тримає запит API; помилка не пробивається."""
+    loop_thread = threading.get_ident()
+    calls = []
+
+    def send_task(name, args=None, queue=None, **options):
+        calls.append((threading.get_ident(), name, options))
+        if name == "broken":
+            raise ConnectionError("broker down")
+
+    monkeypatch.setattr(celery_app, "send_task", send_task)
+    await celery_module.enqueue("stats.recompute_student", args=["x"])
+    await celery_module.enqueue("broken")
+    assert [c[1] for c in calls] == ["stats.recompute_student", "broken"]
+    thread, _, options = calls[0]
+    assert thread != loop_thread
+    assert options["retry"] is True and options["retry_policy"]["max_retries"] <= 2

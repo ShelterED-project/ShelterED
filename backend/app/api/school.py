@@ -153,7 +153,7 @@ async def create_slot(
 ) -> SlotOut:
     """Тижневий слот (час — місцевий час школи). Ідемпотентно за `id`."""
     slot, created = await service.create_slot(session, klass, body)
-    enqueue_rebuild_class(klass.id)
+    await enqueue_rebuild_class(klass.id)
     _created(response, created)
     return SlotOut.model_validate(slot)
 
@@ -168,7 +168,7 @@ async def update_slot(
 ) -> SlotOut:
     slot = await service.get_slot(session, klass, slot_id)
     slot = await service.update_slot(session, slot, body)
-    enqueue_rebuild_class(klass.id)
+    await enqueue_rebuild_class(klass.id)
     return SlotOut.model_validate(slot)
 
 
@@ -181,7 +181,7 @@ async def delete_slot(klass: AdminClass, slot_id: uuid.UUID, session: Session) -
     """Видаляє слот разом із його перевизначеннями й прив'язками уроків.
     Щоб завершити слот без втрати історії, задайте `valid_to`."""
     await service.delete_slot(session, await service.get_slot(session, klass, slot_id))
-    enqueue_rebuild_class(klass.id)
+    await enqueue_rebuild_class(klass.id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -212,7 +212,7 @@ async def create_override(
     """Скасування, заміна чи додатковий урок на дату. Ідемпотентно за `id`;
     на один слот у дату — одне перевизначення (409 OVERRIDE_EXISTS)."""
     override, created = await service.create_override(session, klass, body)
-    enqueue_rebuild_class(klass.id)
+    await enqueue_rebuild_class(klass.id)
     _created(response, created)
     return OverrideOut.model_validate(override)
 
@@ -224,7 +224,7 @@ async def create_override(
 )
 async def delete_override(klass: AdminClass, override_id: uuid.UUID, session: Session) -> Response:
     await service.delete_override(session, klass, override_id)
-    enqueue_rebuild_class(klass.id)
+    await enqueue_rebuild_class(klass.id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -300,7 +300,7 @@ async def assign_lesson(
     size = await service.assign_lesson(
         session, user, klass, slot_id, date, body.lesson_id, settings
     )
-    enqueue_rebuild_class(klass.id)
+    await enqueue_rebuild_class(klass.id)
     return AssignmentOut(slot_id=slot_id, date=date, lesson_id=body.lesson_id, pack_day_bytes=size)
 
 
@@ -313,5 +313,5 @@ async def unassign_lesson(
     klass: TeacherClass, slot_id: uuid.UUID, date: dt.date, session: Session
 ) -> Response:
     await service.unassign_lesson(session, klass, slot_id, date)
-    enqueue_rebuild_class(klass.id)
+    await enqueue_rebuild_class(klass.id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

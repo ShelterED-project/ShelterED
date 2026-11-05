@@ -178,7 +178,7 @@ async def authorize(
         raise AppError("INVALID_CLIENT", "Unknown client_id", status_code=400)
     user = await session.scalar(select(User).where(User.email == email))
     # verify_secret_async з None виконує фіктивну перевірку: час відповіді не видає, чи існує email.
-    # TODO: захист від підбору пароля — rate limiting запитів (за клієнтом/IP) в епіку безпеки,
+    # Захист від підбору пароля — rate limiting невдалих спроб у роутері (app/core/rate_limit.py),
     # а не блокування акаунтів (діти могли б навмисно блокувати інших).
     password_ok = await verify_secret_async(password, user.password_hash if user else None)
     if user is None or not user.is_active or not password_ok:

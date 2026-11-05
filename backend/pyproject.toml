@@ -19,6 +19,8 @@ dependencies = [
     # База часових поясів для zoneinfo: на Windows її немає (UTC, Europe/Kyiv).
     "tzdata==2026.5",
     "celery[redis]==5.6.3",
+    # Rate limiting входу (B15.3) напряму через redis.asyncio; версія — та, що тягне celery.
+    "redis==6.4.0",
     "PyJWT==2.15.1",
     "pwdlib[argon2]==0.3.1",
     # HTTP-клієнт до API тривог (B7); раніше був лише dev-залежністю тестів.

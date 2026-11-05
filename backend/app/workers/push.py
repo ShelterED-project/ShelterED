@@ -15,12 +15,12 @@ logger = logging.getLogger(__name__)
 PushType = Literal["alert", "all_clear", "pack_updated"]
 
 
-def enqueue_push(push_type: PushType, *, class_id: uuid.UUID, **ids: object) -> None:
+async def enqueue_push(push_type: PushType, *, class_id: uuid.UUID, **ids: object) -> None:
     """Єдина точка постановки push. Одержувачі — пристрої класу `class_id` (учні, вчителі;
     для тривоги — і батьки) визначає задача B8. `ids`: alert_id, lesson_id, pack_id тощо."""
     payload = {"type": push_type, "class_id": str(class_id)}
     payload.update({k: None if v is None else str(v) for k, v in ids.items()})
-    enqueue("push.send", args=[payload], queue="push")
+    await enqueue("push.send", args=[payload], queue="push")
 
 
 @celery_app.task(name="push.send")
