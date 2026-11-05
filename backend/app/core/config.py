@@ -86,6 +86,9 @@ class Settings(BaseSettings):
     stats_pass_score: int = 60
     stats_closing_soon_h: int = 6
     stats_refresh_interval_s: int = 3600
+    # Перерахунок класу після синхронізації відкладається на N с і не дублюється: коли клас
+    # синхронізується разом, задачі учнів ставлять один перерахунок класу.
+    stats_class_debounce_s: int = 30
     # Навчання під час тривог (дашборд адміністрації): перераховуються тривоги за N днів.
     stats_alert_lookback_days: int = 14
 

@@ -12,6 +12,7 @@ from test_sync import attempt, batch, content, now, progress, send
 from app.core.config import get_settings
 from app.models.stats import ClassLessonStat, StudentLessonStat, StudentStudyDay, StudentTestStat
 from app.services import stats as stats_service
+from app.workers import stats as stats_worker
 from app.workers.celery_app import celery_app
 
 pytestmark = pytest.mark.anyio
@@ -84,8 +85,76 @@ async def test_refresh_all_covers_students_without_activity(db_session, world, c
     assert row is not None and row.progress_pct == 0 and row.completed_at is None
 
 
+@pytest.fixture
+def worker_session(db_session, monkeypatch):
+    """Задачі Celery бачать тестову транзакцію замість власної сесії."""
+    from contextlib import asynccontextmanager
+
+    @asynccontextmanager
+    async def session():
+        yield db_session
+
+    monkeypatch.setattr(stats_worker, "standalone_session", session)
+
+
+async def test_class_sync_schedules_one_debounced_class_recompute(
+    client, db_session, world, factory, c, enqueued, worker_session
+) -> None:
+    """Клас синхронізується разом: задачі учнів рахують лише рядки учня й ставлять один
+    відкладений перерахунок класу (а не N повних перерахунків). Задача класу знімає позначку,
+    тож наступна синхронізація ставить новий перерахунок."""
+    if not await _redis_available():
+        pytest.skip("Redis is not available")
+    students = [world.student_a] + [
+        await factory.student(world.class_a, f"Учень{i}", "Тест") for i in range(3)
+    ]
+    for student in students:
+        await send(client, student, batch(progress(c.module.id, 100, now())))
+        assert await stats_worker._recompute_student(student.id) == 1
+    class_tasks = [e for e in enqueued if e.name == "stats.recompute_class"]
+    assert [t.args for t in class_tasks] == [[str(world.class_a.id)]]
+    # Задача учня клас не рахує.
+    assert await db_session.scalar(select(func.count()).select_from(ClassLessonStat)) == 0
+
+    assert await stats_worker._recompute_class(world.class_a.id) is True
+    row = await db_session.get(ClassLessonStat, (world.class_a.id, c.lesson.id))
+    assert row is not None and row.students_completed == len(students)
+    await stats_worker._recompute_student(world.student_a.id)
+    assert len([e for e in enqueued if e.name == "stats.recompute_class"]) == 2
+    await stats_worker._clear_pending(world.class_a.id)
+
+
+async def test_class_recompute_without_redis_is_still_scheduled(
+    db_session, world, enqueued, monkeypatch
+) -> None:
+    """Redis для дедуплікації недоступний — перерахунок класу однаково ставиться."""
+    from redis.asyncio import Redis
+
+    monkeypatch.setattr(
+        stats_worker,
+        "_redis",
+        lambda: Redis.from_url("redis://127.0.0.1:1/0", socket_connect_timeout=0.2),
+    )
+    for _ in range(2):
+        await stats_worker.enqueue_recompute_class(world.class_a.id)
+    assert len([e for e in enqueued if e.name == "stats.recompute_class"]) == 2
+
+
+async def _redis_available() -> bool:
+    redis = stats_worker._redis()
+    try:
+        await redis.ping()
+        return True
+    except Exception:
+        return False
+    finally:
+        await redis.aclose()
+
+
 def test_tasks_and_beat_are_registered() -> None:
-    assert {"stats.recompute_student", "stats.refresh_all"} <= set(celery_app.tasks)
+    assert {"stats.recompute_student", "stats.recompute_class", "stats.refresh_all"} <= set(
+        celery_app.tasks
+    )
     beat = celery_app.conf.beat_schedule["stats-refresh"]
     assert beat["task"] == "stats.refresh_all" and beat["options"]["queue"] == "default"
 

@@ -348,22 +348,28 @@ async def recompute_class(
     return True
 
 
-async def recompute_for_student(
-    session: AsyncSession, student_id: uuid.UUID, settings: Settings
-) -> int:
-    """Після синхронізації: рядки учня, потім кожного його класу (окремі транзакції: клас
-    читає вже закомічені рядки учнів, тож паралельні задачі різних учнів не гублять даних)."""
+async def recompute_student_rows(session: AsyncSession, student_id: uuid.UUID) -> list[uuid.UUID]:
+    """Рядки учня (commit). Повертає класи учня, рядки яких тепер треба перерахувати."""
     if not await recompute_student(session, student_id):
         await session.rollback()
-        return 0
+        return []
     await session.commit()
-    class_ids = list(
+    return list(
         await session.scalars(
             select(ClassMembership.class_id).where(
                 ClassMembership.user_id == student_id, ClassMembership.member_role == "student"
             )
         )
     )
+
+
+async def recompute_for_student(
+    session: AsyncSession, student_id: uuid.UUID, settings: Settings
+) -> int:
+    """Рядки учня, потім одразу кожного його класу (окремі транзакції: клас читає вже
+    закомічені рядки учнів). Задача після синхронізації класи не рахує сама, а ставить
+    відкладений перерахунок класу з дедуплікацією (`app/workers/stats.py`)."""
+    class_ids = await recompute_student_rows(session, student_id)
     for class_id in class_ids:
         await recompute_class(session, class_id, settings)
         await session.commit()
