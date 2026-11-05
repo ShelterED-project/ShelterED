@@ -23,6 +23,11 @@ os.environ["CORS_ORIGINS"] = '["http://localhost:5173"]'
 os.environ["ALERTS_API_TOKEN"] = ""
 os.environ["ALERTS_SOURCE_STALE_S"] = "300"
 os.environ["SYNC_SUSPICIOUS_SKEW_S"] = "300"
+os.environ["RATE_LIMIT_JOIN_ACCOUNT"] = "10"
+os.environ["RATE_LIMIT_JOIN_IP"] = "60"
+os.environ["RATE_LIMIT_LOGIN_ACCOUNT"] = "10"
+os.environ["RATE_LIMIT_LOGIN_IP"] = "60"
+os.environ["RATE_LIMIT_WINDOW_S"] = "900"
 
 import uuid  # noqa: E402
 from collections.abc import AsyncIterator  # noqa: E402
@@ -38,9 +43,10 @@ from httpx import ASGITransport, AsyncClient  # noqa: E402
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine  # noqa: E402
 from sqlalchemy.pool import NullPool  # noqa: E402
 
-from app.api.deps import get_storage  # noqa: E402
+from app.api.deps import get_rate_limiter, get_storage  # noqa: E402
 from app.core.config import get_settings  # noqa: E402
 from app.core.db import get_session  # noqa: E402
+from app.core.rate_limit import MemoryRateLimiter  # noqa: E402
 from app.core.security import create_access_token, hash_secret, new_link_code  # noqa: E402
 from app.core.storage import LocalMediaStorage  # noqa: E402
 from app.main import create_app  # noqa: E402
@@ -250,6 +256,9 @@ def app(db_session: AsyncSession) -> FastAPI:
         yield db_session
 
     application.dependency_overrides[get_session] = override_session
+    # Rate limiter у пам'яті (свіжий на тест): тести не залежать від Redis і один від одного.
+    limiter = MemoryRateLimiter()
+    application.dependency_overrides[get_rate_limiter] = lambda: limiter
     return application
 
 
@@ -292,6 +301,8 @@ async def committed(migrated_db: str) -> AsyncIterator[Committed]:
             yield session
 
     application.dependency_overrides[get_session] = override_session
+    limiter = MemoryRateLimiter()
+    application.dependency_overrides[get_rate_limiter] = lambda: limiter
     setup = maker()
     try:
         async with AsyncClient(

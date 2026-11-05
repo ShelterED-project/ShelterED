@@ -5129,7 +5129,7 @@
     },
     "/auth/authorize": {
       "post": {
-        "description": "OAuth 2.0 Authorization Code + PKCE (S256) для вчителів, батьків, адміністрації.\n\nФорму входу малює PWA; відповідь — одноразовий `code` (60 с) для `POST /auth/token`.",
+        "description": "OAuth 2.0 Authorization Code + PKCE (S256) для вчителів, батьків, адміністрації.\n\nФорму входу малює PWA; відповідь — одноразовий `code` (60 с) для `POST /auth/token`.\nНевдалі спроби обмежені на email і на IP (`RATE_LIMIT_LOGIN_*` за `RATE_LIMIT_WINDOW_S`);\nпонад ліміт — 429 з `Retry-After`. Акаунт не блокується.",
         "operationId": "authorize_auth_authorize_post",
         "requestBody": {
           "content": {
@@ -5181,6 +5181,23 @@
               }
             },
             "description": "Unprocessable Content"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RATE_LIMITED: забагато невдалих спроб; повторити після `Retry-After` с",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
           },
           "500": {
             "content": {
@@ -5302,7 +5319,7 @@
     },
     "/auth/student/join": {
       "post": {
-        "description": "Вхід учня: код класу + імʼя + прізвище + PIN (4–6 цифр).\n\nЯкщо учня з таким імʼям у класі ще немає — його створюють, інакше перевіряють PIN.\nКод класу нормалізується (лише A-Z і 0-9; кириличні двійники латиниці замінюються).\nПрострочений код пускає лише наявних учнів із вірним PIN; для невідомого імені й хибного PIN\nвідповідь однакова: 401 `INVALID_CREDENTIALS`.",
+        "description": "Вхід учня: код класу + імʼя + прізвище + PIN (4–6 цифр).\n\nЯкщо учня з таким імʼям у класі ще немає — його створюють, інакше перевіряють PIN.\nКод класу нормалізується (лише A-Z і 0-9; кириличні двійники латиниці замінюються).\nПрострочений код пускає лише наявних учнів із вірним PIN; для невідомого імені й хибного PIN\nвідповідь однакова: 401 `INVALID_CREDENTIALS`.\n\nЗахист від перебору PIN: невдалі спроби обмежені на код класу + ім'я й на IP\n(`RATE_LIMIT_JOIN_*` за `RATE_LIMIT_WINDOW_S`); понад ліміт — 429 з `Retry-After`.\nБлокування акаунта немає (ліміт знімається сам після вікна).",
         "operationId": "student_join_auth_student_join_post",
         "parameters": [
           {
@@ -5372,6 +5389,23 @@
               }
             },
             "description": "Unprocessable Content"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RATE_LIMITED: забагато невдалих спроб; повторити після `Retry-After` с",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
           },
           "500": {
             "content": {

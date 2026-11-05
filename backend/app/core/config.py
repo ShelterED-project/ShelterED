@@ -78,6 +78,17 @@ class Settings(BaseSettings):
     # пізніше часу сервера або |зсув годинника пакета| більше за цей поріг. Позначка, не блокування.
     sync_suspicious_skew_s: int = 300
 
+    # Rate limiting входу (B15.3): рахуються лише невдалі спроби, фіксоване вікно, без
+    # блокування акаунта. Redis БД 2 (0 і 1 — Celery); недоступний Redis — вхід дозволено.
+    rate_limit_redis_url: str = "redis://localhost:6380/2"
+    # Вхід учня: на код класу + ім'я (перебір PIN) і на IP (уся школа може бути за одним NAT).
+    rate_limit_join_account: int = 10
+    rate_limit_join_ip: int = 60
+    # Вхід дорослих (POST /auth/authorize): на email і на IP.
+    rate_limit_login_account: int = 10
+    rate_limit_login_ip: int = 60
+    rate_limit_window_s: int = 900
+
     @property
     def alerts_polling_enabled(self) -> bool:
         return bool(self.alerts_api_token and self.alerts_api_token.get_secret_value())

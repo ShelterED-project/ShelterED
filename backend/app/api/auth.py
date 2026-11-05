@@ -1,5 +1,6 @@
 import json
 import uuid
+from collections.abc import Awaitable, Callable
 from typing import Annotated, Literal
 from urllib.parse import parse_qsl
 
@@ -10,6 +11,7 @@ from app.api.deps import (
     AccessibleStudent,
     Admin,
     CurrentUser,
+    Limiter,
     Parent,
     Session,
     SettingsDep,
@@ -17,6 +19,8 @@ from app.api.deps import (
     StaffClass,
 )
 from app.core.errors import AppError
+from app.core.rate_limit import RateLimiter, Rule, rule
+from app.core.security import normalize_link_code
 from app.schemas.auth import (
     AdminCreateUserRequest,
     AuthorizeRequest,
@@ -41,6 +45,42 @@ UserAgent = Annotated[str | None, Header()]
 R401 = {401: {"model": ErrorResponse, "description": "Не автентифіковано"}}
 R403 = {403: {"model": ErrorResponse, "description": "Недостатньо прав"}}
 R404 = {404: {"model": ErrorResponse, "description": "Не знайдено"}}
+R429 = {
+    429: {
+        "model": ErrorResponse,
+        "description": "RATE_LIMITED: забагато невдалих спроб; повторити після `Retry-After` с",
+        "headers": {"Retry-After": {"schema": {"type": "integer"}}},
+    }
+}
+
+# Невдалі спроби входу, які рахує rate limiter (успішний вхід не рахується).
+_FAILED_LOGIN = {"INVALID_CREDENTIALS", "INVALID_JOIN_CODE"}
+
+
+def _client_ip(request: Request) -> str:
+    # За Nginx справжній IP дає uvicorn --proxy-headers (X-Forwarded-For від довіреного проксі).
+    return request.client.host if request.client else "unknown"
+
+
+async def _limited[T](
+    limiter: RateLimiter, rules: list[Rule], call: Callable[[], Awaitable[T]]
+) -> T:
+    """Вхід із лімітом невдалих спроб: вичерпаний ключ — 429 з Retry-After, без виклику."""
+    retry_after = await limiter.retry_after(rules)
+    if retry_after is not None:
+        raise AppError(
+            "RATE_LIMITED",
+            "Too many failed login attempts, try again later",
+            status_code=429,
+            details={"retry_after": retry_after},
+            headers={"Retry-After": str(retry_after)},
+        )
+    try:
+        return await call()
+    except AppError as exc:
+        if exc.code in _FAILED_LOGIN:
+            await limiter.hit(rules)
+        raise
 
 
 @router.post(
@@ -49,23 +89,39 @@ R404 = {404: {"model": ErrorResponse, "description": "Не знайдено"}}
     responses={
         400: {"model": ErrorResponse, "description": "Невідомий client_id"},
         401: {"model": ErrorResponse, "description": "INVALID_CREDENTIALS"},
+        **R429,
     },
 )
 async def authorize(
-    body: AuthorizeRequest, session: Session, settings: SettingsDep
+    body: AuthorizeRequest,
+    request: Request,
+    session: Session,
+    settings: SettingsDep,
+    limiter: Limiter,
 ) -> AuthorizeResponse:
     """OAuth 2.0 Authorization Code + PKCE (S256) для вчителів, батьків, адміністрації.
 
     Форму входу малює PWA; відповідь — одноразовий `code` (60 с) для `POST /auth/token`.
+    Невдалі спроби обмежені на email і на IP (`RATE_LIMIT_LOGIN_*` за `RATE_LIMIT_WINDOW_S`);
+    понад ліміт — 429 з `Retry-After`. Акаунт не блокується.
     """
-    code = await service.authorize(
-        session,
-        email=body.email,
-        password=body.password,
-        code_challenge=body.code_challenge,
-        client_id=body.client_id,
-        redirect_uri=body.redirect_uri,
-        settings=settings,
+    window = settings.rate_limit_window_s
+    rules = [
+        rule("login:acct", body.email.casefold(), settings.rate_limit_login_account, window),
+        rule("login:ip", _client_ip(request), settings.rate_limit_login_ip, window),
+    ]
+    code = await _limited(
+        limiter,
+        rules,
+        lambda: service.authorize(
+            session,
+            email=body.email,
+            password=body.password,
+            code_challenge=body.code_challenge,
+            client_id=body.client_id,
+            redirect_uri=body.redirect_uri,
+            settings=settings,
+        ),
     )
     return AuthorizeResponse(code=code)
 
@@ -149,10 +205,16 @@ async def me(user: CurrentUser) -> UserOut:
     responses={
         400: {"model": ErrorResponse, "description": "INVALID_JOIN_CODE"},
         401: {"model": ErrorResponse, "description": "INVALID_CREDENTIALS (хибний PIN)"},
+        **R429,
     },
 )
 async def student_join(
-    body: StudentJoinRequest, session: Session, settings: SettingsDep, user_agent: UserAgent = None
+    body: StudentJoinRequest,
+    request: Request,
+    session: Session,
+    settings: SettingsDep,
+    limiter: Limiter,
+    user_agent: UserAgent = None,
 ) -> TokenResponse:
     """Вхід учня: код класу + імʼя + прізвище + PIN (4–6 цифр).
 
@@ -160,15 +222,30 @@ async def student_join(
     Код класу нормалізується (лише A-Z і 0-9; кириличні двійники латиниці замінюються).
     Прострочений код пускає лише наявних учнів із вірним PIN; для невідомого імені й хибного PIN
     відповідь однакова: 401 `INVALID_CREDENTIALS`.
+
+    Захист від перебору PIN: невдалі спроби обмежені на код класу + ім'я й на IP
+    (`RATE_LIMIT_JOIN_*` за `RATE_LIMIT_WINDOW_S`); понад ліміт — 429 з `Retry-After`.
+    Блокування акаунта немає (ліміт знімається сам після вікна).
     """
-    return await service.student_join(
-        session,
-        join_code=body.join_code,
-        display_name=body.display_name,
-        last_name=body.last_name,
-        pin=body.pin,
-        settings=settings,
-        user_agent=user_agent,
+    window = settings.rate_limit_window_s
+    identity = normalize_link_code(body.join_code) + "\n"
+    identity += service.name_key(body.display_name, body.last_name)
+    rules = [
+        rule("join:acct", identity, settings.rate_limit_join_account, window),
+        rule("join:ip", _client_ip(request), settings.rate_limit_join_ip, window),
+    ]
+    return await _limited(
+        limiter,
+        rules,
+        lambda: service.student_join(
+            session,
+            join_code=body.join_code,
+            display_name=body.display_name,
+            last_name=body.last_name,
+            pin=body.pin,
+            settings=settings,
+            user_agent=user_agent,
+        ),
     )
 
 
