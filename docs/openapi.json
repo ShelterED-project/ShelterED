@@ -2080,6 +2080,33 @@
                     "title": "Перевір себе",
                     "window_enabled": true,
                     "window_hours": 48
+                  },
+                  {
+                    "id": "0192f0a0-0000-7000-8000-000000000332",
+                    "questions": [
+                      {
+                        "answer_key": [
+                          "a"
+                        ],
+                        "id": "0192f0a0-0000-7000-8000-000000000342",
+                        "kind": "single",
+                        "options": [
+                          {
+                            "id": "a",
+                            "text": "1/2"
+                          },
+                          {
+                            "id": "b",
+                            "text": "1/3"
+                          }
+                        ],
+                        "points": 1,
+                        "position": 1,
+                        "prompt": "Що більше: 1/2 чи 1/3?"
+                      }
+                    ],
+                    "title": "Тренування",
+                    "window_enabled": false
                   }
                 ],
                 "title": "Звичайні дроби",
@@ -2188,8 +2215,22 @@
         "type": "object"
       },
       "PackQuestion": {
-        "description": "Питання тесту в пакеті. Ключа відповідей немає (відкрите питання B11.4).",
+        "description": "Питання тесту в пакеті. `answer_key` (id правильних варіантів) є лише в тренувальному\nтесті (`window_enabled = false`) для миттєвої перевірки офлайн; в оцінюваному тесті з\nвікном поля немає зовсім — оцінює сервер після синхронізації.",
         "properties": {
+          "answer_key": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Answer Key"
+          },
           "id": {
             "format": "uuid",
             "title": "Id",
@@ -10208,6 +10249,33 @@
                           "title": "Перевір себе",
                           "window_enabled": true,
                           "window_hours": 48
+                        },
+                        {
+                          "id": "0192f0a0-0000-7000-8000-000000000332",
+                          "questions": [
+                            {
+                              "answer_key": [
+                                "a"
+                              ],
+                              "id": "0192f0a0-0000-7000-8000-000000000342",
+                              "kind": "single",
+                              "options": [
+                                {
+                                  "id": "a",
+                                  "text": "1/2"
+                                },
+                                {
+                                  "id": "b",
+                                  "text": "1/3"
+                                }
+                              ],
+                              "points": 1,
+                              "position": 1,
+                              "prompt": "Що більше: 1/2 чи 1/3?"
+                            }
+                          ],
+                          "title": "Тренування",
+                          "window_enabled": false
                         }
                       ],
                       "title": "Звичайні дроби",
