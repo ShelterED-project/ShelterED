@@ -565,22 +565,21 @@ UNIQUE (`lesson_id`, `part`, `position`).
 |---|---|---|
 | id | uuid PK | `client_event_id` події, що дала поточне значення |
 | student_id | uuid FK → app_user ON DELETE CASCADE | |
-| answered_on | date | дата відповіді в поясі школи (`Europe/Kyiv`) |
+| answered_on | date | дата відповіді в поясі школи (`Europe/Kyiv`) за виправленим часом |
 | value | smallint CHECK 1..5 | картинка погоди; людям число не показується |
-| occurred_at | timestamptz | годинник пристрою — лише для «пізніша відповідь дня перемагає» |
+| occurred_at | timestamptz | час пристрою, виправлений на зсув годинника пакета (`occurred_at` + `clock_skew_ms`); від нього дата й «пізніша відповідь дня перемагає» |
 | created_at | timestamptz default now() | |
 
-UNIQUE (`student_id`, `answered_on`) — одна відповідь на день, upsert з `WHERE (occurred_at, id) > ...`. Індекс `answered_on` — для видалення: Celery beat `wellbeing.purge` раз на добу видаляє рядки, старші за 30 днів. У `sync_event.payload` для `survey_answer` — `{}`.
+UNIQUE (`student_id`, `answered_on`) — одна відповідь на день, upsert з `WHERE (occurred_at, id) > ...`. Дата з майбутнього чи старша за 30 днів не записується (подія все одно `accepted`), читання обмежені `answered_on <= сьогодні`. Індекс `answered_on` — для видалення: Celery `wellbeing.purge` (crontab щодня 01:30 UTC і при старті воркера, ідемпотентно) видаляє рядки, старші за 30 днів, і датовані пізніше за завтра (Київ).
+
+У `sync_event.payload` для `survey_answer` — `{}`; міграція стирає payload уже збережених подій цього типу (відкат його не відновлює). Записи `sync_event` типу `survey_answer` той самий `wellbeing.purge` видаляє через 30 днів після `received_at`: payload порожній, але видно, коли й з якого пристрою дитина відповідала. Повтор такої події після видалення прийметься знову, але її дата вже поза строком — відповідь не запишеться.
 
 ### `wellbeing_view_log`
 | Поле | Тип | Примітка |
 |---|---|---|
 | id | uuid PK | |
 | viewer_id | uuid FK → app_user ON DELETE SET NULL | хто дивився |
-| scope | text CHECK IN (`student`, `class`, `school`) | |
-| student_id | uuid FK → app_user ON DELETE CASCADE NULL | для `student` (перегляд батьків) |
-| class_id | uuid FK → school_class ON DELETE CASCADE NULL | для `class` |
-| school_id | uuid FK → school ON DELETE CASCADE NULL | для `school` |
+| student_id | uuid FK → app_user ON DELETE CASCADE | чию дитину дивилися |
 | viewed_at | timestamptz default now() | |
 
-Пишеться при кожному перегляді батьків, вчителя й адміна (власний перегляд учня — ні). Нових персональних полів про дітей немає; агрегатів не зберігаємо — зведення рахуються на льоту з приховуванням груп < 5 дітей.
+Пишеться при кожному перегляді батьків (власний перегляд учня — ні). Вчитель і адміністрація доступу не мають зовсім, тож і записів від них немає. Нових персональних полів про дітей немає; агрегатів не зберігаємо — тижневе зведення батькам рахується на льоту.
