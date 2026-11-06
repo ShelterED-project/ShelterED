@@ -4529,6 +4529,120 @@
         "title": "StudentTestResult",
         "type": "object"
       },
+      "StudentWellbeingParent": {
+        "description": "Батьки бачать лише тижневе зведення словами, без днів і чисел.",
+        "properties": {
+          "gentle_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "М'який рядок, коли кілька днів були непрості",
+            "title": "Gentle Note"
+          },
+          "mood": {
+            "anyOf": [
+              {
+                "enum": [
+                  "sunny",
+                  "cloudy",
+                  "hard"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Більшість днів тижня; null — замало відповідей",
+            "title": "Mood"
+          },
+          "student_id": {
+            "format": "uuid",
+            "title": "Student Id",
+            "type": "string"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          },
+          "tips": {
+            "description": "Поради для розмови (лише разом із gentle_note)",
+            "items": {
+              "type": "string"
+            },
+            "title": "Tips",
+            "type": "array"
+          },
+          "view": {
+            "const": "parent",
+            "default": "parent",
+            "title": "View",
+            "type": "string"
+          },
+          "week_from": {
+            "format": "date",
+            "title": "Week From",
+            "type": "string"
+          },
+          "week_to": {
+            "format": "date",
+            "title": "Week To",
+            "type": "string"
+          }
+        },
+        "required": [
+          "student_id",
+          "week_from",
+          "week_to",
+          "mood",
+          "summary",
+          "gentle_note",
+          "tips"
+        ],
+        "title": "StudentWellbeingParent",
+        "type": "object"
+      },
+      "StudentWellbeingSelf": {
+        "description": "Учень бачить себе: свої картинки за 14 днів.",
+        "properties": {
+          "days": {
+            "description": "Останні 14 днів, від нових до старих",
+            "items": {
+              "$ref": "#/components/schemas/WellbeingDay"
+            },
+            "title": "Days",
+            "type": "array"
+          },
+          "show_support": {
+            "description": "Показати в наступній відповіді спокійний блок «Якщо хочеш поговорити»",
+            "title": "Show Support",
+            "type": "boolean"
+          },
+          "student_id": {
+            "format": "uuid",
+            "title": "Student Id",
+            "type": "string"
+          },
+          "view": {
+            "const": "self",
+            "default": "self",
+            "title": "View",
+            "type": "string"
+          }
+        },
+        "required": [
+          "student_id",
+          "days",
+          "show_support"
+        ],
+        "title": "StudentWellbeingSelf",
+        "type": "object"
+      },
       "StudyDay": {
         "properties": {
           "day": {
@@ -4839,29 +4953,17 @@
               },
               {
                 "additionalProperties": false,
-                "description": "`survey_answer`: відповідь на опитування «як ти зараз?» (ЧЕРНЕТКА, B13.4).\n\nМінімум даних: лише вибір зі шкали, без вільного тексту. Перелік питань і шкала\nпогоджуються з психологом; окремого сховища поки немає (подія лежить у `sync_event`).",
+                "description": "`survey_answer`: «Як ти зараз?» — картинка погоди 1..5 (1 «Гроза» … 5 «Сонечко»).\n\nНе тест і не діагноз (docs/wellbeing-checkin.md). Мінімум даних: лише вибір, без тексту.\nЗначення зберігається окремо (`wellbeing_answer`), у журнал `sync_event` іде порожній payload.",
                 "properties": {
-                  "question_id": {
-                    "maxLength": 32,
-                    "minLength": 1,
-                    "title": "Question Id",
-                    "type": "string"
-                  },
-                  "survey_id": {
-                    "format": "uuid",
-                    "title": "Survey Id",
-                    "type": "string"
-                  },
                   "value": {
-                    "maximum": 10.0,
-                    "minimum": 0.0,
+                    "description": "1 «Гроза» … 5 «Сонечко»",
+                    "maximum": 5.0,
+                    "minimum": 1.0,
                     "title": "Value",
                     "type": "integer"
                   }
                 },
                 "required": [
-                  "survey_id",
-                  "question_id",
                   "value"
                 ],
                 "title": "SurveyAnswerPayload",
@@ -5491,6 +5593,63 @@
           "environment"
         ],
         "title": "VersionResponse",
+        "type": "object"
+      },
+      "WellbeingDay": {
+        "properties": {
+          "date": {
+            "format": "date",
+            "title": "Date",
+            "type": "string"
+          },
+          "picture": {
+            "enum": [
+              "storm",
+              "rain",
+              "cloud",
+              "sun_cloud",
+              "sun"
+            ],
+            "title": "Picture",
+            "type": "string"
+          }
+        },
+        "required": [
+          "date",
+          "picture"
+        ],
+        "title": "WellbeingDay",
+        "type": "object"
+      },
+      "WellbeingTextsOut": {
+        "description": "Усі тексти «Як ти зараз?» (діти, батьки); `version` — для кешу фронтенду.",
+        "properties": {
+          "child": {
+            "additionalProperties": true,
+            "title": "Child",
+            "type": "object"
+          },
+          "disclaimer": {
+            "title": "Disclaimer",
+            "type": "string"
+          },
+          "parent": {
+            "additionalProperties": true,
+            "title": "Parent",
+            "type": "object"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "child",
+          "parent",
+          "disclaimer"
+        ],
+        "title": "WellbeingTextsOut",
         "type": "object"
       }
     },
@@ -12780,6 +12939,119 @@
         ]
       }
     },
+    "/students/{student_id}/wellbeing": {
+      "get": {
+        "description": "Учень бачить свої картинки за 14 днів і `show_support`; батьки — лише тижневе зведення\nсловами (без днів і чисел), кожен перегляд батьків пишеться в журнал. Вчитель (навіть\nсвого класу), адмін, інші батьки й учні — 403.",
+        "operationId": "student_wellbeing_students__student_id__wellbeing_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "student_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Student Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "mood": "sunny",
+                  "student_id": "0192f0a0-0000-7000-8000-0000000000cc",
+                  "summary": "Цього тижня більшість днів — сонячні.",
+                  "tips": [],
+                  "view": "parent",
+                  "week_from": "2026-10-31",
+                  "week_to": "2026-11-06"
+                },
+                "schema": {
+                  "discriminator": {
+                    "mapping": {
+                      "parent": "#/components/schemas/StudentWellbeingParent",
+                      "self": "#/components/schemas/StudentWellbeingSelf"
+                    },
+                    "propertyName": "view"
+                  },
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/StudentWellbeingSelf"
+                    },
+                    {
+                      "$ref": "#/components/schemas/StudentWellbeingParent"
+                    }
+                  ],
+                  "title": "Response Student Wellbeing Students  Student Id  Wellbeing Get"
+                }
+              }
+            },
+            "description": "Успішна відповідь"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Не автентифіковано"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Недостатньо прав"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Не знайдено"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Student Wellbeing",
+        "tags": [
+          "wellbeing"
+        ]
+      }
+    },
     "/subjects": {
       "get": {
         "description": "Загальний довідник і предмети своєї школи.",
@@ -13641,6 +13913,63 @@
         "summary": "Get Version",
         "tags": [
           "system"
+        ]
+      }
+    },
+    "/wellbeing/texts": {
+      "get": {
+        "description": "Усі тексти «Як ти зараз?»: питання, картинки погоди, відповіді дитині, дихальна вправа,\nблок підтримки з гарячою лінією, тексти для батьків. Будь-яка роль.",
+        "operationId": "wellbeing_texts_wellbeing_texts_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WellbeingTextsOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Не автентифіковано"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Wellbeing Texts",
+        "tags": [
+          "wellbeing"
         ]
       }
     }

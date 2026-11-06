@@ -11,7 +11,10 @@
   вікна тесту (B11), пізніші за дедлайн — `not_credited_late`, решта — `not_credited_repeat`;
   оцінює сервер за `answer_key`;
 - `rollcall_status` — перемагає найпізніший `occurred_at`;
-- `survey_answer` — лише запис у `sync_event` (окреме сховище — B13.4).
+- `survey_answer` — «Як ти зараз?»: значення йде лише в `wellbeing_answer` (одна відповідь
+  на день за часом, виправленим на зсув годинника пакета; перемагає найпізніша), у журнал
+  `sync_event` — порожній payload. Дата з майбутнього чи поза строком зберігання —
+  `accepted`, але відповідь не записується.
 
 Стрічка змін: `change_seq`/`change_xid` ставить тригер (міграція 827ed8465b1b). Курсор —
 пара (xid, seq): віддаються лише рядки транзакцій, старших за найстарішу ще активну
@@ -26,6 +29,7 @@ import uuid
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, ValidationError
 from sqlalchemy import and_, exists, func, literal, or_, select, text, tuple_, union_all, update
@@ -47,6 +51,7 @@ from app.schemas.sync import (
     ModuleProgressPayload,
     RollCallStatusChange,
     RollCallStatusPayload,
+    SurveyAnswerPayload,
     SyncChangesOut,
     SyncEventIn,
     SyncEventResult,
@@ -54,6 +59,8 @@ from app.schemas.sync import (
     SyncEventsResponse,
     TestAttemptPayload,
 )
+from app.services import school as school_service
+from app.services import wellbeing as wellbeing_service
 from app.workers.stats import enqueue_recompute_student
 
 logger = logging.getLogger(__name__)
@@ -83,6 +90,8 @@ class Batch:
     threshold: dt.timedelta
     # Допуск для `session_closed` (SYNC_ROLLCALL_CLOSE_GRACE_S).
     close_grace: dt.timedelta = dt.timedelta(0)
+    # Пояс школи учня — один раз на пакет, лише якщо в ньому є `survey_answer`.
+    tz: ZoneInfo | None = None
 
 
 def _result(event_id: uuid.UUID, status: str, reason: str | None = None) -> SyncEventResult:
@@ -549,7 +558,11 @@ async def _process_event(
     stored_payload: dict[str, Any] = {}
     try:
         payload = model.model_validate(event.payload)
-        stored_payload = payload.model_dump(mode="json")
+        # Значення «Як ти зараз?» у журнал подій не потрапляє (окреме сховище з обмеженим
+        # доступом і строком зберігання).
+        stored_payload = (
+            {} if isinstance(payload, SurveyAnswerPayload) else payload.model_dump(mode="json")
+        )
     except ValidationError:
         payload = None
     if payload is None or _has_nul(stored_payload):
@@ -580,6 +593,23 @@ async def _process_event(
         await _apply_test_attempt(session, batch, event.client_event_id, payload, suspicious)
     elif isinstance(payload, RollCallStatusPayload):
         await _apply_rollcall(session, batch, event.client_event_id, occurred_at, payload)
+    elif isinstance(payload, SurveyAnswerPayload):
+        # Дата відповіді — за часом, виправленим на зсув годинника пакета (як у `_after_close`):
+        # пристрій із неправильною датою не «переносить» відповідь на інший день.
+        try:
+            corrected = occurred_at + dt.timedelta(milliseconds=batch.clock_skew_ms)
+        except OverflowError:
+            corrected = None
+        if corrected is not None and batch.tz is not None:
+            await wellbeing_service.apply_answer(
+                session,
+                batch.user_id,
+                event.client_event_id,
+                corrected,
+                payload.value,
+                batch.tz,
+                batch.received_at,
+            )
     return _result(event.client_event_id, "accepted")
 
 
@@ -606,6 +636,8 @@ async def receive_events(
         threshold=threshold,
         close_grace=dt.timedelta(seconds=settings.sync_rollcall_close_grace_s),
     )
+    if any(e.type == "survey_answer" for e in body.events):
+        batch.tz = await school_service.school_tz(session, user.school_id)
 
     results: list[SyncEventResult | None] = [None] * len(body.events)
     first: dict[uuid.UUID, int] = {}
@@ -645,8 +677,12 @@ async def receive_events(
             # `duplicate` для вже записаних подій. Payload у лог не пишемо.
             failed += 1
             logger.exception("Sync event processing failed (type=%s)", event.type)
-    if any(r is not None and r.status == "accepted" for r in results):
+    if any(
+        r is not None and r.status == "accepted" and e.type != "survey_answer"
+        for r, e in zip(results, body.events, strict=True)
+    ):
         # Агрегати кабінетів (B14) — після commit подій; помилка брокера не ламає прийом.
+        # «Як ти зараз?» в агрегати не входить, тож пакет лише з ним перерахунку не ставить.
         await enqueue_recompute_student(batch.user_id)
     if failed:
         raise AppError(

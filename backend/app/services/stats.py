@@ -19,7 +19,6 @@ import datetime as dt
 import uuid
 from collections import defaultdict
 from decimal import Decimal
-from zoneinfo import ZoneInfo
 
 from sqlalchemy import delete, func, select, union
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -65,8 +64,8 @@ from app.schemas.stats import (
     StudyTime,
     TestStatusCounts,
 )
+from app.services.school import school_tz
 
-DEFAULT_TZ = "Europe/Kyiv"
 STUDY_DAYS = 7
 
 
@@ -76,13 +75,6 @@ def _now() -> dt.datetime:
 
 async def _lock(session: AsyncSession, key: str) -> None:
     await session.execute(select(func.pg_advisory_xact_lock(func.hashtextextended(key, 0))))
-
-
-async def _school_tz(session: AsyncSession, school_id: uuid.UUID | None) -> ZoneInfo:
-    name = None
-    if school_id is not None:
-        name = await session.scalar(select(School.timezone).where(School.id == school_id))
-    return ZoneInfo(name or DEFAULT_TZ)
 
 
 def _assigned_lessons(class_ids, today: dt.date):
@@ -123,7 +115,7 @@ async def recompute_student(
     if student is None or student.role != "student":
         return False
     await _lock(session, f"stats:student:{student_id}")
-    tz = await _school_tz(session, student.school_id)
+    tz = await school_tz(session, student.school_id)
     today = now.astimezone(tz).date()
 
     class_ids = select(ClassMembership.class_id).where(
@@ -241,7 +233,7 @@ async def recompute_class(
     if klass is None:
         return False
     await _lock(session, f"stats:class:{class_id}")
-    tz = await _school_tz(session, klass.school_id)
+    tz = await school_tz(session, klass.school_id)
     today = now.astimezone(tz).date()
 
     students = list(await session.scalars(_class_students(class_id)))
@@ -657,7 +649,7 @@ async def student_progress(
         )
     ).all()
 
-    tz = await _school_tz(session, student.school_id)
+    tz = await school_tz(session, student.school_id)
     today = now.astimezone(tz).date()
     first = today - dt.timedelta(days=STUDY_DAYS - 1)
     days = dict(
@@ -783,7 +775,7 @@ async def alert_study(
     now = now or _now()
     if admin.school_id is None:
         return AlertStudyOut(alerts=[], alert_minutes=0, study_minutes=0, computed_at=None)
-    tz = await _school_tz(session, admin.school_id)
+    tz = await school_tz(session, admin.school_id)
     query = (
         select(AlertEvent, AlertStudyStat)
         .outerjoin(AlertStudyStat, AlertStudyStat.alert_event_id == AlertEvent.id)

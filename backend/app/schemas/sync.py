@@ -93,15 +93,13 @@ class RollCallStatusPayload(BaseModel):
 
 
 class SurveyAnswerPayload(BaseModel):
-    """`survey_answer`: відповідь на опитування «як ти зараз?» (ЧЕРНЕТКА, B13.4).
+    """`survey_answer`: «Як ти зараз?» — картинка погоди 1..5 (1 «Гроза» … 5 «Сонечко»).
 
-    Мінімум даних: лише вибір зі шкали, без вільного тексту. Перелік питань і шкала
-    погоджуються з психологом; окремого сховища поки немає (подія лежить у `sync_event`).
+    Не тест і не діагноз (docs/wellbeing-checkin.md). Мінімум даних: лише вибір, без тексту.
+    Значення зберігається окремо (`wellbeing_answer`), у журнал `sync_event` іде порожній payload.
     """
 
-    survey_id: uuid.UUID
-    question_id: Annotated[str, StringConstraints(min_length=1, max_length=32)]
-    value: int = Field(ge=0, le=10)
+    value: int = Field(ge=1, le=5, strict=True, description="1 «Гроза» … 5 «Сонечко»")
 
     model_config = ConfigDict(extra="forbid")
 
