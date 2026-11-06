@@ -200,6 +200,40 @@ async def test_subscription_rejects_bad_keys(client, world) -> None:
     assert (await client.post("/push/subscriptions", json=data, headers=headers)).status_code == 422
 
 
+@pytest.mark.parametrize("padded", [False, True])
+async def test_subscription_accepts_padded_and_unpadded_keys(client, world, padded) -> None:
+    """Ключі з `=` у кінці (стандартний base64url) і без нього: p256dh 65 байт, auth 16."""
+    raw_point = base64.urlsafe_b64decode(P256DH + "=")
+    raw_auth = base64.urlsafe_b64decode(AUTH + "==")
+    assert (len(raw_point), len(raw_auth)) == (65, 16)
+    p256dh = base64.urlsafe_b64encode(raw_point).decode()
+    auth = base64.urlsafe_b64encode(raw_auth).decode()
+    if not padded:
+        p256dh, auth = p256dh.rstrip("="), auth.rstrip("=")
+    assert p256dh.endswith("=") == padded and auth.endswith("=") == padded
+    data = body()
+    data["keys"] = {"p256dh": p256dh, "auth": auth}
+    response = await client.post(
+        "/push/subscriptions", json=data, headers=auth_header(world.student_a)
+    )
+    assert response.status_code == 201
+
+
+async def test_subscription_rejects_p256dh_off_curve(client, world) -> None:
+    """65 байт із префіксом 0x04, але не точка P-256 — 422 (а не вічні збої шифрування)."""
+    raw = bytearray(base64.urlsafe_b64decode(P256DH + "="))
+    raw[-1] ^= 1
+    data = body()
+    data["keys"] = {
+        "p256dh": base64.urlsafe_b64encode(bytes(raw)).decode().rstrip("="),
+        "auth": AUTH,
+    }
+    response = await client.post(
+        "/push/subscriptions", json=data, headers=auth_header(world.student_a)
+    )
+    assert response.status_code == 422
+
+
 async def test_subscription_limit_removes_oldest(client, db_session, world, app) -> None:
     settings = get_settings().model_copy(update={"push_max_subscriptions_per_user": 3})
     app.dependency_overrides[get_settings] = lambda: settings

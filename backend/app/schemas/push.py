@@ -8,6 +8,7 @@ import uuid
 from typing import Annotated
 from urllib.parse import urlsplit
 
+from cryptography.hazmat.primitives.asymmetric import ec
 from pydantic import BaseModel, ConfigDict, StringConstraints, field_validator
 
 from app.core.config import get_settings
@@ -18,11 +19,18 @@ ENDPOINT = "https://fcm.googleapis.com/fcm/send/dXk2...abc"
 Key = Annotated[str, StringConstraints(min_length=1, max_length=256, pattern=r"^[A-Za-z0-9_=-]+$")]
 
 
-def _b64url_len(value: str) -> int:
+def _b64url_decode(value: str) -> bytes | None:
+    """base64url з `=` у кінці чи без нього; доповнення рахуємо від рядка без `=`."""
+    stripped = value.rstrip("=")
     try:
-        return len(base64.urlsafe_b64decode(value.rstrip("=") + "=" * (-len(value) % 4)))
+        return base64.urlsafe_b64decode(stripped + "=" * (-len(stripped) % 4))
     except (binascii.Error, ValueError):
-        return -1
+        return None
+
+
+def _b64url_len(value: str) -> int:
+    raw = _b64url_decode(value)
+    return -1 if raw is None else len(raw)
 
 
 class PushKeys(BaseModel):
@@ -34,8 +42,14 @@ class PushKeys(BaseModel):
     @field_validator("p256dh")
     @classmethod
     def _p256dh(cls, value: str) -> str:
-        if _b64url_len(value) != 65:
+        raw = _b64url_decode(value)
+        if raw is None or len(raw) != 65:
             raise ValueError("p256dh must be a base64url P-256 public key (65 bytes)")
+        # Точка має лежати на кривій P-256: інакше шифрування payload падає на кожній відправці.
+        try:
+            ec.EllipticCurvePublicKey.from_encoded_point(ec.SECP256R1(), raw)
+        except ValueError:
+            raise ValueError("p256dh is not a valid P-256 public key") from None
         return value
 
     @field_validator("auth")
