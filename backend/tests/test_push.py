@@ -234,24 +234,51 @@ async def test_subscription_rejects_p256dh_off_curve(client, world) -> None:
     assert response.status_code == 422
 
 
-async def test_subscription_limit_removes_oldest(client, db_session, world, app) -> None:
-    settings = get_settings().model_copy(update={"push_max_subscriptions_per_user": 3})
-    app.dependency_overrides[get_settings] = lambda: settings
+async def _subscribe_with_times(client, db_session, user, count: int) -> list[uuid.UUID]:
+    """`count` підписок; created_at — 1, 2, ... с (у тесті все в одній транзакції з тим самим
+    now()). updated_at найстарішої — найновіший, ніби її щойно чіпала спроба доставки."""
     ids = []
-    for _ in range(4):
+    for i in range(count):
         data = body()
         ids.append(uuid.UUID(data["id"]))
-        await client.post("/push/subscriptions", json=data, headers=auth_header(world.teacher_a))
-        # Різний updated_at (у тесті все в одній транзакції з тим самим now()).
+        await client.post("/push/subscriptions", json=data, headers=auth_header(user))
         sub = await db_session.get(PushSubscription, ids[-1])
-        sub.updated_at = sub.updated_at.replace(microsecond=0).replace(second=len(ids))
+        sub.created_at = sub.created_at.replace(microsecond=0, second=i + 1)
+        sub.updated_at = sub.created_at.replace(second=59 - i)
         await db_session.flush()
-    left = set(
+    return ids
+
+
+async def _left(db_session, user) -> set[uuid.UUID]:
+    return set(
         await db_session.scalars(
-            select(PushSubscription.id).where(PushSubscription.user_id == world.teacher_a.id)
+            select(PushSubscription.id).where(PushSubscription.user_id == user.id)
         )
     )
-    assert left == set(ids[1:])
+
+
+async def test_subscription_limit_removes_oldest_by_creation(
+    client, db_session, world, app
+) -> None:
+    """Витісняється найдавніша за created_at, навіть якщо її updated_at свіжий (доставка)."""
+    settings = get_settings().model_copy(update={"push_max_subscriptions_per_user": 3})
+    app.dependency_overrides[get_settings] = lambda: settings
+    ids = await _subscribe_with_times(client, db_session, world.teacher_a, 3)
+    await client.post("/push/subscriptions", json=body(), headers=auth_header(world.teacher_a))
+    left = await _left(db_session, world.teacher_a)
+    assert len(left) == 3 and ids[0] not in left and set(ids[1:]) <= left
+
+
+async def test_subscription_limit_removes_failed_first(client, db_session, world, app) -> None:
+    settings = get_settings().model_copy(update={"push_max_subscriptions_per_user": 3})
+    app.dependency_overrides[get_settings] = lambda: settings
+    ids = await _subscribe_with_times(client, db_session, world.teacher_a, 3)
+    failed = await db_session.get(PushSubscription, ids[2])
+    failed.failed_at = failed.created_at
+    await db_session.flush()
+    await client.post("/push/subscriptions", json=body(), headers=auth_header(world.teacher_a))
+    left = await _left(db_session, world.teacher_a)
+    assert len(left) == 3 and ids[2] not in left and set(ids[:2]) <= left
 
 
 async def test_delete_is_idempotent_and_own_only(client, db_session, world) -> None:

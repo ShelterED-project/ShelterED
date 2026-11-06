@@ -58,11 +58,16 @@ def endpoint_host(endpoint: str) -> str:
 
 
 async def _trim(session: AsyncSession, user_id: uuid.UUID, limit: int) -> None:
-    """Понад ліміт пристроїв на користувача — найдавніші (за останнім оновленням) видаляються."""
+    """Понад ліміт пристроїв на користувача видаляються спершу підписки з `failed_at`, далі
+    найдавніші за `created_at`. Не за `updated_at`: він змінюється й від спроб доставки."""
     keep = (
         select(PushSubscription.id)
         .where(PushSubscription.user_id == user_id)
-        .order_by(PushSubscription.updated_at.desc(), PushSubscription.created_at.desc())
+        .order_by(
+            PushSubscription.failed_at.is_not(None),
+            PushSubscription.created_at.desc(),
+            PushSubscription.id.desc(),
+        )
         .limit(limit)
     )
     await session.execute(
@@ -76,8 +81,6 @@ def _refresh(sub: PushSubscription, user: User, body: PushSubscriptionCreate) ->
     sub.user_id = user.id
     sub.p256dh = body.keys.p256dh
     sub.auth = body.keys.auth
-    # Явно, щоб `updated_at` змінився й без зміни даних: підписка «свіжа» для ліміту пристроїв.
-    sub.updated_at = dt.datetime.now(dt.UTC)
     sub.failed_at = None
 
 
