@@ -444,7 +444,7 @@ UNIQUE (`lesson_id`, `part`, `position`).
 ## Поза B2 (з'явиться у своїх епіках)
 
 - Ключ пристрою для підпису QR — B10.2 (можливо, разом із таблицею `device` ❓7).
-- Відповіді опитування «як ти зараз?» і журнал доступу до них — B13.4 / B15.4, окремо від решти даних.
+- Відповіді опитування «як ти зараз?» і журнал доступу до них — див. «Рішення «Як ти зараз?»».
 - Агрегати (прогрес класу, мапа знань) — B9.6 / B14, див. «Рішення B14».
 
 ## Рішення (раніше ❓)
@@ -555,3 +555,32 @@ UNIQUE (`lesson_id`, `part`, `position`).
 - **Компроміс загального ліміту:** його вичерпання на вікно (15 хв) не пускає й справжнього власника, тобто це DoS-важіль. Поріг навмисно високий: однокласник руками 100 хибних PIN за 15 хв не введе, тож досягти його можна лише скриптом зі зміною IP — а такий перебір і треба зупинити. Це тимчасовий ліміт, а не блокування: знімається сам, вчитель може скинути PIN.
 - **Лічильник** — атомарний Lua-скрипт (`INCR` + `EXPIRE` на першій спробі вікна); ключ без TTL не блокує й отримує вікно заново.
 - **IP клієнта** за Nginx — лише через `uvicorn --proxy-headers` з `FORWARDED_ALLOW_IPS` = IP/підмережа Nginx (Dockerfile); без цього всі клієнти мали б один IP Nginx.
+
+## Рішення «Як ти зараз?» (06.11.2026)
+
+Міграція `3fbf7c1bc79d`. Деталі й тексти — `docs/wellbeing-checkin.md`.
+
+### `wellbeing_answer`
+| Поле | Тип | Примітка |
+|---|---|---|
+| id | uuid PK | `client_event_id` події, що дала поточне значення |
+| student_id | uuid FK → app_user ON DELETE CASCADE | |
+| answered_on | date | дата відповіді в поясі школи (`Europe/Kyiv`) |
+| value | smallint CHECK 1..5 | картинка погоди; людям число не показується |
+| occurred_at | timestamptz | годинник пристрою — лише для «пізніша відповідь дня перемагає» |
+| created_at | timestamptz default now() | |
+
+UNIQUE (`student_id`, `answered_on`) — одна відповідь на день, upsert з `WHERE (occurred_at, id) > ...`. Індекс `answered_on` — для видалення: Celery beat `wellbeing.purge` раз на добу видаляє рядки, старші за 30 днів. У `sync_event.payload` для `survey_answer` — `{}`.
+
+### `wellbeing_view_log`
+| Поле | Тип | Примітка |
+|---|---|---|
+| id | uuid PK | |
+| viewer_id | uuid FK → app_user ON DELETE SET NULL | хто дивився |
+| scope | text CHECK IN (`student`, `class`, `school`) | |
+| student_id | uuid FK → app_user ON DELETE CASCADE NULL | для `student` (перегляд батьків) |
+| class_id | uuid FK → school_class ON DELETE CASCADE NULL | для `class` |
+| school_id | uuid FK → school ON DELETE CASCADE NULL | для `school` |
+| viewed_at | timestamptz default now() | |
+
+Пишеться при кожному перегляді батьків, вчителя й адміна (власний перегляд учня — ні). Нових персональних полів про дітей немає; агрегатів не зберігаємо — зведення рахуються на льоту з приховуванням груп < 5 дітей.
