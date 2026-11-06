@@ -267,6 +267,29 @@ async def test_batch_with_several_changes_pushes_latest_status(client, world, en
     assert [p["status"] for p in pushes(enqueued, "rollcall_status")] == ["safe"]
 
 
+async def test_batch_returning_to_previous_status_does_not_push(client, world, enqueued) -> None:
+    """A→B→A в одному пакеті: для батьків статус не змінився — push немає. A→B→A→B — є."""
+    sid = uuid.uuid4()
+    await start(client, world.teacher_a, world.class_a, sid)
+    t0 = now() - dt.timedelta(minutes=10)
+    await mark(client, world.student_a, sid, "in_shelter", t0)
+    assert len(pushes(enqueued, "rollcall_status")) == 1
+    body = batch_of(
+        rc_event(sid, "safe", t0 + dt.timedelta(minutes=1)),
+        rc_event(sid, "in_shelter", t0 + dt.timedelta(minutes=2)),
+    )
+    r = await client.post("/sync/events", json=body, headers=auth_header(world.student_a))
+    assert [x["status"] for x in r.json()["results"]] == ["accepted", "accepted"]
+    assert len(pushes(enqueued, "rollcall_status")) == 1
+    body = batch_of(
+        rc_event(sid, "safe", t0 + dt.timedelta(minutes=3)),
+        rc_event(sid, "in_shelter", t0 + dt.timedelta(minutes=4)),
+        rc_event(sid, "safe", t0 + dt.timedelta(minutes=5)),
+    )
+    r = await client.post("/sync/events", json=body, headers=auth_header(world.student_a))
+    assert [p["status"] for p in pushes(enqueued, "rollcall_status")] == ["in_shelter", "safe"]
+
+
 async def test_no_push_for_closed_session_or_rejected_event(client, world, enqueued) -> None:
     sid = uuid.uuid4()
     t0 = now()
