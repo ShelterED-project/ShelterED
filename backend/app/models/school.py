@@ -86,7 +86,6 @@ class User(TimestampMixin, Base):
     # refresh) із меншою версією перестають діяти.
     token_version: Mapped[int] = mapped_column(default=0, server_default=text("0"))
     is_active: Mapped[bool] = mapped_column(server_default=text("true"))
-    last_seen_at: Mapped[dt.datetime | None]
 
 
 class ClassMembership(Base):

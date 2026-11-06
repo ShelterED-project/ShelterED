@@ -121,6 +121,15 @@ class Settings(BaseSettings):
     rate_limit_qr_relay: int = 120
     rate_limit_qr_relay_window_s: int = 600
 
+    # Строки зберігання (B15.1, docs/data-inventory.md; щоденна задача `retention.purge`).
+    # Журнал подій: payload стирається, відхилені події видаляються (рядки прийнятих лишаються
+    # для ідемпотентності). Має бути значно більшим за горизонт офлайну пристрою.
+    retention_sync_event_days: int = 180
+    # Прострочені refresh-токени й коди авторизації — через N днів після закінчення строку.
+    retention_auth_days: int = 7
+    retention_parent_link_code_days: int = 30
+    retention_wellbeing_view_log_days: int = 365
+
     # Web Push (B8): пара ключів VAPID (`python -m app.cli gen-vapid`) і контакт `mailto:` для
     # push-сервісів. Не задано — відправка пропускається з попередженням у лог.
     vapid_public_key: str | None = None
