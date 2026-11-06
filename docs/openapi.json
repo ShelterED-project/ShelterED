@@ -1206,6 +1206,153 @@
         "title": "CurrentLessonOut",
         "type": "object"
       },
+      "DeletionRequestCreate": {
+        "examples": [
+          {
+            "id": "0192f0a0-0000-7000-8000-000000000d01",
+            "reason": "left_school"
+          }
+        ],
+        "properties": {
+          "id": {
+            "description": "Id запиту, створює клієнт (повтор — той самий запит)",
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "enum": [
+                  "left_school",
+                  "consent_withdrawn",
+                  "duplicate_account",
+                  "other"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Причина з переліку; вільного тексту немає (мінімум даних)",
+            "title": "Reason"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "DeletionRequestCreate",
+        "type": "object"
+      },
+      "DeletionRequestOut": {
+        "examples": [
+          {
+            "created_at": "2026-11-06T09:00:00Z",
+            "id": "0192f0a0-0000-7000-8000-000000000d01",
+            "reason": "left_school",
+            "requested_by_role": "parent",
+            "status": "pending",
+            "student_id": "0192f0a0-0000-7000-8000-000000000101",
+            "student_name": "Іван Петренко"
+          }
+        ],
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "decided_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decided At"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "enum": [
+                  "left_school",
+                  "consent_withdrawn",
+                  "duplicate_account",
+                  "other"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "requested_by_role": {
+            "enum": [
+              "parent",
+              "admin"
+            ],
+            "title": "Requested By Role",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "confirmed",
+              "rejected"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "student_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "NULL після видалення даних учня",
+            "title": "Student Id"
+          },
+          "student_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Ім'я та прізвище, доки учень існує",
+            "title": "Student Name"
+          }
+        },
+        "required": [
+          "id",
+          "student_id",
+          "student_name",
+          "status",
+          "reason",
+          "requested_by_role",
+          "created_at",
+          "decided_at"
+        ],
+        "title": "DeletionRequestOut",
+        "type": "object"
+      },
       "ErrorBody": {
         "properties": {
           "code": {
@@ -9975,6 +10122,316 @@
         ]
       }
     },
+    "/deletion-requests": {
+      "get": {
+        "description": "Адміністрація — запити своєї школи (`?status=pending` — черга на рішення); батьки —\nстатус власних запитів.",
+        "operationId": "list_requests_deletion_requests_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "pending",
+                    "confirmed",
+                    "rejected"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/DeletionRequestOut"
+                  },
+                  "title": "Response List Requests Deletion Requests Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Запити, новіші спершу (до 500)"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Не автентифіковано"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Недостатньо прав"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Requests",
+        "tags": [
+          "privacy"
+        ]
+      }
+    },
+    "/deletion-requests/{request_id}/confirm": {
+      "post": {
+        "description": "Адміністрація школи учня видаляє його дані безповоротно: акаунт і все пов'язане\n(спроби, прогрес, журнал подій, перекличка, «Як ти зараз?», push-підписки, токени,\nприв'язки батьків, агрегати). У журналі лишається запис без персональних даних.\nПовтор — той самий результат (200); відхилений запит — 409.",
+        "operationId": "confirm_deletion_requests__request_id__confirm_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "request_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Request Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "created_at": "2026-11-06T09:00:00Z",
+                  "id": "0192f0a0-0000-7000-8000-000000000d01",
+                  "reason": "left_school",
+                  "requested_by_role": "parent",
+                  "status": "pending",
+                  "student_id": "0192f0a0-0000-7000-8000-000000000101",
+                  "student_name": "Іван Петренко"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/DeletionRequestOut"
+                }
+              }
+            },
+            "description": "Успішна відповідь"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Не автентифіковано"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Недостатньо прав"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Запит не знайдено"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "DELETION_REQUEST_DECIDED: запит уже має інше рішення"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Confirm",
+        "tags": [
+          "privacy"
+        ]
+      }
+    },
+    "/deletion-requests/{request_id}/reject": {
+      "post": {
+        "description": "Адміністрація школи відхиляє запит. Повтор — той самий результат; виконаний — 409.",
+        "operationId": "reject_deletion_requests__request_id__reject_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "request_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Request Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "created_at": "2026-11-06T09:00:00Z",
+                  "id": "0192f0a0-0000-7000-8000-000000000d01",
+                  "reason": "left_school",
+                  "requested_by_role": "parent",
+                  "status": "pending",
+                  "student_id": "0192f0a0-0000-7000-8000-000000000101",
+                  "student_name": "Іван Петренко"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/DeletionRequestOut"
+                }
+              }
+            },
+            "description": "Успішна відповідь"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Не автентифіковано"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Недостатньо прав"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Запит не знайдено"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "DELETION_REQUEST_DECIDED: запит уже має інше рішення"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Reject",
+        "tags": [
+          "privacy"
+        ]
+      }
+    },
     "/health": {
       "get": {
         "description": "Liveness: процес живий. БД не перевіряє, щоб падіння Neon не перезапускало API.",
@@ -12591,6 +13048,127 @@
         "summary": "Update Question",
         "tags": [
           "lessons"
+        ]
+      }
+    },
+    "/students/{student_id}/deletion-requests": {
+      "post": {
+        "description": "Запит на повне видалення даних учня. Створюють батьки цієї дитини або адміністрація\nїї школи; виконує адміністрація школи (`/deletion-requests/{id}/confirm`). Відкритий\nзапит — один на учня. Ідемпотентно за `id`: повтор — 200 з наявним запитом (і після\nвидалення учня).",
+        "operationId": "create_request_students__student_id__deletion_requests_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "student_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Student Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeletionRequestCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Повтор із тим самим id: наявний запит"
+          },
+          "201": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "created_at": "2026-11-06T09:00:00Z",
+                  "id": "0192f0a0-0000-7000-8000-000000000d01",
+                  "reason": "left_school",
+                  "requested_by_role": "parent",
+                  "status": "pending",
+                  "student_id": "0192f0a0-0000-7000-8000-000000000101",
+                  "student_name": "Іван Петренко"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/DeletionRequestOut"
+                }
+              }
+            },
+            "description": "Запит створено"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Не автентифіковано"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Недостатньо прав"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Учня не знайдено"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "DELETION_REQUEST_EXISTS: в учня вже є відкритий запит; ID_CONFLICT: id зайнятий іншим запитом"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Request",
+        "tags": [
+          "privacy"
         ]
       }
     },

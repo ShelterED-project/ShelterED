@@ -11,6 +11,7 @@ from app.api import (
     lessons,
     media,
     packs,
+    privacy,
     push,
     rollcall,
     school,
@@ -73,6 +74,7 @@ def create_app() -> FastAPI:
     app.include_router(push.router)
     app.include_router(tutor.router)
     app.include_router(wellbeing.router)
+    app.include_router(privacy.router)
     return app
 
 
