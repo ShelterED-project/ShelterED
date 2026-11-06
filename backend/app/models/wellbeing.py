@@ -44,24 +44,15 @@ class WellbeingAnswer(Base):
 
 
 class WellbeingViewLog(Base):
-    """Хто й коли дивився дані «Як ти зараз?»: дитину (батьки) чи агрегат класу/школи."""
+    """Хто й коли дивився дані «Як ти зараз?» дитини (батьки). Сама дитина в журнал не
+    пишеться; вчитель і адміністрація доступу не мають."""
 
     __tablename__ = "wellbeing_view_log"
-    __table_args__ = (
-        CheckConstraint("scope IN ('student', 'class', 'school')", name="scope"),
-        Index("ix_wellbeing_view_log_student_id", "student_id"),
-    )
+    __table_args__ = (Index("ix_wellbeing_view_log_student_id", "student_id"),)
 
     id: Mapped[uuid.UUID] = uuid_pk()
     viewer_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("app_user.id", ondelete="SET NULL")
     )
-    scope: Mapped[str]
-    student_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("app_user.id", ondelete="CASCADE")
-    )
-    class_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("school_class.id", ondelete="CASCADE")
-    )
-    school_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("school.id", ondelete="CASCADE"))
+    student_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("app_user.id", ondelete="CASCADE"))
     viewed_at: Mapped[dt.datetime] = mapped_column(server_default=func.now())

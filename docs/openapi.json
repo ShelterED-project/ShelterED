@@ -1340,107 +1340,6 @@
         "title": "GapTopic",
         "type": "object"
       },
-      "GroupWellbeingOut": {
-        "description": "Зведення класу чи школи за 7 днів; менше 5 різних дітей — `too_few`, без чисел.",
-        "examples": [
-          {
-            "class_id": "0192f0a0-0000-7000-8000-000000000001",
-            "distribution": {
-              "cloudy": 6,
-              "hard": 3,
-              "sunny": 14
-            },
-            "scope": "class",
-            "status": "ok",
-            "week_from": "2026-10-31",
-            "week_to": "2026-11-06"
-          }
-        ],
-        "properties": {
-          "class_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Class Id"
-          },
-          "distribution": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/WellbeingDistribution"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "message": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "«Замало відповідей…» для `too_few`",
-            "title": "Message"
-          },
-          "school_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "School Id"
-          },
-          "scope": {
-            "enum": [
-              "class",
-              "school"
-            ],
-            "title": "Scope",
-            "type": "string"
-          },
-          "status": {
-            "enum": [
-              "ok",
-              "too_few"
-            ],
-            "title": "Status",
-            "type": "string"
-          },
-          "week_from": {
-            "format": "date",
-            "title": "Week From",
-            "type": "string"
-          },
-          "week_to": {
-            "format": "date",
-            "title": "Week To",
-            "type": "string"
-          }
-        },
-        "required": [
-          "scope",
-          "week_from",
-          "week_to",
-          "status",
-          "message",
-          "distribution"
-        ],
-        "title": "GroupWellbeingOut",
-        "type": "object"
-      },
       "HealthResponse": {
         "properties": {
           "status": {
@@ -5722,32 +5621,8 @@
         "title": "WellbeingDay",
         "type": "object"
       },
-      "WellbeingDistribution": {
-        "description": "Кількість відповідей за тиждень у трьох групах (не дітей і не оцінок).",
-        "properties": {
-          "cloudy": {
-            "title": "Cloudy",
-            "type": "integer"
-          },
-          "hard": {
-            "title": "Hard",
-            "type": "integer"
-          },
-          "sunny": {
-            "title": "Sunny",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "sunny",
-          "cloudy",
-          "hard"
-        ],
-        "title": "WellbeingDistribution",
-        "type": "object"
-      },
       "WellbeingTextsOut": {
-        "description": "Усі тексти «Як ти зараз?» (діти, батьки, персонал); `version` — для кешу фронтенду.",
+        "description": "Усі тексти «Як ти зараз?» (діти, батьки); `version` — для кешу фронтенду.",
         "properties": {
           "child": {
             "additionalProperties": true,
@@ -5763,11 +5638,6 @@
             "title": "Parent",
             "type": "object"
           },
-          "staff": {
-            "additionalProperties": true,
-            "title": "Staff",
-            "type": "object"
-          },
           "version": {
             "title": "Version",
             "type": "string"
@@ -5777,7 +5647,6 @@
           "version",
           "child",
           "parent",
-          "staff",
           "disclaimer"
         ],
         "title": "WellbeingTextsOut",
@@ -10086,107 +9955,6 @@
         ]
       }
     },
-    "/classes/{class_id}/wellbeing": {
-      "get": {
-        "description": "Розподіл відповідей класу за 7 днів у трьох групах; якщо відповіли менше 5 різних\nдітей — `too_few` без чисел. Лише вчитель цього класу; перегляд пишеться в журнал.",
-        "operationId": "class_wellbeing_classes__class_id__wellbeing_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "class_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Class Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "example": {
-                  "class_id": "0192f0a0-0000-7000-8000-000000000001",
-                  "distribution": {
-                    "cloudy": 6,
-                    "hard": 3,
-                    "sunny": 14
-                  },
-                  "scope": "class",
-                  "status": "ok",
-                  "week_from": "2026-10-31",
-                  "week_to": "2026-11-06"
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/GroupWellbeingOut"
-                }
-              }
-            },
-            "description": "Успішна відповідь"
-          },
-          "401": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Не автентифіковано"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Недостатньо прав"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Не знайдено"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Unprocessable Content"
-          },
-          "500": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Internal Server Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Class Wellbeing",
-        "tags": [
-          "wellbeing"
-        ]
-      }
-    },
     "/health": {
       "get": {
         "description": "Liveness: процес живий. БД не перевіряє, щоб падіння Neon не перезапускало API.",
@@ -13173,7 +12941,7 @@
     },
     "/students/{student_id}/wellbeing": {
       "get": {
-        "description": "Учень бачить свої картинки за 14 днів і `show_support`; батьки — лише тижневе зведення\nсловами (без днів і чисел), кожен перегляд батьків пишеться в журнал. Вчитель, адмін,\nінші батьки — 403.",
+        "description": "Учень бачить свої картинки за 14 днів і `show_support`; батьки — лише тижневе зведення\nсловами (без днів і чисел), кожен перегляд батьків пишеться в журнал. Вчитель (навіть\nсвого класу), адмін, інші батьки й учні — 403.",
         "operationId": "student_wellbeing_students__student_id__wellbeing_get",
         "parameters": [
           {
@@ -14148,98 +13916,9 @@
         ]
       }
     },
-    "/wellbeing/school": {
-      "get": {
-        "description": "Те саме для всієї школи адміна (без класів і окремих дітей). Лише адміністрація.",
-        "operationId": "school_wellbeing_wellbeing_school_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "example": {
-                  "class_id": "0192f0a0-0000-7000-8000-000000000001",
-                  "distribution": {
-                    "cloudy": 6,
-                    "hard": 3,
-                    "sunny": 14
-                  },
-                  "scope": "class",
-                  "status": "ok",
-                  "week_from": "2026-10-31",
-                  "week_to": "2026-11-06"
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/GroupWellbeingOut"
-                }
-              }
-            },
-            "description": "Успішна відповідь"
-          },
-          "401": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Не автентифіковано"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Недостатньо прав"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Не знайдено"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Unprocessable Content"
-          },
-          "500": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Internal Server Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "School Wellbeing",
-        "tags": [
-          "wellbeing"
-        ]
-      }
-    },
     "/wellbeing/texts": {
       "get": {
-        "description": "Усі тексти «Як ти зараз?»: питання, картинки погоди, відповіді дитині, дихальна вправа,\nблок підтримки з гарячою лінією, тексти для батьків і персоналу. Будь-яка роль.",
+        "description": "Усі тексти «Як ти зараз?»: питання, картинки погоди, відповіді дитині, дихальна вправа,\nблок підтримки з гарячою лінією, тексти для батьків. Будь-яка роль.",
         "operationId": "wellbeing_texts_wellbeing_texts_get",
         "responses": {
           "200": {

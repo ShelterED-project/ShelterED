@@ -5,8 +5,7 @@
 Хто що бачить:
 - учень — свої картинки за 14 днів (без журналу);
 - батьки прив'язаної дитини — тижневе зведення словами (з журналом);
-- вчитель класу / адмін школи — розподіл за тиждень, лише якщо відповіли ≥ 5 різних дітей
-  (з журналом); окремих відповідей — ніхто, крім самої дитини.
+- вчитель і адміністрація — нічого (ні окремих відповідей, ні зведень класу чи школи).
 """
 
 import datetime as dt
@@ -18,27 +17,20 @@ from sqlalchemy import delete, select, tuple_
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.school import ClassMembership, School, SchoolClass, User
+from app.models.school import School, User
 from app.models.wellbeing import WellbeingAnswer, WellbeingViewLog
-from app.schemas.wellbeing import (
-    GroupWellbeingOut,
-    StudentWellbeingParent,
-    StudentWellbeingSelf,
-    WellbeingDay,
-    WellbeingDistribution,
-)
+from app.schemas.wellbeing import StudentWellbeingParent, StudentWellbeingSelf, WellbeingDay
 from app.services.wellbeing_texts import MOOD_WORDS, PICTURES, TEXTS, mood_of
 
 DEFAULT_TZ = "Europe/Kyiv"
 HISTORY_DAYS = 14  # учень бачить себе за 14 днів
-WEEK_DAYS = 7  # зведення батькам і персоналу
+WEEK_DAYS = 7  # зведення батькам
 # М'який сигнал: ≥ 3 з останніх 5 відповідей за 14 днів — «Гроза» чи «Дощик».
 SIGNAL_WINDOW_DAYS = 14
 SIGNAL_LAST = 5
 SIGNAL_LOW_COUNT = 3
 LOW_MAX_VALUE = 2
 PARENT_MIN_ANSWERS = 3  # менше — зведення не показуємо (інакше видно окремий день)
-GROUP_MIN_CHILDREN = 5  # приховування малих груп
 RETENTION_DAYS = 30
 # Нічия в зведенні — на користь спокійнішого слова.
 _TIE_ORDER = ("cloudy", "sunny", "hard")
@@ -90,24 +82,8 @@ async def apply_answer(
 # ---------- перегляд ----------
 
 
-async def _log_view(
-    session: AsyncSession,
-    viewer: User,
-    scope: str,
-    *,
-    student_id: uuid.UUID | None = None,
-    class_id: uuid.UUID | None = None,
-    school_id: uuid.UUID | None = None,
-) -> None:
-    session.add(
-        WellbeingViewLog(
-            viewer_id=viewer.id,
-            scope=scope,
-            student_id=student_id,
-            class_id=class_id,
-            school_id=school_id,
-        )
-    )
+async def _log_view(session: AsyncSession, viewer: User, student_id: uuid.UUID) -> None:
+    session.add(WellbeingViewLog(viewer_id=viewer.id, student_id=student_id))
     await session.commit()
 
 
@@ -158,7 +134,7 @@ async def student_view(
         top = max(counts.values())
         mood = next(m for m in _TIE_ORDER if counts[m] == top)
     texts = TEXTS["parent"]
-    await _log_view(session, viewer, "student", student_id=student.id)
+    await _log_view(session, viewer, student.id)
     return StudentWellbeingParent(
         student_id=student.id,
         week_from=week_from,
@@ -168,64 +144,6 @@ async def student_view(
         gentle_note=texts["gentle_note"] if signal else None,
         tips=list(texts["tips"]) if signal else [],
     )
-
-
-async def _group(
-    session: AsyncSession, students, today: dt.date
-) -> tuple[dt.date, WellbeingDistribution | None]:
-    week_from = today - dt.timedelta(days=WEEK_DAYS - 1)
-    rows = (
-        await session.execute(
-            select(WellbeingAnswer.student_id, WellbeingAnswer.value).where(
-                WellbeingAnswer.student_id.in_(students),
-                WellbeingAnswer.answered_on.between(week_from, today),
-            )
-        )
-    ).all()
-    if len({r.student_id for r in rows}) < GROUP_MIN_CHILDREN:
-        return week_from, None
-    counts = Counter(mood_of(r.value) for r in rows)
-    return week_from, WellbeingDistribution(
-        sunny=counts["sunny"], cloudy=counts["cloudy"], hard=counts["hard"]
-    )
-
-
-def _group_out(scope: str, week_from, today, dist, **ids) -> GroupWellbeingOut:
-    return GroupWellbeingOut(
-        scope=scope,  # type: ignore[arg-type]
-        week_from=week_from,
-        week_to=today,
-        status="ok" if dist else "too_few",
-        message=None if dist else TEXTS["staff"]["too_few"],
-        distribution=dist,
-        **ids,
-    )
-
-
-async def class_view(
-    session: AsyncSession, viewer: User, klass: SchoolClass, now: dt.datetime | None = None
-) -> GroupWellbeingOut:
-    """Розподіл класу за 7 днів (вчитель класу); < 5 різних дітей — `too_few`."""
-    tz = await _school_tz(session, klass.school_id)
-    today = (now or _now()).astimezone(tz).date()
-    students = select(ClassMembership.user_id).where(
-        ClassMembership.class_id == klass.id, ClassMembership.member_role == "student"
-    )
-    week_from, dist = await _group(session, students, today)
-    await _log_view(session, viewer, "class", class_id=klass.id)
-    return _group_out("class", week_from, today, dist, class_id=klass.id)
-
-
-async def school_view(
-    session: AsyncSession, admin: User, now: dt.datetime | None = None
-) -> GroupWellbeingOut:
-    """Розподіл школи адміна за 7 днів; < 5 різних дітей — `too_few`."""
-    tz = await _school_tz(session, admin.school_id)
-    today = (now or _now()).astimezone(tz).date()
-    students = select(User.id).where(User.school_id == admin.school_id, User.role == "student")
-    week_from, dist = await _group(session, students, today)
-    await _log_view(session, admin, "school", school_id=admin.school_id)
-    return _group_out("school", week_from, today, dist, school_id=admin.school_id)
 
 
 # ---------- зберігання ----------

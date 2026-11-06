@@ -54,30 +54,12 @@ def upgrade() -> None:
         "wellbeing_view_log",
         sa.Column("id", sa.UUID(), nullable=False),
         sa.Column("viewer_id", sa.UUID(), nullable=True),
-        sa.Column("scope", sa.Text(), nullable=False),
-        sa.Column("student_id", sa.UUID(), nullable=True),
-        sa.Column("class_id", sa.UUID(), nullable=True),
-        sa.Column("school_id", sa.UUID(), nullable=True),
+        sa.Column("student_id", sa.UUID(), nullable=False),
         sa.Column(
             "viewed_at",
             postgresql.TIMESTAMP(timezone=True),
             server_default=sa.text("now()"),
             nullable=False,
-        ),
-        sa.CheckConstraint(
-            "scope IN ('student', 'class', 'school')", name=op.f("ck_wellbeing_view_log_scope")
-        ),
-        sa.ForeignKeyConstraint(
-            ["class_id"],
-            ["school_class.id"],
-            name=op.f("fk_wellbeing_view_log_class_id_school_class"),
-            ondelete="CASCADE",
-        ),
-        sa.ForeignKeyConstraint(
-            ["school_id"],
-            ["school.id"],
-            name=op.f("fk_wellbeing_view_log_school_id_school"),
-            ondelete="CASCADE",
         ),
         sa.ForeignKeyConstraint(
             ["student_id"],

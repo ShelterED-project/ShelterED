@@ -1,5 +1,5 @@
 """«Як ти зараз?» (docs/wellbeing-checkin.md): запис через синхронізацію, одна відповідь на
-день, хто що бачить, приховування малих груп, журнал переглядів, строк зберігання."""
+день, хто що бачить (лише дитина й батьки), журнал переглядів, строк зберігання."""
 
 import datetime as dt
 import logging
@@ -184,11 +184,7 @@ async def test_parent_sees_only_weekly_words_and_view_is_logged(client, db_sessi
     assert "days" not in body and "value" not in body
     assert body["week_to"] == today().isoformat()
     [log] = await logs(db_session)
-    assert (log.viewer_id, log.scope, log.student_id) == (
-        world.parent_a.id,
-        "student",
-        world.student_a.id,
-    )
+    assert (log.viewer_id, log.student_id) == (world.parent_a.id, world.student_a.id)
 
 
 async def test_parent_summary_needs_three_answers_and_ties_are_calm(
@@ -251,82 +247,24 @@ async def test_other_parent_of_another_child_is_denied(client, factory, world) -
     assert r.status_code == 403
 
 
-# ---------- клас і школа ----------
+# ---------- вчитель і адміністрація — нічого ----------
 
 
-async def five_answered(db, factory, klass, values=(5, 4, 3, 2, 1)) -> list:
-    students = [await factory.student(klass, f"Учень{i}", "Тест") for i in range(len(values))]
-    for student, value in zip(students, values, strict=True):
-        await answer(db, student, today(), value)
-    return students
-
-
-async def test_class_view_is_suppressed_below_five_children(
-    client, db_session, factory, world
+@pytest.mark.parametrize("who", ["teacher_a", "admin"])
+async def test_teacher_of_class_and_school_admin_see_nothing(
+    client, db_session, factory, world, who
 ) -> None:
-    students = await five_answered(db_session, factory, world.class_a, (5, 4, 3, 2))
-    # Кілька днів одного учня не додають «дітей».
-    await answer(db_session, students[0], today() - dt.timedelta(days=1), 5)
-    url = f"/classes/{world.class_a.id}/wellbeing"
-    r = await client.get(url, headers=auth_header(world.teacher_a))
-    assert r.status_code == 200, r.text
-    body = r.json()
-    assert body["status"] == "too_few" and body["distribution"] is None
-    assert body["message"] == TEXTS["staff"]["too_few"]
-    [log] = await logs(db_session)
-    assert (log.viewer_id, log.scope, log.class_id) == (
-        world.teacher_a.id,
-        "class",
-        world.class_a.id,
-    )
-
-
-async def test_class_view_shows_distribution_from_five_children(
-    client, db_session, factory, world
-) -> None:
-    students = await five_answered(db_session, factory, world.class_a)
-    await answer(db_session, students[0], today() - dt.timedelta(days=2), 4)
-    # Старіші за тиждень і з іншого класу — не рахуються.
-    await answer(db_session, students[1], today() - dt.timedelta(days=7), 1)
-    await answer(db_session, world.student_b, today(), 1)
-    r = await client.get(
-        f"/classes/{world.class_a.id}/wellbeing", headers=auth_header(world.teacher_a)
-    )
-    body = r.json()
-    assert body["status"] == "ok"
-    assert body["distribution"] == {"sunny": 3, "cloudy": 1, "hard": 2}
-    assert "student" not in r.text
-
-
-@pytest.mark.parametrize("who", ["teacher_b", "admin", "student_a", "parent_a"])
-async def test_class_view_only_for_teacher_of_class(client, db_session, world, who) -> None:
-    r = await client.get(
-        f"/classes/{world.class_a.id}/wellbeing", headers=auth_header(getattr(world, who))
-    )
+    """Вчитель класу дитини й адмін її школи не бачать ні дитину, ні зведень класу чи школи:
+    дані опитування — лише для дитини та її батьків."""
+    students = [await factory.student(world.class_a, f"Учень{i}", "Тест") for i in range(5)]
+    for student in [world.student_a, *students]:
+        await answer(db_session, student, today(), 1)
+    headers = auth_header(getattr(world, who))
+    r = await client.get(f"/students/{world.student_a.id}/wellbeing", headers=headers)
     assert r.status_code == 403
+    for url in (f"/classes/{world.class_a.id}/wellbeing", "/wellbeing/school"):
+        assert (await client.get(url, headers=headers)).status_code == 404
     assert await logs(db_session) == []
-
-
-async def test_school_view_for_admin_with_suppression(client, db_session, factory, world) -> None:
-    url = "/wellbeing/school"
-    await five_answered(db_session, factory, world.class_c)  # інша школа
-    await answer(db_session, world.student_a, today(), 5)
-    body = (await client.get(url, headers=auth_header(world.admin))).json()
-    assert body["status"] == "too_few" and body["distribution"] is None
-    await five_answered(db_session, factory, world.class_b, (5, 5, 3, 1))
-    body = (await client.get(url, headers=auth_header(world.admin))).json()
-    assert body["status"] == "ok"
-    assert body["distribution"] == {"sunny": 3, "cloudy": 1, "hard": 1}
-    assert body["school_id"] == str(world.school.id)
-    assert [(lg.scope, lg.school_id) for lg in await logs(db_session)] == [
-        ("school", world.school.id)
-    ] * 2
-
-
-@pytest.mark.parametrize("who", ["teacher_a", "student_a", "parent_a"])
-async def test_school_view_only_for_admin(client, world, who) -> None:
-    r = await client.get("/wellbeing/school", headers=auth_header(getattr(world, who)))
-    assert r.status_code == 403
 
 
 # ---------- тексти ----------
@@ -349,6 +287,7 @@ async def test_texts_for_any_authenticated_user(client, world, who) -> None:
         "0 800 500 225",
     }
     assert body["child"]["skip"] == "Пропустити"
+    assert "staff" not in body
     lowered = r.text.lower()
     for word in ("депрес", "тривожн", "ризик", "норм", "мусиш", "діагноз"):
         assert word not in lowered, word
