@@ -677,8 +677,12 @@ async def receive_events(
             # `duplicate` для вже записаних подій. Payload у лог не пишемо.
             failed += 1
             logger.exception("Sync event processing failed (type=%s)", event.type)
-    if any(r is not None and r.status == "accepted" for r in results):
+    if any(
+        r is not None and r.status == "accepted" and e.type != "survey_answer"
+        for r, e in zip(results, body.events, strict=True)
+    ):
         # Агрегати кабінетів (B14) — після commit подій; помилка брокера не ламає прийом.
+        # «Як ти зараз?» в агрегати не входить, тож пакет лише з ним перерахунку не ставить.
         await enqueue_recompute_student(batch.user_id)
     if failed:
         raise AppError(

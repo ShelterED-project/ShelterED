@@ -7,7 +7,7 @@ import pytest
 from conftest import auth_header
 from httpx import AsyncClient
 from sqlalchemy import func, select
-from test_sync import attempt, batch, content, now, progress, send
+from test_sync import attempt, batch, content, event, now, progress, send
 
 from app.core.config import get_settings
 from app.models.stats import ClassLessonStat, StudentLessonStat, StudentStudyDay, StudentTestStat
@@ -62,6 +62,13 @@ async def test_sync_batch_enqueues_one_recompute_after_commit(client, world, c, 
     # Повтор того самого пакета (лише duplicate) нічого не ставить.
     await send(client, world.student_a, body)
     assert len([e for e in enqueued if e.name == "stats.recompute_student"]) == 1
+
+
+async def test_survey_only_batch_does_not_enqueue_recompute(client, world, enqueued) -> None:
+    body = batch(event("survey_answer", {"value": 3}))
+    results = await send(client, world.student_a, body)
+    assert results[0]["status"] == "accepted"
+    assert [e for e in enqueued if e.name == "stats.recompute_student"] == []
 
 
 async def test_recompute_is_idempotent(client, db_session, world, c) -> None:
