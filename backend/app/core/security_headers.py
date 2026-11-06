@@ -2,7 +2,10 @@
 
 - `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `X-Frame-Options: DENY` —
   завжди (API не вбудовується у фрейми й не має сторінок, крім `/docs`).
-- `Cache-Control: no-store` на `/auth/*`: токени й коди не мають лягати в кеш браузера чи проксі.
+- `Cache-Control: no-store` за замовчуванням на всі відповіді: токени, одноразові коди
+  (прив'язка батьків, код класу), дані дітей не мають лягати в кеш браузера чи проксі.
+  Ендпоінти, які кешуються навмисно (пакети `GET /packs/{id}`, перекличка з ETag), ставлять
+  власний `Cache-Control` — його middleware не чіпає. Від шляху (і `root_path`) не залежить.
 - `Strict-Transport-Security` — лише коли HSTS увімкнено (`HSTS_ENABLED` або `ENVIRONMENT=prod`)
   і запит справді прийшов по HTTPS. Схему ставить uvicorn з `--proxy-headers` за
   `X-Forwarded-Proto` від довіреного Nginx (`FORWARDED_ALLOW_IPS`); сирий заголовок тут не
@@ -17,7 +20,6 @@ STATIC_HEADERS = {
     "Referrer-Policy": "no-referrer",
     "X-Frame-Options": "DENY",
 }
-NO_STORE_PREFIX = "/auth/"
 
 
 class SecurityHeadersMiddleware:
@@ -30,7 +32,6 @@ class SecurityHeadersMiddleware:
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
-        no_store = scope["path"].startswith(NO_STORE_PREFIX)
         hsts = self.hsts if scope.get("scheme") == "https" else None
 
         async def send_with_headers(message: Message) -> None:
@@ -38,8 +39,7 @@ class SecurityHeadersMiddleware:
                 headers = MutableHeaders(scope=message)
                 for name, value in STATIC_HEADERS.items():
                     headers.setdefault(name, value)
-                if no_store:
-                    headers["Cache-Control"] = "no-store"
+                headers.setdefault("Cache-Control", "no-store")
                 if hsts is not None:
                     headers["Strict-Transport-Security"] = hsts
             await send(message)

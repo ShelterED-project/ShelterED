@@ -23,7 +23,6 @@ def test_static_headers_on_every_response(make_client):
     assert response.headers["Referrer-Policy"] == "no-referrer"
     assert response.headers["X-Frame-Options"] == "DENY"
     assert "Strict-Transport-Security" not in response.headers
-    assert "no-store" not in response.headers.get("Cache-Control", "")
 
 
 def test_error_responses_have_headers(make_client):
@@ -32,10 +31,26 @@ def test_error_responses_have_headers(make_client):
     assert response.headers["X-Content-Type-Options"] == "nosniff"
 
 
-def test_auth_endpoints_not_cached(make_client):
-    response = make_client().get("/auth/me")
-    assert response.status_code == 401
-    assert response.headers["Cache-Control"] == "no-store"
+def test_api_responses_not_cached_by_default(make_client):
+    client = make_client()
+    for path in ("/auth/me", "/deletion-requests", "/health", "/no-such-path"):
+        assert client.get(path).headers["Cache-Control"] == "no-store", path
+    # Префікс за проксі (root_path) не обходить заборону кешу.
+    behind_proxy = TestClient(client.app, base_url="http://test", root_path="/api")
+    assert behind_proxy.get("/api/auth/me").headers["Cache-Control"] == "no-store"
+
+
+def test_own_cache_control_is_kept(make_client):
+    from fastapi import Response
+
+    app = make_client().app
+
+    @app.get("/cached-test")
+    async def cached() -> Response:
+        return Response(headers={"Cache-Control": "private, no-cache"})
+
+    response = TestClient(app).get("/cached-test")
+    assert response.headers["Cache-Control"] == "private, no-cache"
 
 
 def test_hsts_only_over_https_when_enabled(make_client):

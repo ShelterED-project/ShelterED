@@ -53,7 +53,7 @@ def create_app() -> FastAPI:
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
-        expose_headers=["X-Request-ID", "ETag"],
+        expose_headers=["X-Request-ID", "ETag", "Retry-After"],
     )
     app.add_middleware(
         SecurityHeadersMiddleware,
