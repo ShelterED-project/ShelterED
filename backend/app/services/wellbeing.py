@@ -27,7 +27,8 @@ from app.services.wellbeing_texts import MOOD_WORDS, PICTURES, TEXTS, mood_of
 
 HISTORY_DAYS = 14  # учень бачить себе за 14 днів
 WEEK_DAYS = 7  # зведення батькам
-# М'який сигнал: ≥ 3 з останніх 5 відповідей за 14 днів — «Гроза» чи «Дощик».
+# М'який сигнал дитині: ≥ 3 з останніх 5 відповідей за 14 днів — «Гроза» чи «Дощик».
+# Батькам — те саме вікно, що й зведення: ≥ 3 відповіді «Гроза»/«Дощик» за 7 днів.
 SIGNAL_WINDOW_DAYS = 14
 SIGNAL_LAST = 5
 SIGNAL_LOW_COUNT = 3
@@ -125,7 +126,6 @@ async def student_view(
         today - dt.timedelta(days=max(HISTORY_DAYS, SIGNAL_WINDOW_DAYS) - 1),
         today,
     )
-    signal = _gentle_signal(answers, today)
     if viewer.role == "student":
         history_since = today - dt.timedelta(days=HISTORY_DAYS - 1)
         return StudentWellbeingSelf(
@@ -135,7 +135,7 @@ async def student_view(
                 for d, v in answers
                 if history_since <= d <= today
             ],
-            show_support=signal,
+            show_support=_gentle_signal(answers, today),
         )
 
     week_from = today - dt.timedelta(days=WEEK_DAYS - 1)
@@ -145,6 +145,11 @@ async def student_view(
         counts = Counter(mood_of(v) for v in week)
         top = max(counts.values())
         mood = next(m for m in _TIE_ORDER if counts[m] == top)
+    # М'який рядок батькам — лише з відповідей того самого тижня, що й зведення (не може
+    # з'явитися поруч із «замало відповідей» і не розкриває старіші дні).
+    parent_signal = len(week) >= PARENT_MIN_ANSWERS and (
+        sum(v <= LOW_MAX_VALUE for v in week) >= SIGNAL_LOW_COUNT
+    )
     texts = TEXTS["parent"]
     await _log_view(session, viewer, student.id)
     return StudentWellbeingParent(
@@ -153,8 +158,8 @@ async def student_view(
         week_to=today,
         mood=mood,  # type: ignore[arg-type]
         summary=texts["summary"].format(word=MOOD_WORDS[mood]) if mood else texts["not_enough"],
-        gentle_note=texts["gentle_note"] if signal else None,
-        tips=list(texts["tips"]) if signal else [],
+        gentle_note=texts["gentle_note"] if parent_signal else None,
+        tips=list(texts["tips"]) if parent_signal else [],
     )
 
 

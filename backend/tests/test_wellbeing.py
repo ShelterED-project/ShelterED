@@ -236,7 +236,7 @@ async def test_parent_summary_needs_three_answers_and_ties_are_calm(
     assert body["mood"] == "sunny"
 
 
-async def test_gentle_signal_three_of_last_five_within_14_days(client, db_session, world) -> None:
+async def test_child_support_three_of_last_five_within_14_days(client, db_session, world) -> None:
     url = f"/students/{world.student_a.id}/wellbeing"
     # Старі непрості дні (поза 14 днями) не рахуються.
     for days_ago in (15, 16, 17):
@@ -246,21 +246,40 @@ async def test_gentle_signal_three_of_last_five_within_14_days(client, db_sessio
     await answer(db_session, world.student_a, today() - dt.timedelta(days=3), 4)
     child = (await client.get(url, headers=auth_header(world.student_a))).json()
     assert child["show_support"] is False
-    parent = (await client.get(url, headers=auth_header(world.parent_a))).json()
-    assert parent["gentle_note"] is None and parent["tips"] == []
 
     await answer(db_session, world.student_a, today() - dt.timedelta(days=8), 2)
     child = (await client.get(url, headers=auth_header(world.student_a))).json()
     assert child["show_support"] is True
+    # Батькам — лише тиждень зведення: за 7 днів непростих відповідей дві, рядка немає.
     parent = (await client.get(url, headers=auth_header(world.parent_a))).json()
-    assert parent["gentle_note"] == TEXTS["parent"]["gentle_note"]
-    assert parent["tips"] == TEXTS["parent"]["tips"]
+    assert parent["mood"] == "hard"
+    assert parent["gentle_note"] is None and parent["tips"] == []
 
     # Лише останні 5 відповідей: свіжі сонячні дні витісняють старі непрості.
     for days_ago in (0, 4, 5):
         await answer(db_session, world.student_a, today() - dt.timedelta(days=days_ago), 5)
     child = (await client.get(url, headers=auth_header(world.student_a))).json()
     assert child["show_support"] is False
+
+
+async def test_parent_gentle_note_uses_the_summary_week(client, db_session, world) -> None:
+    url = f"/students/{world.student_a.id}/wellbeing"
+    # Три непрості дні, але один — 8 днів тому: за тиждень лише дві відповіді, «замало
+    # відповідей» без м'якого рядка (хоча дитині блок підтримки вже показується).
+    for days_ago in (1, 2, 8):
+        await answer(db_session, world.student_a, today() - dt.timedelta(days=days_ago), 1)
+    parent = (await client.get(url, headers=auth_header(world.parent_a))).json()
+    assert parent["summary"] == TEXTS["parent"]["not_enough"]
+    assert parent["gentle_note"] is None and parent["tips"] == []
+    child = (await client.get(url, headers=auth_header(world.student_a))).json()
+    assert child["show_support"] is True
+
+    # Третя непроста відповідь у межах тижня — рядок і поради з'являються.
+    await answer(db_session, world.student_a, today() - dt.timedelta(days=6), 2)
+    parent = (await client.get(url, headers=auth_header(world.parent_a))).json()
+    assert parent["mood"] == "hard"
+    assert parent["gentle_note"] == TEXTS["parent"]["gentle_note"]
+    assert parent["tips"] == TEXTS["parent"]["tips"]
 
 
 @pytest.mark.parametrize("who", ["parent_free", "teacher_a", "admin", "student_b"])
