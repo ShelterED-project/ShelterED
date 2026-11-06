@@ -114,6 +114,12 @@ class Settings(BaseSettings):
     rate_limit_join_account_all_ips: int = 100
     rate_limit_login_account_all_ips: int = 100
     rate_limit_window_s: int = 900
+    # Ліміти на кількість запитів користувача (рахується кожен запит, не лише невдалий):
+    # ШІ-репетитор — на учня; QR-ретрансляція подій (`POST /sync/events` від вчителя) — на вчителя.
+    rate_limit_tutor: int = 20
+    rate_limit_tutor_window_s: int = 600
+    rate_limit_qr_relay: int = 120
+    rate_limit_qr_relay_window_s: int = 600
 
     # Web Push (B8): пара ключів VAPID (`python -m app.cli gen-vapid`) і контакт `mailto:` для
     # push-сервісів. Не задано — відправка пропускається з попередженням у лог.

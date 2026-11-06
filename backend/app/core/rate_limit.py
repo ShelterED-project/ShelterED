@@ -1,4 +1,5 @@
-"""Rate limiting входу (B15.3): захист PIN учня і пароля дорослих від перебору.
+"""Rate limiting (B15.3): вхід (захист PIN учня і пароля дорослих від перебору) і ліміт
+запитів користувача для ШІ-репетитора та QR-ретрансляції (`enforce`).
 
 Рахуються лише **невдалі** спроби (хибний PIN/пароль, невідомий код класу) у фіксованому
 вікні на кожен ключ; коли лічильник досяг ліміту, наступні запити з цим ключем отримують
@@ -24,6 +25,8 @@ from typing import Protocol
 
 from redis.asyncio import Redis
 from redis.exceptions import RedisError
+
+from app.core.errors import AppError
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +67,22 @@ for i, key in ipairs(KEYS) do
 end
 return #KEYS
 """
+
+
+async def enforce(limiter: RateLimiter, rules: list[Rule]) -> None:
+    """Ліміт запитів: кожен виклик рахується; вичерпаний ключ — 429 `RATE_LIMITED` з
+    `Retry-After` (запит не рахується). Між перевіркою й зарахуванням паралельні запити можуть
+    на кілька перевищити ліміт — для захисту від зловживань цього досить."""
+    retry_after = await limiter.retry_after(rules)
+    if retry_after is not None:
+        raise AppError(
+            "RATE_LIMITED",
+            "Too many requests, try again later",
+            status_code=429,
+            details={"retry_after": retry_after},
+            headers={"Retry-After": str(retry_after)},
+        )
+    await limiter.hit(rules)
 
 
 class RedisRateLimiter:

@@ -6,7 +6,7 @@ import logging
 import uuid
 
 import pytest
-from conftest import PASSWORD, PIN
+from conftest import PASSWORD, PIN, auth_header
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from redis.asyncio import Redis
@@ -275,3 +275,70 @@ async def test_account_wide_limit_for_adult_logins(app: FastAPI, world) -> None:
     async with from_ip(app, "10.9.9.9") as owner:
         r = await owner.post("/auth/authorize", json=authorize(email, PASSWORD))
         assert r.status_code == 429
+
+
+# ---------- ліміт запитів: ШІ-репетитор і QR-ретрансляція ----------
+
+
+def tutor_body() -> dict:
+    return {
+        "request_id": str(uuid.uuid4()),
+        "mode": "explain_again",
+        "lesson_id": "0192f0a0-0000-7000-8000-00000000ffff",
+    }
+
+
+def relay_body() -> dict:
+    return {
+        "sent_at": "2026-11-05T09:55:00Z",
+        "events": [
+            {
+                "client_event_id": str(uuid.uuid4()),
+                "type": "rollcall_status",
+                "device_id": str(uuid.uuid4()),
+                "occurred_at": "2026-11-05T09:54:10Z",
+                "payload": {"session_id": str(uuid.uuid4()), "status": "in_shelter"},
+            }
+        ],
+    }
+
+
+async def test_tutor_is_limited_per_student(client: AsyncClient, world) -> None:
+    """Кожен запит рахується (і поки заглушка відповідає 501); інший учень не зачеплений."""
+    headers = auth_header(world.student_a)
+    for _ in range(20):
+        r = await client.post("/tutor/ask", json=tutor_body(), headers=headers)
+        assert r.status_code == 501
+    r = await client.post("/tutor/ask", json=tutor_body(), headers=headers)
+    assert r.status_code == 429 and r.json()["error"]["code"] == "RATE_LIMITED"
+    assert 0 < int(r.headers["Retry-After"]) <= 600
+    other = await client.post("/tutor/ask", json=tutor_body(), headers=auth_header(world.student_b))
+    assert other.status_code == 501
+
+
+async def test_tutor_limit_not_spent_by_denied_roles(client: AsyncClient, world) -> None:
+    for _ in range(25):
+        r = await client.post("/tutor/ask", json=tutor_body(), headers=auth_header(world.teacher_a))
+        assert r.status_code == 403
+
+
+async def test_qr_relay_is_limited_per_teacher(client: AsyncClient, world) -> None:
+    headers = auth_header(world.teacher_a)
+    for _ in range(120):
+        r = await client.post("/sync/events", json=relay_body(), headers=headers)
+        assert r.status_code == 501
+    r = await client.post("/sync/events", json=relay_body(), headers=headers)
+    assert r.status_code == 429 and "Retry-After" in r.headers
+    other = await client.post(
+        "/sync/events", json=relay_body(), headers=auth_header(world.teacher_b)
+    )
+    assert other.status_code == 501
+
+
+async def test_student_sync_is_not_limited_by_relay_limit(
+    app: FastAPI, client: AsyncClient, world
+) -> None:
+    """Звичайна синхронізація учня не обмежується: outbox після днів офлайну має пройти."""
+    limiter = app.dependency_overrides[get_rate_limiter]()
+    await client.post("/sync/events", json=relay_body(), headers=auth_header(world.student_a))
+    assert limiter.counters == {}
