@@ -89,7 +89,9 @@ def run_seed() -> int:
     if settings.environment == "prod":
         print("Error: seed data is not allowed when ENVIRONMENT=prod", file=sys.stderr)
         return 1
-    password = os.environ.get("SEED_PASSWORD") or None
+    # Із Settings: змінна оточення або `.env` (SecretStr — у repr/логи не потрапляє).
+    secret = settings.seed_password
+    password = (secret.get_secret_value() if secret else None) or None
     if password is not None and len(password) < 8:
         print("SEED_PASSWORD must be at least 8 characters", file=sys.stderr)
         return 1

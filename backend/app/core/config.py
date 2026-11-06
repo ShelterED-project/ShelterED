@@ -126,6 +126,10 @@ class Settings(BaseSettings):
         "notify.windows.com",
     ]
 
+    # Демо-дані (`python -m app.cli seed`): спільний пароль дорослих (≥ 8 символів). Не задано —
+    # генерується й друкується один раз при створенні акаунтів.
+    seed_password: SecretStr | None = None
+
     @property
     def push_enabled(self) -> bool:
         return bool(

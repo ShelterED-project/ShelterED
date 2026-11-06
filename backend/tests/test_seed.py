@@ -1,6 +1,7 @@
 """Демо-дані (`python -m app.cli seed`): ідемпотентність, перевірки публікації, охорона prod."""
 
 import pytest
+from pydantic import SecretStr
 from sqlalchemy import func, select
 
 from app import cli
@@ -158,3 +159,44 @@ def test_cli_seed_refuses_production(monkeypatch, capsys) -> None:
     monkeypatch.setattr(cli, "get_settings", lambda: settings)
     assert cli.main(["seed"]) == 1
     assert "not allowed" in capsys.readouterr().err
+
+
+def test_seed_password_is_read_from_env_file(tmp_path, monkeypatch, capsys) -> None:
+    """SEED_PASSWORD береться через Settings, тож працює і з `.env`, і в repr не видно."""
+    from types import SimpleNamespace
+
+    from app.core.config import Settings
+    from app.seed import runner
+
+    monkeypatch.delenv("SEED_PASSWORD", raising=False)
+    env = tmp_path / ".env"
+    env.write_text("SEED_PASSWORD=from-dot-env-42\n", encoding="utf-8")
+    settings = Settings(_env_file=env)
+    assert settings.seed_password.get_secret_value() == "from-dot-env-42"
+    assert "from-dot-env-42" not in repr(settings)
+
+    captured = {}
+
+    async def fake_seed(session, settings, password=None):
+        captured["password"] = password
+        return SimpleNamespace(
+            school_id="s",
+            join_codes={},
+            adult_emails=[],
+            generated_password=None,
+            passwords_set=True,
+            lessons=0,
+            packs_built=0,
+            problems=[],
+        )
+
+    monkeypatch.setattr(cli, "get_settings", lambda: settings)
+    monkeypatch.setattr(runner, "seed", fake_seed)
+    assert cli.main(["seed"]) == 0
+    assert captured["password"] == "from-dot-env-42"
+    assert "from-dot-env-42" not in capsys.readouterr().out
+
+    short = settings.model_copy(update={"seed_password": SecretStr("short")})
+    monkeypatch.setattr(cli, "get_settings", lambda: short)
+    assert cli.main(["seed"]) == 1
+    assert "at least 8" in capsys.readouterr().err
