@@ -1,7 +1,8 @@
 """Адміністративні команди: python -m app.cli create-admin --email ... --name ... --school-id ...
 
 Також: python -m app.cli export-openapi (записує docs/openapi.json),
-python -m app.cli gen-vapid (друкує нову пару ключів VAPID для Web Push).
+python -m app.cli gen-vapid (друкує нову пару ключів VAPID для Web Push),
+python -m app.cli seed (демо-дані; пароль дорослих — SEED_PASSWORD або згенерований).
 """
 
 import argparse
@@ -19,6 +20,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from pydantic import TypeAdapter, ValidationError
 
+from app.core.config import get_settings
 from app.core.db import get_engine, get_sessionmaker
 from app.core.errors import AppError
 from app.models.school import School
@@ -77,6 +79,50 @@ def gen_vapid() -> tuple[str, str]:
     return _b64url(public), _b64url(private)
 
 
+def run_seed() -> int:
+    """Демо-дані в БД з DATABASE_URL. Пароль дорослих — SEED_PASSWORD, інакше генерується й
+    друкується один раз (лише при створенні акаунтів); у репозиторії паролів немає."""
+    from app.seed.content import STUDENT_PIN
+    from app.seed.runner import SeedRefused, seed
+
+    settings = get_settings()
+    if settings.environment == "prod":
+        print("Error: seed data is not allowed when ENVIRONMENT=prod", file=sys.stderr)
+        return 1
+    password = os.environ.get("SEED_PASSWORD") or None
+    if password is not None and len(password) < 8:
+        print("SEED_PASSWORD must be at least 8 characters", file=sys.stderr)
+        return 1
+
+    async def run():
+        try:
+            async with get_sessionmaker()() as session:
+                return await seed(session, settings, password=password)
+        finally:
+            await get_engine().dispose()
+
+    try:
+        result = asyncio.run(run())
+    except SeedRefused as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    print(f"School: {result.school_id}")
+    for name, code in result.join_codes.items():
+        print(f"Class {name}: join code {code}, students' PIN {STUDENT_PIN}")
+    print("Adults: " + ", ".join(result.adult_emails))
+    if result.generated_password:
+        print(f"Adults' password (shown once): {result.generated_password}")
+    elif result.passwords_set:
+        print("Adults' password: from SEED_PASSWORD")
+    else:
+        print("Adults' passwords unchanged (set SEED_PASSWORD to reset)")
+    print(f"Lessons: {result.lessons}, new packs: {result.packs_built}")
+    if result.problems:
+        print(f"Publication checks failed: {result.problems}", file=sys.stderr)
+        return 1
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m app.cli")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -88,7 +134,11 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--password", help="Для скриптів; інакше буде запит")
     sub.add_parser("export-openapi", help="Записати docs/openapi.json зі специфікації FastAPI")
     sub.add_parser("gen-vapid", help="Надрукувати нову пару ключів VAPID (у .env не пише)")
+    sub.add_parser("seed", help="Демо-дані: школа, класи, люди, розклад, уроки, пакети")
     args = parser.parse_args(argv)
+
+    if args.command == "seed":
+        return run_seed()
 
     if args.command == "gen-vapid":
         # Лише в stdout: ключ не пишеться у файли й не потрапляє в логи.
