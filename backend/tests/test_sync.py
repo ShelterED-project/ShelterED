@@ -592,6 +592,38 @@ async def test_deterministic_bad_events_are_rejected_not_retried_forever(
     assert await db_session.get(SyncEvent, uuid.UUID(old["client_event_id"])) is None
 
 
+async def test_nul_in_validated_payload_is_rejected_before_jsonb(
+    client, db_session, world, c, monkeypatch, caplog
+) -> None:
+    """Захисна перевірка `_has_nul`: якщо схема payload пропустить рядок із U+0000 (зараз
+    жодна не пропускає — id варіантів лише `[A-Za-z0-9_-]`, решта полів — UUID, числа, час),
+    подія `rejected`/`invalid_payload` ще до запису, без помилки JSONB."""
+    from pydantic import BaseModel, ConfigDict
+
+    from app.schemas.sync import PAYLOAD_MODELS
+
+    class Loose(BaseModel):
+        model_config = ConfigDict(extra="allow")
+
+    monkeypatch.setitem(PAYLOAD_MODELS, "test_attempt", Loose)
+    bad = attempt(c.test.id, {c.q1.id: ["a\u0000"]}, now())
+    good = progress(c.module.id, 50)
+    with caplog.at_level("ERROR"):
+        results = await send(client, world.student_a, batch(bad, good))
+    assert statuses(results) == [("rejected", "invalid_payload"), ("accepted", None)]
+    assert not any("data error" in r.getMessage() for r in caplog.records)
+    stored = await db_session.get(SyncEvent, uuid.UUID(bad["client_event_id"]))
+    assert stored.payload == {} and stored.reject_reason == "invalid_payload"
+    assert await send(client, world.student_a, batch(bad)) == [
+        {
+            "client_event_id": bad["client_event_id"],
+            "status": "rejected",
+            "reason": "invalid_payload",
+        }
+    ]
+    assert sync_service._has_nul({"k": ["x", {"y\u0000": 1}]})
+
+
 async def test_data_error_while_applying_is_rejected_infra_error_is_retried(
     committed, monkeypatch
 ) -> None:
