@@ -1,10 +1,12 @@
 """Адміністративні команди: python -m app.cli create-admin --email ... --name ... --school-id ...
 
-Також: python -m app.cli export-openapi (записує docs/openapi.json).
+Також: python -m app.cli export-openapi (записує docs/openapi.json),
+python -m app.cli gen-vapid (друкує нову пару ключів VAPID для Web Push).
 """
 
 import argparse
 import asyncio
+import base64
 import copy
 import getpass
 import json
@@ -13,6 +15,8 @@ import sys
 import uuid
 from pathlib import Path
 
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import ec
 from pydantic import TypeAdapter, ValidationError
 
 from app.core.db import get_engine, get_sessionmaker
@@ -58,6 +62,21 @@ def render_openapi() -> str:
     return json.dumps(spec, indent=2, ensure_ascii=False, sort_keys=True) + "\n"
 
 
+def _b64url(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
+
+
+def gen_vapid() -> tuple[str, str]:
+    """Нова пара ключів VAPID (P-256): публічний — нестиснена точка (applicationServerKey для
+    `pushManager.subscribe`), приватний — 32 байти; обидва base64url без `=`."""
+    key = ec.generate_private_key(ec.SECP256R1())
+    public = key.public_key().public_bytes(
+        serialization.Encoding.X962, serialization.PublicFormat.UncompressedPoint
+    )
+    private = key.private_numbers().private_value.to_bytes(32, "big")
+    return _b64url(public), _b64url(private)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m app.cli")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -68,7 +87,16 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--school-id", required=True, type=uuid.UUID)
     p.add_argument("--password", help="Для скриптів; інакше буде запит")
     sub.add_parser("export-openapi", help="Записати docs/openapi.json зі специфікації FastAPI")
+    sub.add_parser("gen-vapid", help="Надрукувати нову пару ключів VAPID (у .env не пише)")
     args = parser.parse_args(argv)
+
+    if args.command == "gen-vapid":
+        # Лише в stdout: ключ не пишеться у файли й не потрапляє в логи.
+        public, private = gen_vapid()
+        print(f"VAPID_PUBLIC_KEY={public}")
+        print(f"VAPID_PRIVATE_KEY={private}")
+        print("VAPID_SUBJECT=mailto:<admin email>")
+        return 0
 
     if args.command == "export-openapi":
         OPENAPI_PATH.write_text(render_openapi(), encoding="utf-8", newline="\n")

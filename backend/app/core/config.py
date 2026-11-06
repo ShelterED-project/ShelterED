@@ -110,6 +110,23 @@ class Settings(BaseSettings):
     rate_limit_login_account_all_ips: int = 100
     rate_limit_window_s: int = 900
 
+    # Web Push (B8): пара ключів VAPID (`python -m app.cli gen-vapid`) і контакт `mailto:` для
+    # push-сервісів. Не задано — відправка пропускається з попередженням у лог.
+    vapid_public_key: str | None = None
+    vapid_private_key: SecretStr | None = None
+    vapid_subject: str | None = None
+    # Пристроїв на користувача: понад ліміт найдавніші підписки видаляються.
+    push_max_subscriptions_per_user: int = 10
+
+    @property
+    def push_enabled(self) -> bool:
+        return bool(
+            self.vapid_public_key
+            and self.vapid_private_key
+            and self.vapid_private_key.get_secret_value()
+            and self.vapid_subject
+        )
+
     @property
     def alerts_polling_enabled(self) -> bool:
         return bool(self.alerts_api_token and self.alerts_api_token.get_secret_value())
