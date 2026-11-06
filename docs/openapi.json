@@ -3038,6 +3038,7 @@
         "type": "object"
       },
       "PushKeys": {
+        "description": "Ключі підписки браузера, base64url: p256dh — точка P-256 (65 байт), auth — 16 байт.",
         "properties": {
           "auth": {
             "maxLength": 256,
@@ -3068,8 +3069,8 @@
             "endpoint": "https://fcm.googleapis.com/fcm/send/dXk2...abc",
             "id": "0192f0a0-0000-7000-8000-000000000a01",
             "keys": {
-              "auth": "tBHI",
-              "p256dh": "BNcRdreALRFXTkOOUHK1EtK2wtaz5Ry4YfYCA_0QTpQ"
+              "auth": "dGKjugWk0qMwRUW6A0jvNQ",
+              "p256dh": "BBJFmkZC5F0jfP24cPgJUCB45eRrVp1-DWnDyMYoxVXhkPqlJDq98HcVnf0xelE_ZbzOfuy3yave_sTvQf3qH8M"
             }
           }
         ],
@@ -5558,6 +5559,25 @@
           "school_id"
         ],
         "title": "UserOut",
+        "type": "object"
+      },
+      "VapidKeyOut": {
+        "description": "Публічний ключ VAPID, base64url (нестиснена точка P-256).",
+        "examples": [
+          {
+            "public_key": "BCTzOAxHjAlTsdbtrMg4mKkcK8ka6j6EaNl5_QaSbAiJ4aPYalDUi8P6az5Fw8eEKMonQcHs4c-1rf539PNyDVs"
+          }
+        ],
+        "properties": {
+          "public_key": {
+            "title": "Public Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "public_key"
+        ],
+        "title": "VapidKeyOut",
         "type": "object"
       },
       "VersionResponse": {
@@ -12161,7 +12181,7 @@
     },
     "/push/subscriptions": {
       "post": {
-        "description": "Підписка пристрою на Web Push (будь-яка роль). Payload пушів мінімальний: тип + id.",
+        "description": "Підписка пристрою на Web Push (будь-яка роль). Payload пушів мінімальний: тип + id.\n\nІдемпотентно: той самий `endpoint` — наявна підписка (переприв'язана до поточного\nкористувача, з новими ключами; її `id` клієнт зберігає); той самий `id` власної\nпідписки з новим `endpoint` — оновлення. До `PUSH_MAX_SUBSCRIPTIONS_PER_USER` (10)\nпристроїв на користувача, понад ліміт найдавніші видаляються.",
         "operationId": "subscribe_push_subscriptions_post",
         "requestBody": {
           "content": {
@@ -12175,7 +12195,7 @@
         },
         "responses": {
           "200": {
-            "description": "Повтор із тим самим endpoint: наявна підписка"
+            "description": "Повтор із тим самим endpoint чи id: наявна підписка"
           },
           "201": {
             "content": {
@@ -12202,6 +12222,16 @@
             },
             "description": "Не автентифіковано"
           },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "ID_CONFLICT: id чужої підписки"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -12221,16 +12251,6 @@
               }
             },
             "description": "Internal Server Error"
-          },
-          "501": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "NOT_IMPLEMENTED: заглушка контракту"
           }
         },
         "security": [
@@ -12246,7 +12266,7 @@
     },
     "/push/subscriptions/{subscription_id}": {
       "delete": {
-        "description": "Видаляє власну підписку. Ідемпотентно (повтор — теж 204).",
+        "description": "Видаляє власну підписку. Чужа чи вже видалена — 404 (клієнт вважає її видаленою).",
         "operationId": "unsubscribe_push_subscriptions__subscription_id__delete",
         "parameters": [
           {
@@ -12303,16 +12323,6 @@
               }
             },
             "description": "Internal Server Error"
-          },
-          "501": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "NOT_IMPLEMENTED: заглушка контракту"
           }
         },
         "security": [
@@ -12321,6 +12331,76 @@
           }
         ],
         "summary": "Unsubscribe",
+        "tags": [
+          "push"
+        ]
+      }
+    },
+    "/push/vapid-key": {
+      "get": {
+        "description": "Публічний ключ VAPID (`applicationServerKey` для `pushManager.subscribe`).",
+        "operationId": "vapid_key_push_vapid_key_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "public_key": "BCTzOAxHjAlTsdbtrMg4mKkcK8ka6j6EaNl5_QaSbAiJ4aPYalDUi8P6az5Fw8eEKMonQcHs4c-1rf539PNyDVs"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/VapidKeyOut"
+                }
+              }
+            },
+            "description": "Успішна відповідь"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Не автентифіковано"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "PUSH_NOT_CONFIGURED: ключі VAPID не задані"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Vapid Key",
         "tags": [
           "push"
         ]
