@@ -9,13 +9,13 @@ import asyncio
 import logging
 import uuid
 
-from redis.asyncio import Redis
 from redis.exceptions import RedisError
 
 from app.core.config import get_settings
 from app.core.db import standalone_session
 from app.services import stats as stats_service
 from app.workers.celery_app import celery_app, enqueue
+from app.workers.redis_client import redis_client
 
 logger = logging.getLogger(__name__)
 
@@ -29,10 +29,6 @@ def _pending_key(class_id: uuid.UUID) -> str:
     return f"sheltered:stats:class_pending:{class_id}"
 
 
-def _redis() -> Redis:
-    return Redis.from_url(get_settings().redis_url, socket_timeout=0.5, socket_connect_timeout=0.5)
-
-
 async def enqueue_recompute_class(class_id: uuid.UUID) -> None:
     """Перерахунок класу через `STATS_CLASS_DEBOUNCE_S`, не більше одного в очікуванні:
     ключ у Redis (`SET NX`, TTL з запасом) ставить задачу лише перший. Задача знімає ключ
@@ -40,25 +36,20 @@ async def enqueue_recompute_class(class_id: uuid.UUID) -> None:
     недоступний — задача ставиться без дедуплікації (зайвий перерахунок краще пропущеного)."""
     delay = get_settings().stats_class_debounce_s
     first = True
-    redis = _redis()
     try:
-        first = bool(await redis.set(_pending_key(class_id), 1, nx=True, ex=delay + 60))
+        # Синхронний спільний клієнт: виклик короткий (таймаут 0,5 с), а задача — у воркері.
+        first = bool(redis_client().set(_pending_key(class_id), 1, nx=True, ex=delay + 60))
     except (RedisError, OSError) as exc:
         logger.warning("Class recompute dedup unavailable: %s", type(exc).__name__)
-    finally:
-        await redis.aclose()
     if first:
         await enqueue("stats.recompute_class", args=[str(class_id)], countdown=delay)
 
 
 async def _clear_pending(class_id: uuid.UUID) -> None:
-    redis = _redis()
     try:
-        await redis.delete(_pending_key(class_id))
+        redis_client().delete(_pending_key(class_id))
     except (RedisError, OSError) as exc:
         logger.warning("Class recompute dedup unavailable: %s", type(exc).__name__)
-    finally:
-        await redis.aclose()
 
 
 async def _recompute_student(student_id: uuid.UUID) -> int:

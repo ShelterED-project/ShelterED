@@ -23,7 +23,6 @@ import requests
 from celery import Task
 from py_vapid import Vapid
 from pywebpush import WebPushException, webpush
-from redis import Redis
 from redis.exceptions import RedisError
 
 from app.core.config import Settings, get_settings
@@ -38,6 +37,7 @@ from app.services.push import (
     SendResult,
 )
 from app.workers.celery_app import celery_app, enqueue
+from app.workers.redis_client import redis_client
 
 logger = logging.getLogger(__name__)
 
@@ -149,15 +149,10 @@ def _dedupe_key(key: str, sub_id: str) -> str:
     return f"sheltered:push:sent:{key}:{sub_id}"
 
 
-def _redis() -> Redis:
-    return Redis.from_url(get_settings().redis_url, socket_timeout=0.5, socket_connect_timeout=0.5)
-
-
 def claim(key: str, sub_id: str) -> bool:
     """True — надсилати (перша спроба або Redis недоступний, fail-open)."""
     try:
-        with _redis() as redis:
-            return bool(redis.set(_dedupe_key(key, sub_id), 1, nx=True, ex=DEDUPE_TTL_S))
+        return bool(redis_client().set(_dedupe_key(key, sub_id), 1, nx=True, ex=DEDUPE_TTL_S))
     except (RedisError, OSError) as exc:
         logger.warning("Push dedup unavailable, sending anyway: %s", type(exc).__name__)
         return True
@@ -165,8 +160,7 @@ def claim(key: str, sub_id: str) -> bool:
 
 def release(key: str, sub_id: str) -> None:
     try:
-        with _redis() as redis:
-            redis.delete(_dedupe_key(key, sub_id))
+        redis_client().delete(_dedupe_key(key, sub_id))
     except (RedisError, OSError) as exc:
         logger.warning("Push dedup unavailable: %s", type(exc).__name__)
 

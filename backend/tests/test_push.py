@@ -565,12 +565,6 @@ def test_retry_delay_is_bounded() -> None:
 class FakeRedis:
     store: dict[str, int] = {}
 
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *exc):
-        return False
-
     def set(self, key, value, nx=False, ex=None):
         if nx and key in self.store:
             return None
@@ -584,7 +578,7 @@ class FakeRedis:
 @pytest.fixture
 def fake_redis(monkeypatch) -> dict:
     FakeRedis.store = {}
-    monkeypatch.setattr(worker, "_redis", FakeRedis)
+    monkeypatch.setattr(worker, "redis_client", FakeRedis)
     return FakeRedis.store
 
 
@@ -644,13 +638,13 @@ def test_deliver_task_gives_up_after_max_retries(monkeypatch, fake_redis) -> Non
 
 def test_deliver_task_fails_open_without_redis(monkeypatch) -> None:
     class Down:
-        def __enter__(self):
+        def set(self, *args, **kwargs):
             raise ConnectionError("down")
 
-        def __exit__(self, *exc):
-            return False
+        def delete(self, *args):
+            raise ConnectionError("down")
 
-    monkeypatch.setattr(worker, "_redis", Down)
+    monkeypatch.setattr(worker, "redis_client", Down)
     sent = []
 
     async def deliver(sub_id, payload):
@@ -723,3 +717,18 @@ def test_webpush_sender_invalid_keys_are_permanent(monkeypatch) -> None:
     broken = settings.model_copy(update={"vapid_private_key": SecretStr("not-a-key")})
     with pytest.raises(Exception):  # noqa: B017 — будь-який виняток розбору ключа VAPID
         worker.webpush_sender(target, "{}", broken, options)
+
+
+def test_workers_share_one_cached_redis_client() -> None:
+    """Дедуплікація push і перерахунку класу — один клієнт (пул) на процес, а не нове
+    з'єднання на кожен виклик; claim/release його не закривають."""
+    from app.workers import redis_client as shared
+    from app.workers import stats as stats_worker
+
+    assert worker.redis_client is shared.redis_client is stats_worker.redis_client
+    client = shared.redis_client()
+    pool = client.connection_pool
+    sub, key = str(uuid.uuid4()), f"test-{uuid.uuid4()}"
+    worker.claim(key, sub)
+    worker.release(key, sub)
+    assert shared.redis_client() is client and client.connection_pool is pool
