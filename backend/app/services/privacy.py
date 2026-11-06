@@ -4,7 +4,8 @@
 членство в класах, прив'язки батьків і коди прив'язки, refresh-токени й коди авторизації,
 push-підписки, журнал подій `sync_event` (з ним спроби тестів), прогрес модулів, статуси
 переклички, «Як ти зараз?» (відповіді й журнал переглядів), агрегати учня. Агрегати класів
-після цього перераховуються задачею (`stats.recompute_class`).
+після цього перераховуються задачею (`stats.recompute_class`). Підтверджений запит
+(без персональних даних) лишається назавжди як запис журналу видалень.
 """
 
 import datetime as dt
@@ -12,13 +13,13 @@ import hashlib
 import logging
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError
-from app.models.privacy import DataDeletionLog, DataDeletionRequest
-from app.models.school import ClassMembership, User
+from app.models.privacy import DataDeletionRequest
+from app.models.school import ClassMembership, ParentChild, User
 from app.schemas.privacy import DeletionRequestCreate, DeletionRequestOut
 from app.services.idempotency import id_conflict, integrity_errors
 
@@ -34,22 +35,35 @@ def _now() -> dt.datetime:
     return dt.datetime.now(dt.UTC)
 
 
+async def to_out_many(
+    session: AsyncSession, reqs: list[DataDeletionRequest]
+) -> list[DeletionRequestOut]:
+    """Імена учнів — одним запитом. Інших користувачів (автор, хто вирішив) не розкриваємо:
+    лише роль автора."""
+    ids = {r.student_id for r in reqs if r.student_id is not None}
+    names: dict[uuid.UUID, str] = {}
+    if ids:
+        rows = await session.execute(
+            select(User.id, User.display_name, User.last_name).where(User.id.in_(ids))
+        )
+        names = {uid: " ".join(p for p in (first, last) if p) for uid, first, last in rows}
+    return [
+        DeletionRequestOut(
+            id=req.id,
+            student_id=req.student_id,
+            student_name=names.get(req.student_id) if req.student_id else None,
+            status=req.status,  # type: ignore[arg-type]
+            reason=req.reason,  # type: ignore[arg-type]
+            requested_by_role=req.requested_by_role,  # type: ignore[arg-type]
+            created_at=req.created_at,
+            decided_at=req.decided_at,
+        )
+        for req in reqs
+    ]
+
+
 async def to_out(session: AsyncSession, req: DataDeletionRequest) -> DeletionRequestOut:
-    name = None
-    if req.student_id is not None:
-        student = await session.get(User, req.student_id)
-        if student is not None:
-            name = " ".join(p for p in (student.display_name, student.last_name) if p)
-    return DeletionRequestOut(
-        id=req.id,
-        student_id=req.student_id,
-        student_name=name,
-        status=req.status,  # type: ignore[arg-type]
-        reason=req.reason,  # type: ignore[arg-type]
-        requested_by_role=req.requested_by_role,  # type: ignore[arg-type]
-        created_at=req.created_at,
-        decided_at=req.decided_at,
-    )
+    return (await to_out_many(session, [req]))[0]
 
 
 def _check_repeat(req: DataDeletionRequest, user: User, hashed: str, reason: str | None) -> None:
@@ -169,25 +183,9 @@ async def confirm(
             await session.flush()
             # Решту даних учня прибирає ON DELETE CASCADE у БД.
             await session.delete(student)
-    now = _now()
-    req.student_id = None
     req.status = "confirmed"
-    req.decided_at = now
+    req.decided_at = _now()
     req.decided_by = admin.id
-    await session.execute(
-        pg_insert(DataDeletionLog)
-        .values(
-            id=uuid.uuid4(),
-            request_id=req.id,
-            school_id=req.school_id,
-            student_hash=req.student_hash,
-            requested_by_role=req.requested_by_role,
-            requested_at=req.created_at,
-            confirmed_by=admin.id,
-            deleted_at=now,
-        )
-        .on_conflict_do_nothing(index_elements=["request_id"])
-    )
     await session.commit()
     # Без id учня й імен: лише id запиту.
     logger.info("Student data deleted", extra={"deletion_request_id": str(req.id)})
@@ -210,12 +208,19 @@ async def reject(session: AsyncSession, admin: User, request_id: uuid.UUID) -> D
 async def list_requests(
     session: AsyncSession, user: User, status: str | None
 ) -> list[DataDeletionRequest]:
-    """Адміністрація — запити своєї школи, батьки — власні запити."""
+    """Адміністрація — запити своєї школи; батьки — запити щодо своїх дітей (зокрема створені
+    другим із батьків чи школою) і власні (після видалення дитини прив'язки вже немає)."""
     stmt = select(DataDeletionRequest).order_by(DataDeletionRequest.created_at.desc())
     if user.role == "admin":
         stmt = stmt.where(DataDeletionRequest.school_id == user.school_id)
     else:
-        stmt = stmt.where(DataDeletionRequest.requested_by == user.id)
+        children = select(ParentChild.child_id).where(ParentChild.parent_id == user.id)
+        stmt = stmt.where(
+            or_(
+                DataDeletionRequest.requested_by == user.id,
+                DataDeletionRequest.student_id.in_(children),
+            )
+        )
     if status is not None:
         stmt = stmt.where(DataDeletionRequest.status == status)
     return list(await session.scalars(stmt.limit(500)))

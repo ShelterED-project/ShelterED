@@ -11,7 +11,7 @@ from test_sync import attempt, batch, content, event, progress, rollcall, send
 
 from app.models import Base
 from app.models.auth import AuthCode, ParentLinkCode, RefreshToken
-from app.models.privacy import DataDeletionLog, DataDeletionRequest
+from app.models.privacy import DataDeletionRequest
 from app.models.push import PushSubscription
 from app.models.school import User
 from app.models.wellbeing import WellbeingViewLog
@@ -133,19 +133,19 @@ async def test_parent_requests_admin_confirms_and_all_child_data_is_gone(
     assert await db_session.get(User, w.parent_a.id) is not None
     row = await db_session.get(DataDeletionRequest, uuid.UUID(req["id"]))
     assert row.student_id is None and row.student_hash == student_hash(student_id)
-    log = await db_session.scalar(select(DataDeletionLog))
-    assert log.request_id == row.id and log.confirmed_by == w.admin.id
-    assert log.student_hash == student_hash(student_id) and log.requested_by_role == "parent"
+    # Підтверджений запит і є записом журналу видалень.
+    assert row.status == "confirmed" and row.decided_by == w.admin.id
+    assert row.decided_at is not None and row.requested_by_role == "parent"
     assert any(
         c.name == "stats.recompute_class" and c.args == [str(w.class_a.id)] for c in enqueued
     )
 
-    # Повтор підтвердження — той самий результат, без нового запису журналу.
+    # Повтор підтвердження — той самий результат.
     again = await client.post(
         f"/deletion-requests/{req['id']}/confirm", headers=auth_header(w.admin)
     )
     assert again.status_code == 200 and again.json() == done
-    assert await db_session.scalar(select(func.count()).select_from(DataDeletionLog)) == 1
+    assert await db_session.scalar(select(func.count()).select_from(DataDeletionRequest)) == 1
     # Батьки бачать статус свого запиту.
     mine = await client.get("/deletion-requests", headers=auth_header(w.parent_a))
     assert [(x["id"], x["status"]) for x in mine.json()] == [(req["id"], "confirmed")]
@@ -229,3 +229,43 @@ async def test_reason_is_enum_only(client, w) -> None:
     r = await create(client, w.parent_a, w.student_a, reason="Іван переїхав до Львова")
     assert r.status_code == 422
     assert (await create(client, w.parent_a, w.student_a, reason=None)).status_code == 201
+
+
+async def test_parents_see_all_requests_for_their_child(client, factory, w) -> None:
+    """Другий із батьків бачить запит, створений школою чи першим із батьків (інакше 409
+    `DELETION_REQUEST_EXISTS` без можливості побачити наявний); автор — лише роллю."""
+    second_parent = await factory.parent_of(w.student_a)
+    by_admin = (await create(client, w.admin, w.student_a)).json()
+    clash = await create(client, second_parent, w.student_a)
+    assert clash.json()["error"]["code"] == "DELETION_REQUEST_EXISTS"
+    for parent in (w.parent_a, second_parent):
+        r = await client.get("/deletion-requests", headers=auth_header(parent))
+        assert r.status_code == 200
+        [seen] = r.json()
+        assert seen["id"] == by_admin["id"] and seen["requested_by_role"] == "admin"
+        assert seen["student_name"] == "Іван Петренко"
+        assert not {"requested_by", "decided_by"} & seen.keys()
+    other_parent = await factory.parent_of(w.student_b)
+    assert (await client.get("/deletion-requests", headers=auth_header(other_parent))).json() == []
+
+
+async def test_audit_row_survives_school_deletion(client, db_session, w) -> None:
+    from sqlalchemy import delete
+
+    from app.models.school import School
+
+    req = (await create(client, w.other_admin, w.student_c)).json()
+    r = await client.post(
+        f"/deletion-requests/{req['id']}/confirm", headers=auth_header(w.other_admin)
+    )
+    assert r.status_code == 200
+    # Школу видаляють разом з її користувачами (app_user.school_id без каскаду).
+    await db_session.execute(delete(User).where(User.school_id == w.other_school.id))
+    await db_session.execute(delete(School).where(School.id == w.other_school.id))
+    row = await db_session.scalar(
+        select(DataDeletionRequest)
+        .where(DataDeletionRequest.id == uuid.UUID(req["id"]))
+        .execution_options(populate_existing=True)
+    )
+    assert row is not None and row.school_id is None and row.status == "confirmed"
+    assert row.student_hash == student_hash(w.student_c.id)

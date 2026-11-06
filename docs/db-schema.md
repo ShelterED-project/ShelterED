@@ -598,7 +598,7 @@ UNIQUE (`student_id`, `answered_on`) — одна відповідь на ден
 
 ## Рішення B15 «Безпека даних» (06.11.2026)
 
-Міграції `cd5251c1640d` (запити й журнал видалення) і `ab864a5a777c` (прибрано `app_user.last_seen_at` — ніде не писалося й не читалося). Інвентаризація даних про дітей і строки зберігання — `docs/data-inventory.md`.
+Міграції `cd5251c1640d` (запити на видалення; підтверджені запити — журнал видалень) і `ab864a5a777c` (прибрано `app_user.last_seen_at` — ніде не писалося й не читалося). Інвентаризація даних про дітей і строки зберігання — `docs/data-inventory.md`.
 
 ### `data_deletion_request`
 | Поле | Тип | Примітка |
@@ -606,7 +606,7 @@ UNIQUE (`student_id`, `answered_on`) — одна відповідь на ден
 | id | uuid PK | створює клієнт; повтор — той самий запит |
 | student_id | uuid FK → app_user ON DELETE SET NULL NULL | NULL після видалення учня |
 | student_hash | text NOT NULL | sha256(`student:<id>`): псевдонім учня, лишається після видалення |
-| school_id | uuid FK → school ON DELETE CASCADE | школа учня; рішення — лише адміністрація цієї школи |
+| school_id | uuid FK → school ON DELETE SET NULL NULL | школа учня; рішення — лише адміністрація цієї школи; NULL після видалення школи (запис аудиту лишається) |
 | requested_by | uuid FK → app_user ON DELETE SET NULL NULL | батьки або адміністратор |
 | requested_by_role | text CHECK IN (`parent`, `admin`) | |
 | reason | text NULL CHECK IN (`left_school`, `consent_withdrawn`, `duplicate_account`, `other`) | лише перелік, вільного тексту немає |
@@ -616,18 +616,7 @@ UNIQUE (`student_id`, `answered_on`) — одна відповідь на ден
 
 Частковий UNIQUE `uq_data_deletion_request_student_id_pending` (`student_id`) WHERE `status = 'pending'` — один відкритий запит на учня. Індекси (`school_id`, `status`), `requested_by`.
 
-### `data_deletion_log`
-| Поле | Тип | Примітка |
-|---|---|---|
-| id | uuid PK | |
-| request_id | uuid UNIQUE NOT NULL | без FK; одне видалення на запит |
-| school_id | uuid FK → school ON DELETE CASCADE | |
-| student_hash | text NOT NULL | без імен та id учня |
-| requested_by_role | text CHECK IN (`parent`, `admin`) | |
-| requested_at, deleted_at | timestamptz | |
-| confirmed_by | uuid FK → app_user ON DELETE SET NULL NULL | адміністратор |
-
-- **Видалення:** `POST /deletion-requests/{id}/confirm` видаляє рядок `app_user` учня, решту — каскадом (членство, прив'язки батьків і коди, токени, коди авторизації, push-підписки, `sync_event` → `attempt`, `module_progress`, `rollcall_status`, `wellbeing_*`, агрегати учня); `stats.recompute_class` для його класів. Запит блокується `FOR UPDATE`; повтор підтвердження — той самий результат.
+- **Видалення:** `POST /deletion-requests/{id}/confirm` видаляє рядок `app_user` учня, решту — каскадом (членство, прив'язки батьків і коди, токени, коди авторизації, push-підписки, `sync_event` → `attempt`, `module_progress`, `rollcall_status`, `wellbeing_*`, агрегати учня); `stats.recompute_class` для його класів. Запит блокується `FOR UPDATE`; повтор підтвердження — той самий результат. Окремого журналу немає: підтверджені запити (без персональних даних, `student_hash`) зберігаються безстроково й переживають видалення школи. `GET /deletion-requests`: адміністрація — запити своєї школи; батьки — запити щодо своїх дітей (і створені школою чи другим із батьків) та власні; автор — лише роллю.
 - **Строки зберігання** (`retention.purge`, crontab 02:00 UTC, ідемпотентно): `sync_event` старші за `RETENTION_SYNC_EVENT_DAYS` (180) — payload `{}`, відхилені видаляються; `refresh_token` і `auth_code` — через `RETENTION_AUTH_DAYS` (7) після `expires_at` (посилання `replaced_by_id` спершу обнуляються); `parent_link_code` — через `RETENTION_PARENT_LINK_CODE_DAYS` (30) після `expires_at`; `wellbeing_view_log` — `RETENTION_WELLBEING_VIEW_LOG_DAYS` (365). Рядки прийнятих подій лишаються: на них ідемпотентність і FK (`attempt.client_event_id` ON DELETE CASCADE!). Тригер стрічки змін на `sync_event` не стоїть, тож курсор `/sync/changes` не зачіпається.
 - **Заголовки безпеки й ліміти:** без змін схеми — див. `backend/README.md`.
 

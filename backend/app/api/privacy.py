@@ -81,9 +81,10 @@ async def list_requests(
     status_filter: Annotated[DeletionStatus | None, Query(alias="status")] = None,
 ) -> list[DeletionRequestOut]:
     """Адміністрація — запити своєї школи (`?status=pending` — черга на рішення); батьки —
-    статус власних запитів."""
+    запити щодо своїх дітей (і створені школою чи другим із батьків) та власні. Автора
+    видно лише за роллю (`requested_by_role`)."""
     reqs = await service.list_requests(session, user, status_filter)
-    return [await service.to_out(session, r) for r in reqs]
+    return await service.to_out_many(session, reqs)
 
 
 @router.post(
@@ -92,7 +93,8 @@ async def list_requests(
 async def confirm(request_id: uuid.UUID, admin: Admin, session: Session) -> DeletionRequestOut:
     """Адміністрація школи учня видаляє його дані безповоротно: акаунт і все пов'язане
     (спроби, прогрес, журнал подій, перекличка, «Як ти зараз?», push-підписки, токени,
-    прив'язки батьків, агрегати). У журналі лишається запис без персональних даних.
+    прив'язки батьків, агрегати). Підтверджений запит без персональних даних лишається як
+    запис журналу видалень.
     Повтор — той самий результат (200); відхилений запит — 409."""
     req, class_ids = await service.confirm(session, admin, request_id)
     for class_id in class_ids:
