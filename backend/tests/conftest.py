@@ -34,6 +34,11 @@ os.environ["RATE_LIMIT_LOGIN_IP"] = "300"
 os.environ["RATE_LIMIT_JOIN_ACCOUNT_ALL_IPS"] = "100"
 os.environ["RATE_LIMIT_LOGIN_ACCOUNT_ALL_IPS"] = "100"
 os.environ["RATE_LIMIT_WINDOW_S"] = "900"
+# Web Push у тестах без ключів VAPID (тести, яким треба, підставляють свої).
+os.environ["VAPID_PUBLIC_KEY"] = ""
+os.environ["VAPID_PRIVATE_KEY"] = ""
+os.environ["VAPID_SUBJECT"] = ""
+os.environ["PUSH_MAX_SUBSCRIPTIONS_PER_USER"] = "10"
 
 import uuid  # noqa: E402
 from collections.abc import AsyncIterator  # noqa: E402

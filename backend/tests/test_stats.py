@@ -135,27 +135,20 @@ async def test_class_recompute_without_redis_is_still_scheduled(
     db_session, world, enqueued, monkeypatch
 ) -> None:
     """Redis для дедуплікації недоступний — перерахунок класу однаково ставиться."""
-    from redis.asyncio import Redis
+    from redis import Redis
 
-    monkeypatch.setattr(
-        stats_worker,
-        "_redis",
-        lambda: Redis.from_url("redis://127.0.0.1:1/0", socket_connect_timeout=0.2),
-    )
+    down = Redis.from_url("redis://127.0.0.1:1/0", socket_connect_timeout=0.2)
+    monkeypatch.setattr(stats_worker, "redis_client", lambda: down)
     for _ in range(2):
         await stats_worker.enqueue_recompute_class(world.class_a.id)
     assert len([e for e in enqueued if e.name == "stats.recompute_class"]) == 2
 
 
 async def _redis_available() -> bool:
-    redis = stats_worker._redis()
     try:
-        await redis.ping()
-        return True
+        return bool(stats_worker.redis_client().ping())
     except Exception:
         return False
-    finally:
-        await redis.aclose()
 
 
 def test_tasks_and_beat_are_registered() -> None:

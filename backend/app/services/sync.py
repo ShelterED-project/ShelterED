@@ -10,7 +10,8 @@
 - `test_attempt` — зараховується перша завершена спроба (за `completed_at` пристрою) у межах
   вікна тесту (B11), пізніші за дедлайн — `not_credited_late`, решта — `not_credited_repeat`;
   оцінює сервер за `answer_key`;
-- `rollcall_status` — перемагає найпізніший `occurred_at`;
+- `rollcall_status` — перемагає найпізніший `occurred_at`; якщо статус дитини у відкритій
+  перекличці справді змінився — push батькам (B12.4, після commit, один на сесію за пакет);
 - `survey_answer` — «Як ти зараз?»: значення йде лише в `wellbeing_answer` (одна відповідь
   на день за часом, виправленим на зсув годинника пакета; перемагає найпізніша), у журнал
   `sync_event` — порожній payload. Дата з майбутнього чи поза строком зберігання —
@@ -26,7 +27,7 @@ import datetime as dt
 import logging
 import re
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -61,6 +62,7 @@ from app.schemas.sync import (
 )
 from app.services import school as school_service
 from app.services import wellbeing as wellbeing_service
+from app.workers.push import enqueue_push
 from app.workers.stats import enqueue_recompute_student
 
 logger = logging.getLogger(__name__)
@@ -92,6 +94,14 @@ class Batch:
     close_grace: dt.timedelta = dt.timedelta(0)
     # Пояс школи учня — один раз на пакет, лише якщо в ньому є `survey_answer`.
     tz: ZoneInfo | None = None
+    # Зміна статусу переклички поточної події (до commit):
+    # (session_id, статус до події, новий статус, event_id).
+    staged_rollcall: tuple[uuid.UUID, str | None, str, uuid.UUID] | None = None
+    # Після commit: session_id -> (статус до пакета, останній статус, event_id). Push батькам —
+    # лише якщо останній статус відрізняється від статусу до пакета (A→B→A push не дає).
+    rollcall_changes: dict[uuid.UUID, tuple[str | None, str, uuid.UUID]] = field(
+        default_factory=dict
+    )
 
 
 def _result(event_id: uuid.UUID, status: str, reason: str | None = None) -> SyncEventResult:
@@ -429,7 +439,24 @@ async def _apply_rollcall(
     event_id: uuid.UUID,
     occurred_at: dt.datetime,
     payload: RollCallStatusPayload,
-) -> None:
+) -> tuple[str | None, str] | None:
+    """Повертає (статус до, статус після), якщо статус дитини у відкритій перекличці справді
+    змінився (для push батькам), інакше None. Відмітки учня в сесії серіалізуються advisory
+    lock-ом до кінця транзакції події, тож попередній статус, прочитаний тут, точний і для
+    паралельних пакетів."""
+    await session.execute(
+        select(
+            func.pg_advisory_xact_lock(
+                func.hashtextextended(f"rollcall:{payload.session_id}:{batch.user_id}", 0)
+            )
+        )
+    )
+    before = await session.scalar(
+        select(RollCallStatus.status).where(
+            RollCallStatus.session_id == payload.session_id,
+            RollCallStatus.student_id == batch.user_id,
+        )
+    )
     stmt = pg_insert(RollCallStatus).values(
         session_id=payload.session_id,
         student_id=batch.user_id,
@@ -440,7 +467,7 @@ async def _apply_rollcall(
     )
     new = stmt.excluded
     cur = RollCallStatus.__table__.c
-    await session.execute(
+    after = await session.scalar(
         stmt.on_conflict_do_update(
             index_elements=["session_id", "student_id"],
             set_={
@@ -452,8 +479,12 @@ async def _apply_rollcall(
             # Найпізніший occurred_at; рівний час — більший id події (детерміновано).
             where=tuple_(new.occurred_at, new.last_event_id)
             > tuple_(cur.occurred_at, cur.last_event_id),
-        )
+        ).returning(RollCallStatus.status)
     )
+    if after is None or after == before:
+        return None
+    rc = await session.get(RollCallSession, payload.session_id)
+    return (before, after) if rc is not None and rc.closed_at is None else None
 
 
 # ---------- прийом пакета ----------
@@ -592,7 +623,10 @@ async def _process_event(
     elif isinstance(payload, TestAttemptPayload):
         await _apply_test_attempt(session, batch, event.client_event_id, payload, suspicious)
     elif isinstance(payload, RollCallStatusPayload):
-        await _apply_rollcall(session, batch, event.client_event_id, occurred_at, payload)
+        change = await _apply_rollcall(session, batch, event.client_event_id, occurred_at, payload)
+        if change is not None:
+            before, after = change
+            batch.staged_rollcall = (payload.session_id, before, after, event.client_event_id)
     elif isinstance(payload, SurveyAnswerPayload):
         # Дата відповіді — за часом, виправленим на зсув годинника пакета (як у `_after_close`):
         # пристрій із неправильною датою не «переносить» відповідь на інший день.
@@ -651,9 +685,15 @@ async def receive_events(
     failed = 0
     for i in order:
         event = body.events[i]
+        batch.staged_rollcall = None
         try:
             results[i] = await _process_event(session, batch, event)
             await session.commit()
+            if batch.staged_rollcall is not None:
+                session_id, before, status, event_id = batch.staged_rollcall
+                # Статус до пакета — від першої зміни в пакеті.
+                first_before = batch.rollcall_changes.get(session_id, (before,))[0]
+                batch.rollcall_changes[session_id] = (first_before, status, event_id)
         except Exception as exc:
             await session.rollback()
             if _is_data_error(exc):
@@ -684,6 +724,18 @@ async def receive_events(
         # Агрегати кабінетів (B14) — після commit подій; помилка брокера не ламає прийом.
         # «Як ти зараз?» в агрегати не входить, тож пакет лише з ним перерахунку не ставить.
         await enqueue_recompute_student(batch.user_id)
+    for session_id, (before, status, event_id) in batch.rollcall_changes.items():
+        if status == before:
+            continue  # A→B→A в одному пакеті: для батьків нічого не змінилося
+        # Батькам цієї дитини (B12.4): лише id і код статусу. Ключ — id події: повтор задачі
+        # не надсилає вдруге, а наступна зміна статусу — окреме повідомлення.
+        await enqueue_push(
+            "rollcall_status",
+            student_id=batch.user_id,
+            session_id=session_id,
+            status=status,
+            key=f"rollcall_status:{event_id}",
+        )
     if failed:
         raise AppError(
             "INTERNAL_ERROR",

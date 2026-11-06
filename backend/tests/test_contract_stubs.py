@@ -37,26 +37,6 @@ Body = Callable[[SimpleNamespace], Any] | None
 STUBS: list[tuple[str, str, Path, Body, str, str | None]] = [
     (
         "post",
-        "/push/subscriptions",
-        lambda w: "/push/subscriptions",
-        lambda w: {
-            "id": str(uuid.uuid4()),
-            "endpoint": "https://push.example.com/abc",
-            "keys": {"p256dh": "BNcRdreALRFX", "auth": "tBHI"},
-        },
-        "student_a",
-        None,
-    ),
-    (
-        "delete",
-        "/push/subscriptions/{subscription_id}",
-        lambda w: f"/push/subscriptions/{ANY_ID}",
-        None,
-        "parent_a",
-        None,
-    ),
-    (
-        "post",
         "/tutor/ask",
         lambda w: "/tutor/ask",
         lambda w: {"request_id": str(uuid.uuid4()), "mode": "explain_again", "lesson_id": ANY_ID},
