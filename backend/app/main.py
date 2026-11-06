@@ -17,6 +17,7 @@ from app.api import (
     stats,
     sync,
     tutor,
+    wellbeing,
 )
 from app.core.config import APP_VERSION, get_settings
 from app.core.db import get_engine
@@ -66,6 +67,7 @@ def create_app() -> FastAPI:
     app.include_router(alerts.router)
     app.include_router(push.router)
     app.include_router(tutor.router)
+    app.include_router(wellbeing.router)
     return app
 
 

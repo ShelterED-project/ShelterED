@@ -138,14 +138,16 @@ def test_payload_schemas_match_protocol() -> None:
     PAYLOAD_MODELS["test_attempt"].model_validate(
         {"test_id": ANY_ID, "answers": {ANY_ID: ["a"]}, "completed_at": "2026-11-05T09:50:12Z"}
     )
-    PAYLOAD_MODELS["survey_answer"].model_validate(
-        {"survey_id": ANY_ID, "question_id": "q1", "value": 3}
-    )
+    PAYLOAD_MODELS["survey_answer"].model_validate({"value": 3})
     bad = [
         ("module_progress", {"module_id": ANY_ID, "progress_pct": 101}),
         ("rollcall_status", {"session_id": ANY_ID, "status": "shelter"}),
         ("test_attempt", {"test_id": ANY_ID, "answers": {}, "score": 90}),
-        ("survey_answer", {"survey_id": ANY_ID, "question_id": "q1", "value": "погано"}),
+        ("survey_answer", {"value": "погано"}),
+        ("survey_answer", {"value": 0}),
+        ("survey_answer", {"value": 6}),
+        ("survey_answer", {"value": True}),
+        ("survey_answer", {"value": 3, "question_id": "q1"}),
     ]
     for kind, payload in bad:
         with pytest.raises(ValidationError):

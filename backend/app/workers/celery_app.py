@@ -24,6 +24,7 @@ celery_app = Celery(
         "app.workers.packs",
         "app.workers.stats",
         "app.workers.sync",
+        "app.workers.wellbeing",
     ],
 )
 
@@ -60,6 +61,12 @@ celery_app.conf.update(
             "task": "stats.refresh_all",
             "schedule": float(settings.stats_refresh_interval_s),
             "options": {"queue": "default", "expires": settings.stats_refresh_interval_s},
+        },
+        # «Як ти зараз?»: сирі відповіді живуть 30 днів (docs/wellbeing-checkin.md).
+        "wellbeing-purge": {
+            "task": "wellbeing.purge",
+            "schedule": 86400.0,
+            "options": {"queue": "default", "expires": 86400},
         },
     },
 )

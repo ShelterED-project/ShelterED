@@ -147,7 +147,7 @@ async def test_batch_accepts_each_type_and_returns_results_in_request_order(
         rollcall(c.rc.id, "in_shelter", now()),
         progress(c.module.id, 50, now() - dt.timedelta(minutes=5)),
         attempt(c.test.id, {c.q1.id: ["a"]}, now() - dt.timedelta(minutes=1)),
-        event("survey_answer", {"survey_id": str(uuid.uuid4()), "question_id": "q1", "value": 7}),
+        event("survey_answer", {"value": 4}),
     ]
     results = await send(client, world.student_a, batch(*events))
     assert [r["client_event_id"] for r in results] == [e["client_event_id"] for e in events]
@@ -567,7 +567,7 @@ async def test_deterministic_bad_events_are_rejected_not_retried_forever(
 ) -> None:
     """NUL у payload (JSONB не приймає) і час поза діапазоном після переводу в UTC — не 500
     назавжди, а `rejected`/`invalid_payload`; повтор дає те саме, решта пакета приймається."""
-    survey = {"survey_id": str(uuid.uuid4()), "question_id": "q\u00001", "value": 3}
+    survey = {"value": 3, "x\u0000": 1}
     nul = event("survey_answer", survey)
     old = event("rollcall_status", {"session_id": str(c.rc.id), "status": "safe"})
     old["occurred_at"] = "0001-01-01T00:30:00+01:00"

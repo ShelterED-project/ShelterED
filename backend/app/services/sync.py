@@ -11,7 +11,8 @@
   вікна тесту (B11), пізніші за дедлайн — `not_credited_late`, решта — `not_credited_repeat`;
   оцінює сервер за `answer_key`;
 - `rollcall_status` — перемагає найпізніший `occurred_at`;
-- `survey_answer` — лише запис у `sync_event` (окреме сховище — B13.4).
+- `survey_answer` — «Як ти зараз?»: значення йде лише в `wellbeing_answer` (одна відповідь
+  на день, перемагає найпізніший `occurred_at`), у журнал `sync_event` — порожній payload.
 
 Стрічка змін: `change_seq`/`change_xid` ставить тригер (міграція 827ed8465b1b). Курсор —
 пара (xid, seq): віддаються лише рядки транзакцій, старших за найстарішу ще активну
@@ -47,6 +48,7 @@ from app.schemas.sync import (
     ModuleProgressPayload,
     RollCallStatusChange,
     RollCallStatusPayload,
+    SurveyAnswerPayload,
     SyncChangesOut,
     SyncEventIn,
     SyncEventResult,
@@ -54,6 +56,7 @@ from app.schemas.sync import (
     SyncEventsResponse,
     TestAttemptPayload,
 )
+from app.services import wellbeing as wellbeing_service
 from app.workers.stats import enqueue_recompute_student
 
 logger = logging.getLogger(__name__)
@@ -549,7 +552,11 @@ async def _process_event(
     stored_payload: dict[str, Any] = {}
     try:
         payload = model.model_validate(event.payload)
-        stored_payload = payload.model_dump(mode="json")
+        # Значення «Як ти зараз?» у журнал подій не потрапляє (окреме сховище з обмеженим
+        # доступом і строком зберігання).
+        stored_payload = (
+            {} if isinstance(payload, SurveyAnswerPayload) else payload.model_dump(mode="json")
+        )
     except ValidationError:
         payload = None
     if payload is None or _has_nul(stored_payload):
@@ -580,6 +587,10 @@ async def _process_event(
         await _apply_test_attempt(session, batch, event.client_event_id, payload, suspicious)
     elif isinstance(payload, RollCallStatusPayload):
         await _apply_rollcall(session, batch, event.client_event_id, occurred_at, payload)
+    elif isinstance(payload, SurveyAnswerPayload):
+        await wellbeing_service.apply_answer(
+            session, batch.user_id, event.client_event_id, occurred_at, payload.value
+        )
     return _result(event.client_event_id, "accepted")
 
 
