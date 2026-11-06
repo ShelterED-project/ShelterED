@@ -45,6 +45,13 @@ class SyncEvent(Base):
         CheckConstraint("source IN ('online', 'qr')", name="source"),
         CheckConstraint("status IN ('accepted', 'rejected')", name="status"),
         Index("ix_sync_event_user_id_received_at", "user_id", "received_at"),
+        # Строки зберігання (retention.purge): лише ще не очищені події, тож індекс не росте
+        # з історією, а пакетна вибірка найстаріших не сканує вже очищені рядки.
+        Index(
+            "ix_sync_event_retention",
+            "received_at",
+            postgresql_where=text("device_id IS NOT NULL"),
+        ),
     )
 
     # Створює клієнт; вставка INSERT ... ON CONFLICT DO NOTHING.
@@ -52,8 +59,9 @@ class SyncEvent(Base):
     type: Mapped[str]
     # Повне видалення даних учня каскадом (на запит батьків / школи).
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("app_user.id", ondelete="CASCADE"))
-    # Id пристрою створює клієнт; окремої таблиці device поки немає.
-    device_id: Mapped[uuid.UUID]
+    # Id пристрою створює клієнт; окремої таблиці device поки немає. NULL — подію очищено за
+    # строком зберігання (разом із payload і clock_skew_ms).
+    device_id: Mapped[uuid.UUID | None]
     occurred_at: Mapped[dt.datetime]  # годинник пристрою
     received_at: Mapped[dt.datetime] = mapped_column(server_default=func.now())  # годинник сервера
     clock_skew_ms: Mapped[int | None] = mapped_column(BigInteger)

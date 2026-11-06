@@ -5,7 +5,7 @@ import datetime as dt
 import uuid
 
 import pytest
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from test_sync import attempt, batch, content, progress, send
 
 from app.core.config import get_settings
@@ -40,6 +40,11 @@ async def test_old_event_payload_is_cleared_but_duplicate_detection_survives(
     await age_events(db_session, 179)
     assert (await retention.purge(db_session, get_settings()))["sync_event_payloads"] == 0
     await age_events(db_session, 181)
+    await db_session.execute(
+        update(SyncEvent)
+        .where(SyncEvent.client_event_id == good["client_event_id"])
+        .values(is_suspicious=True)
+    )
     counts = await retention.purge(db_session, get_settings())
     assert counts["sync_event_payloads"] == 2 and counts["sync_event_rejected"] == 1
 
@@ -47,6 +52,9 @@ async def test_old_event_payload_is_cleared_but_duplicate_detection_survives(
         await db_session.scalars(select(SyncEvent).execution_options(populate_existing=True))
     )
     assert len(rows) == 2 and all(r.payload == {} for r in rows)
+    # Разом із payload — id пристрою й зсув годинника; позначка підозрілого часу лишається.
+    assert all(r.device_id is None and r.clock_skew_ms is None for r in rows)
+    assert sorted(r.is_suspicious for r in rows) == [False, True]
     # Результати подій на місці.
     assert (await db_session.scalar(select(Attempt))).answers
     assert (await db_session.scalar(select(ModuleProgress))).progress_pct == 40
@@ -131,3 +139,38 @@ async def test_purge_is_scheduled_daily() -> None:
     assert (
         "retention.purge" in celery_app.tasks or "app.workers.retention" in celery_app.conf.include
     )
+
+
+async def test_sync_events_are_purged_in_batches(client, db_session, factory, world) -> None:
+    """Пакети по `batch_size` рядків (кожен — свій commit) до кінця; ліміт часу зупиняє
+    прохід, а наступний запуск добирає решту."""
+    c = await content(db_session, factory, world.class_a, world.teacher_a)
+    t = now()
+    events = [progress(c.module.id, 10 + i, t - dt.timedelta(minutes=i)) for i in range(5)]
+    await send(client, world.student_a, batch(*events))
+    await age_events(db_session, 181)
+
+    first = await retention.purge(db_session, get_settings(), batch_size=2, max_s=0)
+    assert first["sync_event_payloads"] == 2  # ліміт часу: один пакет за запуск
+    rest = await retention.purge(db_session, get_settings(), batch_size=2)
+    assert rest["sync_event_payloads"] == 3
+    left = await db_session.scalar(
+        select(func.count()).select_from(SyncEvent).where(SyncEvent.device_id.is_not(None))
+    )
+    assert left == 0
+
+
+async def test_retention_index_is_used_for_old_events(db_session) -> None:
+    from sqlalchemy import text
+
+    await db_session.execute(text("SET LOCAL enable_seqscan = off"))
+    plan = "\n".join(
+        await db_session.scalars(
+            text(
+                "EXPLAIN SELECT client_event_id FROM sync_event "
+                "WHERE received_at < now() AND device_id IS NOT NULL "
+                "ORDER BY received_at LIMIT 5000"
+            )
+        )
+    )
+    assert "ix_sync_event_retention" in plan
