@@ -13,11 +13,12 @@ import uuid
 from collections import Counter
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import delete, select, tuple_
+from sqlalchemy import delete, or_, select, tuple_
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.school import User
+from app.models.sync import SyncEvent
 from app.models.wellbeing import WellbeingAnswer, WellbeingViewLog
 from app.schemas.wellbeing import StudentWellbeingParent, StudentWellbeingSelf, WellbeingDay
 from app.services.schedule import DEFAULT_TZ
@@ -48,19 +49,28 @@ async def apply_answer(
     session: AsyncSession,
     student_id: uuid.UUID,
     event_id: uuid.UUID,
-    occurred_at: dt.datetime,
+    corrected_at: dt.datetime,
     value: int,
-) -> None:
-    """Одна відповідь на день (дата за поясом школи): пізніша за `occurred_at` замінює ранішу,
-    рівний час — більший id події (детерміновано, незалежно від порядку надходження)."""
-    school_id = await session.scalar(select(User.school_id).where(User.id == student_id))
-    tz = await school_tz(session, school_id)
+    tz: ZoneInfo,
+    received_at: dt.datetime,
+) -> bool:
+    """Одна відповідь на день: пізніша замінює ранішу, рівний час — більший id події
+    (детерміновано, незалежно від порядку надходження).
+
+    `corrected_at` — час пристрою, виправлений на зсув годинника пакета; від нього і дата
+    (за поясом школи), і порядок. Дата в майбутньому (пізніше за «сьогодні» школи на момент
+    прийому) чи старша за строк зберігання — відповідь не записується (False): подія однаково
+    `accepted`, щоб не блокувати outbox, але показувати чи зберігати таке нема сенсу."""
+    today = received_at.astimezone(tz).date()
+    answered_on = corrected_at.astimezone(tz).date()
+    if not today - dt.timedelta(days=RETENTION_DAYS) <= answered_on <= today:
+        return False
     stmt = pg_insert(WellbeingAnswer).values(
         id=event_id,
         student_id=student_id,
-        answered_on=occurred_at.astimezone(tz).date(),
+        answered_on=answered_on,
         value=value,
-        occurred_at=occurred_at,
+        occurred_at=corrected_at,
     )
     new = stmt.excluded
     cur = WellbeingAnswer.__table__.c
@@ -71,6 +81,7 @@ async def apply_answer(
             where=tuple_(new.occurred_at, new.id) > tuple_(cur.occurred_at, cur.id),
         )
     )
+    return True
 
 
 # ---------- перегляд ----------
@@ -82,11 +93,15 @@ async def _log_view(session: AsyncSession, viewer: User, student_id: uuid.UUID) 
 
 
 async def _answers(
-    session: AsyncSession, student_id: uuid.UUID, since: dt.date
+    session: AsyncSession, student_id: uuid.UUID, since: dt.date, today: dt.date
 ) -> list[tuple[dt.date, int]]:
+    """Відповіді за [since, today], від нових до старих (рядки «з майбутнього» не беремо)."""
     rows = await session.execute(
         select(WellbeingAnswer.answered_on, WellbeingAnswer.value)
-        .where(WellbeingAnswer.student_id == student_id, WellbeingAnswer.answered_on >= since)
+        .where(
+            WellbeingAnswer.student_id == student_id,
+            WellbeingAnswer.answered_on.between(since, today),
+        )
         .order_by(WellbeingAnswer.answered_on.desc())
     )
     return [(r.answered_on, r.value) for r in rows]
@@ -94,7 +109,7 @@ async def _answers(
 
 def _gentle_signal(answers: list[tuple[dt.date, int]], today: dt.date) -> bool:
     since = today - dt.timedelta(days=SIGNAL_WINDOW_DAYS - 1)
-    last = [v for d, v in answers if d >= since][:SIGNAL_LAST]
+    last = [v for d, v in answers if since <= d <= today][:SIGNAL_LAST]
     return sum(v <= LOW_MAX_VALUE for v in last) >= SIGNAL_LOW_COUNT
 
 
@@ -105,7 +120,10 @@ async def student_view(
     tz = await school_tz(session, student.school_id)
     today = (now or _now()).astimezone(tz).date()
     answers = await _answers(
-        session, student.id, today - dt.timedelta(days=max(HISTORY_DAYS, SIGNAL_WINDOW_DAYS) - 1)
+        session,
+        student.id,
+        today - dt.timedelta(days=max(HISTORY_DAYS, SIGNAL_WINDOW_DAYS) - 1),
+        today,
     )
     signal = _gentle_signal(answers, today)
     if viewer.role == "student":
@@ -143,13 +161,32 @@ async def student_view(
 # ---------- зберігання ----------
 
 
-async def purge_old(session: AsyncSession, now: dt.datetime | None = None) -> int:
-    """Видаляє відповіді, старші за 30 днів (за датою відповіді). Ідемпотентно."""
-    cutoff = (now or _now()).astimezone(ZoneInfo(DEFAULT_TZ)).date() - dt.timedelta(
-        days=RETENTION_DAYS
+async def purge_old(session: AsyncSession, now: dt.datetime | None = None) -> dict[str, int]:
+    """Строк зберігання 30 днів. Видаляє:
+    - відповіді, старші за 30 днів за датою відповіді, і датовані в майбутньому (запас — один
+      день на пояс школи, відмінний від Києва; такі рядки могли лишитися лише від старих
+      версій, нові запис не пропускає);
+    - записи `sync_event` типу `survey_answer`, отримані понад 30 днів тому: payload у них
+      порожній, але видно, коли й з якого пристрою дитина відповідала.
+
+    Ідемпотентно й безпечно в будь-який момент (зокрема при старті воркера): повторний запуск
+    видаляє лише те, що ще лишилось. Повторно надіслана подія після видалення її запису
+    прийметься знову, але її дата вже поза строком — відповідь не запишеться."""
+    now = now or _now()
+    today = now.astimezone(ZoneInfo(DEFAULT_TZ)).date()
+    answers = await session.execute(
+        delete(WellbeingAnswer).where(
+            or_(
+                WellbeingAnswer.answered_on < today - dt.timedelta(days=RETENTION_DAYS),
+                WellbeingAnswer.answered_on > today + dt.timedelta(days=1),
+            )
+        )
     )
-    result = await session.execute(
-        delete(WellbeingAnswer).where(WellbeingAnswer.answered_on < cutoff)
+    events = await session.execute(
+        delete(SyncEvent).where(
+            SyncEvent.type == "survey_answer",
+            SyncEvent.received_at < now - dt.timedelta(days=RETENTION_DAYS),
+        )
     )
     await session.commit()
-    return result.rowcount or 0
+    return {"answers": answers.rowcount or 0, "events": events.rowcount or 0}

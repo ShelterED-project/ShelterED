@@ -1,8 +1,9 @@
 """«Як ти зараз?» (docs/wellbeing-checkin.md): відповіді окремо від журналу подій і журнал
 переглядів. Не тест і не діагноз: лише вибір картинки погоди 1..5 раз на день.
 
-Значення в `sync_event.payload` не зберігається (там порожній payload). Сирі відповіді живуть
-30 днів (Celery `wellbeing.purge`), видалення учня прибирає їх каскадом.
+Значення в `sync_event.payload` не зберігається (там порожній payload). Сирі відповіді й
+записи `sync_event` типу `survey_answer` живуть 30 днів (Celery `wellbeing.purge`), видалення
+учня прибирає їх каскадом.
 """
 
 import datetime as dt
@@ -35,10 +36,11 @@ class WellbeingAnswer(Base):
     # `client_event_id` події, що дала поточне значення.
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
     student_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("app_user.id", ondelete="CASCADE"))
-    # Дата відповіді в поясі школи (Europe/Kyiv).
+    # Дата відповіді в поясі школи (Europe/Kyiv) за виправленим часом.
     answered_on: Mapped[dt.date] = mapped_column(Date)
     value: Mapped[int] = mapped_column(SmallInteger)
-    # Годинник пристрою: лише для правила «пізніша відповідь дня перемагає».
+    # Час пристрою, виправлений на зсув годинника пакета (`occurred_at` + `clock_skew_ms`):
+    # від нього дата відповіді й правило «пізніша відповідь дня перемагає».
     occurred_at: Mapped[dt.datetime]
     created_at: Mapped[dt.datetime] = mapped_column(server_default=func.now())
 

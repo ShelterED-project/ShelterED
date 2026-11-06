@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 from conftest import auth_header
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
 
 from app.models.school import User
 from app.models.sync import SyncEvent
@@ -44,8 +44,8 @@ def survey(payload, when: dt.datetime | None = None, event_id: str | None = None
     }
 
 
-async def send(client, user, *events: dict) -> list[dict]:
-    body = {"sent_at": iso(dt.datetime.now(dt.UTC)), "events": list(events)}
+async def send(client, user, *events: dict, sent_at: dt.datetime | None = None) -> list[dict]:
+    body = {"sent_at": iso(sent_at or dt.datetime.now(dt.UTC)), "events": list(events)}
     response = await client.post("/sync/events", json=body, headers=auth_header(user))
     assert response.status_code == 200, response.text
     return response.json()["results"]
@@ -144,6 +144,40 @@ async def test_day_is_taken_in_kyiv_time(client, db_session, world) -> None:
     utc = dt.datetime.combine(today() - dt.timedelta(days=2), dt.time(23, 30), tzinfo=dt.UTC)
     await send(client, world.student_a, survey({"value": 3}, utc))
     assert await answers_of(db_session, world.student_a) == [(utc.astimezone(KYIV).date(), 3)]
+
+
+async def test_day_uses_skew_corrected_time(client, db_session, world) -> None:
+    """Годинник планшета на 2 дні вперед: відповідь «сьогодні» за його часом лягає на
+    справжнє сьогодні, а не в майбутнє."""
+    skew = dt.timedelta(days=2)
+    now = dt.datetime.now(dt.UTC)
+    event = survey({"value": 4}, now + skew)
+    results = await send(client, world.student_a, event, sent_at=now + skew)
+    assert results[0]["status"] == "accepted"
+    assert await answers_of(db_session, world.student_a) == [(today(), 4)]
+
+
+@pytest.mark.parametrize("shift", [dt.timedelta(days=3), dt.timedelta(days=-31)])
+async def test_future_or_expired_answer_is_accepted_but_not_stored(
+    client, db_session, world, shift
+) -> None:
+    """Дата з майбутнього чи старша за строк зберігання (після поправки на зсув): подія
+    `accepted` (outbox не блокується), але відповідь не записується."""
+    event = survey({"value": 1}, dt.datetime.now(dt.UTC) + shift)
+    assert (await send(client, world.student_a, event))[0]["status"] == "accepted"
+    assert await answers_of(db_session, world.student_a) == []
+    logged = await db_session.get(SyncEvent, uuid.UUID(event["client_event_id"]))
+    assert logged.status == "accepted" and logged.payload == {}
+
+
+async def test_rows_dated_in_future_are_not_shown(client, db_session, world) -> None:
+    for days_ahead in (1, 2, 3):
+        await answer(db_session, world.student_a, today() + dt.timedelta(days=days_ahead), 1)
+    url = f"/students/{world.student_a.id}/wellbeing"
+    child = (await client.get(url, headers=auth_header(world.student_a))).json()
+    assert child["days"] == [] and child["show_support"] is False
+    parent = (await client.get(url, headers=auth_header(world.parent_a))).json()
+    assert parent["mood"] is None and parent["gentle_note"] is None
 
 
 # ---------- учень і батьки ----------
@@ -300,15 +334,47 @@ async def test_texts_require_auth(client) -> None:
 # ---------- зберігання ----------
 
 
-async def test_purge_removes_answers_older_than_30_days_idempotently(db_session, world) -> None:
+async def test_purge_removes_old_and_future_answers_idempotently(db_session, world) -> None:
     now = dt.datetime.now(dt.UTC)
-    for days_ago in (0, 29, 30, 31, 60):
-        await answer(db_session, world.student_a, today() - dt.timedelta(days=days_ago), 3)
-    assert await service.purge_old(db_session, now) == 2
+    for days in (-60, -31, -30, -29, 0, 1, 2, 5):
+        await answer(db_session, world.student_a, today() + dt.timedelta(days=days), 3)
+    assert (await service.purge_old(db_session, now))["answers"] == 4
     kept = [d for d, _ in await answers_of(db_session, world.student_a)]
-    assert kept == [today() - dt.timedelta(days=n) for n in (30, 29, 0)]
-    assert await service.purge_old(db_session, now) == 0
-    assert len(await answers_of(db_session, world.student_a)) == 3
+    # Завтра лишається (запас на пояс школи), але не показується.
+    assert kept == [today() + dt.timedelta(days=n) for n in (-30, -29, 0, 1)]
+    assert await service.purge_old(db_session, now) == {"answers": 0, "events": 0}
+    assert len(await answers_of(db_session, world.student_a)) == 4
+
+
+async def test_purge_removes_old_survey_sync_events_only(client, db_session, world) -> None:
+    fresh, old = survey({"value": 3}), survey({"value": 3})
+    await send(client, world.student_a, fresh, old)
+    other = SyncEvent(
+        client_event_id=uuid.uuid4(),
+        type="module_progress",
+        user_id=world.student_a.id,
+        device_id=uuid.UUID(DEVICE),
+        occurred_at=dt.datetime.now(dt.UTC),
+        received_at=dt.datetime.now(dt.UTC) - dt.timedelta(days=40),
+        clock_skew_ms=0,
+        is_suspicious=False,
+        source="online",
+        payload={},
+        status="rejected",
+        reject_reason="unknown_entity",
+    )
+    db_session.add(other)
+    await db_session.flush()
+    old_received = dt.datetime.now(dt.UTC) - dt.timedelta(days=31)
+    await db_session.execute(
+        update(SyncEvent)
+        .where(SyncEvent.client_event_id == uuid.UUID(old["client_event_id"]))
+        .values(received_at=old_received)
+    )
+    assert (await service.purge_old(db_session))["events"] == 1
+    ids = set(await db_session.scalars(select(SyncEvent.client_event_id)))
+    assert uuid.UUID(fresh["client_event_id"]) in ids and other.client_event_id in ids
+    assert uuid.UUID(old["client_event_id"]) not in ids
 
 
 async def test_answers_and_view_log_are_deleted_with_student(client, db_session, world) -> None:
