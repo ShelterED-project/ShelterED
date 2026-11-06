@@ -200,8 +200,9 @@ async def unassign_teacher(
 # ---------- розклад: слоти й перевизначення ----------
 
 
-async def school_tz(session: AsyncSession, school_id: uuid.UUID) -> ZoneInfo:
-    school = await session.get(School, school_id)
+async def school_tz(session: AsyncSession, school_id: uuid.UUID | None) -> ZoneInfo:
+    """Пояс школи; без школи чи з невідомою назвою поясу — Europe/Kyiv."""
+    school = await session.get(School, school_id) if school_id is not None else None
     try:
         return ZoneInfo(school.timezone if school else schedule.DEFAULT_TZ)
     except (ZoneInfoNotFoundError, ValueError):

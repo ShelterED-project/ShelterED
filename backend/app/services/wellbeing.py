@@ -17,12 +17,13 @@ from sqlalchemy import delete, select, tuple_
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.school import School, User
+from app.models.school import User
 from app.models.wellbeing import WellbeingAnswer, WellbeingViewLog
 from app.schemas.wellbeing import StudentWellbeingParent, StudentWellbeingSelf, WellbeingDay
+from app.services.schedule import DEFAULT_TZ
+from app.services.school import school_tz
 from app.services.wellbeing_texts import MOOD_WORDS, PICTURES, TEXTS, mood_of
 
-DEFAULT_TZ = "Europe/Kyiv"
 HISTORY_DAYS = 14  # учень бачить себе за 14 днів
 WEEK_DAYS = 7  # зведення батькам
 # М'який сигнал: ≥ 3 з останніх 5 відповідей за 14 днів — «Гроза» чи «Дощик».
@@ -40,13 +41,6 @@ def _now() -> dt.datetime:
     return dt.datetime.now(dt.UTC)
 
 
-async def _school_tz(session: AsyncSession, school_id: uuid.UUID | None) -> ZoneInfo:
-    name = None
-    if school_id is not None:
-        name = await session.scalar(select(School.timezone).where(School.id == school_id))
-    return ZoneInfo(name or DEFAULT_TZ)
-
-
 # ---------- запис (з POST /sync/events) ----------
 
 
@@ -60,7 +54,7 @@ async def apply_answer(
     """Одна відповідь на день (дата за поясом школи): пізніша за `occurred_at` замінює ранішу,
     рівний час — більший id події (детерміновано, незалежно від порядку надходження)."""
     school_id = await session.scalar(select(User.school_id).where(User.id == student_id))
-    tz = await _school_tz(session, school_id)
+    tz = await school_tz(session, school_id)
     stmt = pg_insert(WellbeingAnswer).values(
         id=event_id,
         student_id=student_id,
@@ -108,7 +102,7 @@ async def student_view(
     session: AsyncSession, viewer: User, student: User, now: dt.datetime | None = None
 ) -> StudentWellbeingSelf | StudentWellbeingParent:
     """Учень — себе (картинки), батьки — тижневе зведення словами (перегляд у журнал)."""
-    tz = await _school_tz(session, student.school_id)
+    tz = await school_tz(session, student.school_id)
     today = (now or _now()).astimezone(tz).date()
     answers = await _answers(
         session, student.id, today - dt.timedelta(days=max(HISTORY_DAYS, SIGNAL_WINDOW_DAYS) - 1)
