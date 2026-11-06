@@ -14,7 +14,6 @@ from app.services import push as service
 router = APIRouter(tags=["push"])
 
 R401 = {401: {"model": ErrorResponse, "description": "Не автентифіковано"}}
-R404 = {404: {"model": ErrorResponse, "description": "Не знайдено"}}
 
 
 @router.get(
@@ -65,9 +64,13 @@ async def subscribe(
 @router.delete(
     "/push/subscriptions/{subscription_id}",
     status_code=status.HTTP_204_NO_CONTENT,
-    responses={**R401, **R404},
+    responses={
+        204: {"description": "Підписки цього користувача з таким id більше немає"},
+        **R401,
+    },
 )
 async def unsubscribe(subscription_id: uuid.UUID, user: CurrentUser, session: Session) -> Response:
-    """Видаляє власну підписку. Чужа чи вже видалена — 404 (клієнт вважає її видаленою)."""
+    """Ідемпотентно видаляє власну підписку: повтор, неіснуюча чи чужа — теж 204 (чужа не
+    видаляється, і відповідь не розкриває, чи вона існує)."""
     await service.unsubscribe(session, user, subscription_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

@@ -133,14 +133,13 @@ async def subscribe(
 
 
 async def unsubscribe(session: AsyncSession, user: User, subscription_id: uuid.UUID) -> None:
-    """Видаляє власну підписку; чужа чи неіснуюча — 404 (клієнт вважає її вже видаленою)."""
-    deleted = await session.scalar(
-        delete(PushSubscription)
-        .where(PushSubscription.id == subscription_id, PushSubscription.user_id == user.id)
-        .returning(PushSubscription.id)
+    """Ідемпотентно видаляє власну підписку. Неіснуюча, вже видалена чи чужа — без дії й без
+    помилки (чужу не видаляємо і не розкриваємо, що вона є)."""
+    await session.execute(
+        delete(PushSubscription).where(
+            PushSubscription.id == subscription_id, PushSubscription.user_id == user.id
+        )
     )
-    if deleted is None:
-        raise AppError("NOT_FOUND", "Subscription not found", status_code=404)
     await session.commit()
 
 

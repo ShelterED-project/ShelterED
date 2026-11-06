@@ -254,22 +254,29 @@ async def test_subscription_limit_removes_oldest(client, db_session, world, app)
     assert left == set(ids[1:])
 
 
-async def test_delete_own_only(client, db_session, world) -> None:
+async def test_delete_is_idempotent_and_own_only(client, db_session, world) -> None:
     data = body()
     await client.post("/push/subscriptions", json=data, headers=auth_header(world.parent_a))
     url = f"/push/subscriptions/{data['id']}"
     assert (await client.delete(url)).status_code == 401
-    # Чужа підписка — 404, і вона не видаляється.
+    # Чужа підписка — та сама відповідь, що й неіснуюча (204), і вона не видаляється.
     response = await client.delete(url, headers=auth_header(world.student_a))
-    assert response.status_code == 404
-    assert await db_session.get(PushSubscription, uuid.UUID(data["id"])) is not None
+    missing = await client.delete(
+        f"/push/subscriptions/{uuid.uuid4()}", headers=auth_header(world.student_a)
+    )
+    assert response.status_code == missing.status_code == 204
+    assert response.content == missing.content == b""
+    assert (
+        await db_session.get(PushSubscription, uuid.UUID(data["id"]), populate_existing=True)
+        is not None
+    )
     assert (await client.delete(url, headers=auth_header(world.parent_a))).status_code == 204
     assert (
         await db_session.get(PushSubscription, uuid.UUID(data["id"]), populate_existing=True)
         is None
     )
-    # Повтор — 404 (клієнт вважає підписку видаленою).
-    assert (await client.delete(url, headers=auth_header(world.parent_a))).status_code == 404
+    # Повтор (відповідь загубилася в мережі) — теж 204.
+    assert (await client.delete(url, headers=auth_header(world.parent_a))).status_code == 204
 
 
 # ---------- одержувачі ----------

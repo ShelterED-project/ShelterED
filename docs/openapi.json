@@ -12266,7 +12266,7 @@
     },
     "/push/subscriptions/{subscription_id}": {
       "delete": {
-        "description": "Видаляє власну підписку. Чужа чи вже видалена — 404 (клієнт вважає її видаленою).",
+        "description": "Ідемпотентно видаляє власну підписку: повтор, неіснуюча чи чужа — теж 204 (чужа не\nвидаляється, і відповідь не розкриває, чи вона існує).",
         "operationId": "unsubscribe_push_subscriptions__subscription_id__delete",
         "parameters": [
           {
@@ -12282,7 +12282,7 @@
         ],
         "responses": {
           "204": {
-            "description": "Successful Response"
+            "description": "Підписки цього користувача з таким id більше немає"
           },
           "401": {
             "content": {
@@ -12293,16 +12293,6 @@
               }
             },
             "description": "Не автентифіковано"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Не знайдено"
           },
           "422": {
             "content": {
