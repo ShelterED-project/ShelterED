@@ -200,3 +200,32 @@ def test_seed_password_is_read_from_env_file(tmp_path, monkeypatch, capsys) -> N
     monkeypatch.setattr(cli, "get_settings", lambda: short)
     assert cli.main(["seed"]) == 1
     assert "at least 8" in capsys.readouterr().err
+
+
+async def test_lesson_for_a_date_does_not_depend_on_seed_week(db_session) -> None:
+    """Seed «станом на» два різні тижні дає той самий урок на дату з їхнього перетину."""
+    import datetime as dt
+
+    settings = get_settings()
+    first_monday = dt.date(2026, 11, 2)
+    overlap = [first_monday + dt.timedelta(days=d) for d in range(7, 14)]
+
+    async def assigned() -> dict:
+        rows = await db_session.execute(
+            select(
+                LessonAssignment.slot_id, LessonAssignment.date, LessonAssignment.lesson_id
+            ).where(LessonAssignment.date.in_(overlap))
+        )
+        return {(slot, day): lesson for slot, day, lesson in rows}
+
+    await seed(db_session, settings, today=first_monday)
+    before = await assigned()
+    await seed(db_session, settings, today=first_monday + dt.timedelta(days=7))
+    after = await assigned()
+    assert before and after == before
+    # У 5-А два уроки математики на 5 слотів тижня: лічильник від понеділка тижня запуску
+    # (як було) дав би на цих датах інші уроки.
+    math = {
+        sid("lesson", lesson["key"]) for lesson in content.LESSONS if lesson["subject"] == "math"
+    }
+    assert len(math) == 2 and len(math & set(before.values())) == 2

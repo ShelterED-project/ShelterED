@@ -9,7 +9,7 @@
 import datetime as dt
 import secrets
 import uuid
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -117,6 +117,18 @@ def previous_school_day(today: dt.date) -> dt.date:
     while day.isoweekday() > 5:
         day -= dt.timedelta(days=1)
     return day
+
+
+def subject_occurrence(week: Mapping[int, Sequence[str]], day: dt.date, n: int) -> int:
+    """Порядковий номер уроку предмета слота (`day`, `n`) у безперервній нумерації тижнів:
+    функція лише дати й розкладу, тож та сама дата завжди дає той самий урок, хоч би коли
+    запускався seed (а уроки предмета по черзі змінюються від уроку до уроку й між тижнями).
+    Тижні — від понеділка (`toordinal() == 1` — понеділок), без скидання на новий рік."""
+    subject = week[day.isoweekday()][n]
+    per_week = sum(day_subjects.count(subject) for day_subjects in week.values())
+    earlier = sum(week.get(wd, []).count(subject) for wd in range(1, day.isoweekday()))
+    earlier += week[day.isoweekday()][:n].count(subject)
+    return (day.toordinal() - 1) // 7 * per_week + earlier
 
 
 async def _adult_users(
@@ -370,20 +382,18 @@ async def seed(
         for lesson in c.LESSONS:
             if lesson["class"] == k["key"]:
                 by_subject.setdefault(lesson["subject"], []).append(sid("lesson", lesson["key"]))
-        seen: dict[str, int] = {}
         for offset in range(14):
             day = monday + dt.timedelta(days=offset)
             for n, subject in enumerate(k["week"].get(day.isoweekday(), [])):
                 options = by_subject.get(subject)
                 if not options:
                     continue
-                count = seen.get(subject, 0)
-                seen[subject] = count + 1
+                index = subject_occurrence(k["week"], day, n) % len(options)
                 assignments.append(
                     {
                         "slot_id": sid("slot", k["key"], day.isoweekday(), n),
                         "date": day,
-                        "lesson_id": options[count % len(options)],
+                        "lesson_id": options[index],
                     }
                 )
     await _upsert(session, LessonAssignment, assignments, keys=("slot_id", "date"))
