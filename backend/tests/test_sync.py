@@ -8,7 +8,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from conftest import auth_header
+from conftest import auth_header, pushes
 from httpx import AsyncClient
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -471,6 +471,22 @@ async def test_same_batch_twice_in_parallel_gives_one_record(committed) -> None:
         assert await count(db, RollCallStatus) == 1
         mp = await db.get(ModuleProgress, (w.student.id, w.c.module.id))
         assert mp.progress_pct == 30
+
+
+async def test_parallel_same_status_from_two_devices_pushes_parents_once(
+    committed, enqueued
+) -> None:
+    """Два пристрої учня одночасно надсилають той самий статус різними подіями: батьки
+    отримують один push (попередній статус читається під advisory lock)."""
+    w = await committed_world(committed)
+    headers = auth_header(w.student)
+    at = now()
+    bodies = [batch(rollcall(w.c.rc.id, "in_shelter", at)) for _ in range(4)]
+    responses = await asyncio.gather(
+        *[committed.client.post("/sync/events", json=b, headers=headers) for b in bodies]
+    )
+    assert all(r.status_code == 200 for r in responses)
+    assert [p["status"] for p in pushes(enqueued, "rollcall_status")] == ["in_shelter"]
 
 
 async def test_parallel_attempts_credit_exactly_one(committed) -> None:

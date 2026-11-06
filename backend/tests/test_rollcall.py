@@ -5,7 +5,7 @@ import datetime as dt
 import uuid
 
 import pytest
-from conftest import auth_header
+from conftest import auth_header, pushes
 from httpx import AsyncClient
 
 pytestmark = pytest.mark.anyio
@@ -197,3 +197,88 @@ async def test_alert_opens_session_student_marks_teacher_sees(client, world, enq
     assert (await mark(client, world.student_a, sid, "in_shelter"))["status"] == "accepted"
     session = (await client.get(url, headers=auth_header(world.teacher_a))).json()["session"]
     assert session["summary"]["in_shelter"] == 1
+
+
+# ---------- push батькам при зміні статусу (B12.4) ----------
+
+
+def batch_of(*events) -> dict:
+    return {"sent_at": now().isoformat(), "events": list(events)}
+
+
+def rc_event(session_id, status: str, at: dt.datetime, event_id=None) -> dict:
+    return {
+        "client_event_id": str(event_id or uuid.uuid4()),
+        "type": "rollcall_status",
+        "device_id": str(uuid.uuid4()),
+        "occurred_at": at.isoformat(),
+        "payload": {"session_id": str(session_id), "status": status},
+    }
+
+
+async def test_status_change_pushes_parents_once(client, world, enqueued) -> None:
+    sid = uuid.uuid4()
+    assert (await start(client, world.teacher_a, world.class_a, sid)).status_code == 201
+    t0 = now()
+    await mark(client, world.student_a, sid, "in_shelter", t0)
+    expected = {
+        "type": "rollcall_status",
+        "student_id": str(world.student_a.id),
+        "session_id": str(sid),
+        "status": "in_shelter",
+    }
+    assert pushes(enqueued, "rollcall_status") == [expected]
+    call = next(c for c in enqueued if c.name == "push.send")
+    assert call.queue == "push" and call.args[1].startswith("rollcall_status:")
+    # Той самий статус ще раз (інша подія) — без push; повтор тієї ж події — duplicate, без push.
+    await mark(client, world.student_a, sid, "in_shelter", t0 + dt.timedelta(seconds=5))
+    assert len(pushes(enqueued, "rollcall_status")) == 1
+    # Стара подія (раніший occurred_at) з іншим статусом не перемагає — без push.
+    await mark(client, world.student_a, sid, "safe", t0 - dt.timedelta(minutes=1))
+    assert len(pushes(enqueued, "rollcall_status")) == 1
+    # Справжня зміна — новий push.
+    await mark(client, world.student_a, sid, "safe", t0 + dt.timedelta(seconds=10))
+    assert pushes(enqueued, "rollcall_status")[-1] == {**expected, "status": "safe"}
+    assert len(pushes(enqueued, "rollcall_status")) == 2
+
+
+async def test_repeated_batch_does_not_push_again(client, world, enqueued) -> None:
+    sid = uuid.uuid4()
+    await start(client, world.teacher_a, world.class_a, sid)
+    body = batch_of(rc_event(sid, "in_shelter", now()))
+    headers = auth_header(world.student_a)
+    for _ in range(2):
+        r = await client.post("/sync/events", json=body, headers=headers)
+        assert r.status_code == 200
+    assert r.json()["results"][0]["status"] == "duplicate"
+    assert len(pushes(enqueued, "rollcall_status")) == 1
+
+
+async def test_batch_with_several_changes_pushes_latest_status(client, world, enqueued) -> None:
+    sid = uuid.uuid4()
+    await start(client, world.teacher_a, world.class_a, sid)
+    t0 = now() - dt.timedelta(minutes=5)
+    body = batch_of(
+        rc_event(sid, "safe", t0 + dt.timedelta(minutes=1)),
+        rc_event(sid, "in_shelter", t0),
+    )
+    r = await client.post("/sync/events", json=body, headers=auth_header(world.student_a))
+    assert [x["status"] for x in r.json()["results"]] == ["accepted", "accepted"]
+    assert [p["status"] for p in pushes(enqueued, "rollcall_status")] == ["safe"]
+
+
+async def test_no_push_for_closed_session_or_rejected_event(client, world, enqueued) -> None:
+    sid = uuid.uuid4()
+    t0 = now()
+    await start(client, world.teacher_a, world.class_a, sid)
+    url = f"/classes/{world.class_a.id}/rollcall/{sid}/close"
+    assert (await client.post(url, headers=auth_header(world.teacher_a))).status_code == 200
+    # Офлайн-відмітка до закриття приймається, але push батькам уже не йде.
+    result = await mark(client, world.student_a, sid, "safe", t0)
+    assert result["status"] == "accepted"
+    # Учень іншого класу — forbidden, push немає.
+    sid_b = uuid.uuid4()
+    await start(client, world.teacher_a, world.class_a, sid_b)
+    result = await mark(client, world.student_b, sid_b, "safe")
+    assert result["reason"] == "forbidden"
+    assert pushes(enqueued, "rollcall_status") == []
