@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from typing import Any, Literal
 from urllib.parse import urlsplit
 
+import anyio
 from sqlalchemy import delete, select, union
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -217,10 +218,24 @@ class SendResult:
     retry_after: int | None = None
 
 
-# (підписка, payload JSON, налаштування, опції) -> статус. Мережева помилка — status 0.
-Sender = Callable[[PushSubscription, str, Settings, PushOptions], SendResult]
+@dataclass(frozen=True)
+class PushTarget:
+    """Знімок полів підписки для відправки (поза транзакцією БД)."""
 
-Outcome = Literal["sent", "gone", "failed", "missing", "duplicate", "disabled"]
+    id: uuid.UUID
+    endpoint: str
+    p256dh: str
+    auth: str
+
+
+# Статус від sender: payload не зашифрувати ключами підписки (не точка P-256 тощо) — постійна
+# помилка, повтор не допоможе.
+INVALID_KEYS = -1
+
+# (підписка, payload JSON, налаштування, опції) -> статус. Мережева помилка — status 0.
+Sender = Callable[[PushTarget, str, Settings, PushOptions], SendResult]
+
+Outcome = Literal["sent", "gone", "invalid", "failed", "missing", "duplicate", "disabled"]
 
 
 async def deliver(
@@ -233,34 +248,54 @@ async def deliver(
 ) -> Outcome:
     """Надсилає payload одній підписці (commit — тут).
 
-    2xx → `sent` (`last_success_at`); 404/410 → підписка видаляється (`gone`); 429/5xx чи
-    мережа → `PushRetry`; інші 4xx (ключі не ті, завеликий payload) → `failed` (`failed_at`).
+    2xx → `sent` (`last_success_at`); 404/410 → підписка видаляється (`gone`); ключі підписки
+    непридатні для шифрування (`INVALID_KEYS`) → видаляється без повторів (`invalid`); 429/5xx
+    чи мережа → `PushRetry`; інші 4xx (ключі не ті, завеликий payload) → `failed` (`failed_at`).
+    HTTP-запит іде в окремому потоці й поза транзакцією: поля підписки читаються, транзакція
+    закривається, результат пишеться короткою окремою транзакцією (якщо за цей час підписку
+    перевидали з іншим endpoint чи ключами — результат старої відправки її не чіпає).
     Дедуплікацію повторів робить задача (`app.workers.push`)."""
     if not settings.push_enabled:
         return "disabled"
     sub = await session.get(PushSubscription, subscription_id)
     if sub is None:
+        await session.commit()
         return "missing"
+    target = PushTarget(id=sub.id, endpoint=sub.endpoint, p256dh=sub.p256dh, auth=sub.auth)
+    await session.commit()
     options = PUSH_OPTIONS.get(str(payload.get("type")), PushOptions(ttl=3600, urgency="normal"))
     data = json.dumps(dict(payload), separators=(",", ":"), sort_keys=True)
-    result = sender(sub, data, settings, options)
+    result = await anyio.to_thread.run_sync(sender, target, data, settings, options)
     now = now or dt.datetime.now(dt.UTC)
-    host = endpoint_host(sub.endpoint)
-    if 200 <= result.status < 300:
-        sub.last_success_at = now
-        await session.commit()
-        return "sent"
-    if result.status in (404, 410):
-        logger.info("Push subscription expired, removed: id=%s host=%s", sub.id, host)
-        await session.delete(sub)
-        await session.commit()
-        return "gone"
+    host = endpoint_host(target.endpoint)
     if result.status in (0, 429) or result.status >= 500:
         raise PushRetry(result.status, result.retry_after)
-    logger.warning("Push rejected: id=%s host=%s status=%d", sub.id, host, result.status)
-    sub.failed_at = now
+
+    sub = await session.get(PushSubscription, target.id, populate_existing=True)
+    if sub is None or sub.endpoint != target.endpoint:
+        await session.commit()
+        return "missing"
+    same_keys = (sub.p256dh, sub.auth) == (target.p256dh, target.auth)
+    outcome: Outcome
+    if 200 <= result.status < 300:
+        sub.last_success_at = now
+        outcome = "sent"
+    elif result.status in (404, 410):
+        logger.info("Push subscription expired, removed: id=%s host=%s", sub.id, host)
+        await session.delete(sub)
+        outcome = "gone"
+    elif result.status == INVALID_KEYS:
+        logger.warning("Push subscription keys unusable, removed: id=%s host=%s", sub.id, host)
+        if same_keys:
+            await session.delete(sub)
+        outcome = "invalid"
+    else:
+        logger.warning("Push rejected: id=%s host=%s status=%d", sub.id, host, result.status)
+        if same_keys:
+            sub.failed_at = now
+        outcome = "failed"
     await session.commit()
-    return "failed"
+    return outcome
 
 
 async def mark_failed(

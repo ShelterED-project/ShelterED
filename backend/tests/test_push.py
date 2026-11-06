@@ -503,6 +503,57 @@ async def test_deliver_permanent_error_marks_failed(db_session, world) -> None:
     assert sub is not None and sub.failed_at is not None
 
 
+async def test_deliver_invalid_keys_removes_subscription(db_session, world) -> None:
+    """Ключі, якими не зашифрувати payload, — постійна помилка: підписка видаляється, повтору
+    немає (а не нескінченні збої на кожному push)."""
+    sub_id = (await _subscribe(db_session, world.parent_a))[world.parent_a.id]
+    outcome = await service.deliver(
+        db_session,
+        sub_id,
+        {"type": "alert"},
+        vapid_settings(),
+        FakeSender(SendResult(service.INVALID_KEYS)),
+    )
+    assert outcome == "invalid"
+    assert await db_session.get(PushSubscription, sub_id) is None
+
+
+async def test_deliver_sends_in_thread_and_ignores_resubscribed_row(
+    db_session, world, monkeypatch
+) -> None:
+    """Відправка — у потоці поза транзакцією; якщо під час неї підписку перевидали (інший
+    endpoint), результат старої відправки (410) нову підписку не видаляє."""
+    import threading
+
+    import anyio
+
+    sub_id = (await _subscribe(db_session, world.parent_a))[world.parent_a.id]
+    sub = await db_session.get(PushSubscription, sub_id)
+    old_endpoint = sub.endpoint
+    in_main_thread = []
+
+    def sender(target, data, settings, options):
+        in_main_thread.append(threading.current_thread() is threading.main_thread())
+        assert isinstance(target, service.PushTarget) and target.endpoint == old_endpoint
+        return SendResult(410)
+
+    real_run_sync = anyio.to_thread.run_sync
+
+    async def run_sync(func, *args, **kwargs):
+        result = await real_run_sync(func, *args, **kwargs)
+        # Поки йшов HTTP-запит, браузер перевидав підписку з тим самим id.
+        sub.endpoint = old_endpoint + "-new"
+        await db_session.flush()
+        return result
+
+    monkeypatch.setattr(anyio.to_thread, "run_sync", run_sync)
+    outcome = await service.deliver(db_session, sub_id, {"type": "alert"}, vapid_settings(), sender)
+    assert in_main_thread == [False]
+    assert outcome == "missing"
+    kept = await db_session.get(PushSubscription, sub_id, populate_existing=True)
+    assert kept is not None and kept.endpoint == old_endpoint + "-new"
+
+
 def test_retry_delay_is_bounded() -> None:
     assert worker.retry_delay(0, None) == 30
     assert worker.retry_delay(2, None) == 120
@@ -644,3 +695,31 @@ def test_webpush_sender_maps_errors(monkeypatch) -> None:
 
     monkeypatch.setattr(worker, "webpush", network)
     assert worker.webpush_sender(sub, "{}", settings, options) == SendResult(0)
+
+
+def test_webpush_sender_invalid_keys_are_permanent(monkeypatch) -> None:
+    """Справжній pywebpush: p256dh не на кривій P-256 (записаний до перевірки) — ValueError під
+    час шифрування, ще до HTTP → `INVALID_KEYS`; без ключів — теж. Зламаний ключ VAPID — збій
+    конфігурації: виняток, а не видалення підписки."""
+    raw = bytearray(base64.urlsafe_b64decode(P256DH + "="))
+    raw[-1] ^= 1
+    bad = base64.urlsafe_b64encode(bytes(raw)).decode().rstrip("=")
+    settings = vapid_settings()
+    options = service.PUSH_OPTIONS["alert"]
+    target = service.PushTarget(uuid.uuid4(), "https://fcm.googleapis.com/x", bad, AUTH)
+    assert worker.webpush_sender(target, "{}", settings, options) == SendResult(
+        service.INVALID_KEYS
+    )
+
+    def missing_keys(**kwargs):
+        from pywebpush import WebPushException
+
+        raise WebPushException("Missing keys")
+
+    monkeypatch.setattr(worker, "webpush", missing_keys)
+    assert worker.webpush_sender(target, "{}", settings, options) == SendResult(
+        service.INVALID_KEYS
+    )
+    broken = settings.model_copy(update={"vapid_private_key": SecretStr("not-a-key")})
+    with pytest.raises(Exception):  # noqa: B017 — будь-який виняток розбору ключа VAPID
+        worker.webpush_sender(target, "{}", broken, options)

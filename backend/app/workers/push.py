@@ -28,9 +28,15 @@ from redis.exceptions import RedisError
 
 from app.core.config import Settings, get_settings
 from app.core.db import standalone_session
-from app.models.push import PushSubscription
 from app.services import push as service
-from app.services.push import PushOptions, PushRetry, PushType, SendResult
+from app.services.push import (
+    INVALID_KEYS,
+    PushOptions,
+    PushRetry,
+    PushTarget,
+    PushType,
+    SendResult,
+)
 from app.workers.celery_app import celery_app, enqueue
 
 logger = logging.getLogger(__name__)
@@ -102,10 +108,16 @@ def _retry_after(value: str | None) -> int | None:
 
 
 def webpush_sender(
-    sub: PushSubscription, data: str, settings: Settings, options: PushOptions
+    sub: PushTarget, data: str, settings: Settings, options: PushOptions
 ) -> SendResult:
-    """Відправка через pywebpush. Текст помилки (може містити endpoint) не логуємо."""
+    """Відправка через pywebpush. Текст помилки (може містити endpoint) не логуємо.
+
+    Помилка шифрування ключами підписки (`ValueError`: p256dh не точка P-256, зіпсований
+    base64) чи `WebPushException` без відповіді (ключів бракує) — `INVALID_KEYS`: постійна
+    помилка підписки, без повторів. Ключ VAPID розбирається до цього: його помилка — збій
+    конфігурації, а не підписки, тож підписки через неї не видаляються."""
     assert settings.vapid_private_key is not None and settings.vapid_subject
+    vapid = Vapid.from_string(settings.vapid_private_key.get_secret_value())
     try:
         response = webpush(
             subscription_info={
@@ -113,7 +125,7 @@ def webpush_sender(
                 "keys": {"p256dh": sub.p256dh, "auth": sub.auth},
             },
             data=data,
-            vapid_private_key=Vapid.from_string(settings.vapid_private_key.get_secret_value()),
+            vapid_private_key=vapid,
             # Новий словник щоразу: pywebpush дописує в нього aud і exp.
             vapid_claims={"sub": settings.vapid_subject},
             ttl=options.ttl,
@@ -122,12 +134,14 @@ def webpush_sender(
         )
     except WebPushException as exc:
         if exc.response is None:
-            return SendResult(0)
+            return SendResult(INVALID_KEYS)
         return SendResult(
             exc.response.status_code, _retry_after(exc.response.headers.get("Retry-After"))
         )
     except requests.RequestException:
         return SendResult(0)
+    except ValueError:
+        return SendResult(INVALID_KEYS)
     return SendResult(response.status_code)  # type: ignore[union-attr]  # curl=False → Response
 
 
