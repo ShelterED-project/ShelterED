@@ -19,7 +19,7 @@ from app.api.deps import (
     StaffClass,
 )
 from app.core.errors import AppError
-from app.core.rate_limit import RateLimiter, Rule, rule
+from app.core.rate_limit import RateLimiter, Rule, rate_limited, rule
 from app.core.security import normalize_link_code
 from app.schemas.auth import (
     AdminCreateUserRequest,
@@ -70,13 +70,7 @@ async def _limited[T](
     """Вхід із лімітом невдалих спроб: вичерпаний ключ — 429 з Retry-After, без виклику."""
     retry_after = await limiter.retry_after(rules)
     if retry_after is not None:
-        raise AppError(
-            "RATE_LIMITED",
-            "Too many failed login attempts, try again later",
-            status_code=429,
-            details={"retry_after": retry_after},
-            headers={"Retry-After": str(retry_after)},
-        )
+        raise rate_limited(retry_after, "Too many failed login attempts, try again later")
     try:
         return await call()
     except AppError as exc:

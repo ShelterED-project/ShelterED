@@ -342,3 +342,43 @@ async def test_student_sync_is_not_limited_by_relay_limit(
     limiter = app.dependency_overrides[get_rate_limiter]()
     await client.post("/sync/events", json=relay_body(), headers=auth_header(world.student_a))
     assert limiter.counters == {}
+
+
+async def _parallel_enforce(limiter, rules, n: int) -> int:
+    import asyncio
+
+    from app.core.errors import AppError
+    from app.core.rate_limit import enforce
+
+    async def one() -> bool:
+        try:
+            await enforce(limiter, rules)
+        except AppError as exc:
+            assert exc.status_code == 429 and exc.headers["Retry-After"]
+            return False
+        return True
+
+    return sum(await asyncio.gather(*(one() for _ in range(n))))
+
+
+async def test_enforce_is_atomic_in_memory() -> None:
+    rules = [rule("t", uuid.uuid4().hex, 3, 60)]
+    assert await _parallel_enforce(MemoryRateLimiter(), rules, 10) == 3
+
+
+async def test_enforce_is_atomic_in_redis() -> None:
+    """Паралельні запити не проходять понад ліміт: перевірка й зарахування — один INCR."""
+    settings = get_settings()
+    limiter = RedisRateLimiter(settings.rate_limit_redis_url)
+    try:
+        await limiter.redis.ping()
+    except Exception:
+        await limiter.close()
+        pytest.skip("Redis is not available")
+    rules = [rule("test", uuid.uuid4().hex, 3, 30)]
+    try:
+        assert await _parallel_enforce(limiter, rules, 20) == 3
+        assert 0 < await limiter.redis.ttl(rules[0].key) <= 30
+    finally:
+        await limiter.redis.delete(rules[0].key)
+        await limiter.close()
