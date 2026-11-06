@@ -147,6 +147,10 @@ async def test_same_id_new_endpoint_updates_own_but_conflicts_for_other(
         "https://[::1]/push",
         "https://intranet/push",
         "https://user:pass@fcm.googleapis.com/x",
+        "https://evil.example.com/fcm/send/x",
+        "https://fcm.googleapis.com.evil.com/x",
+        "https://notfcm.googleapis.com/x",
+        "https://storage.googleapis.com/x",
     ],
 )
 async def test_subscription_rejects_unsafe_endpoint(client, world, endpoint) -> None:
@@ -154,6 +158,37 @@ async def test_subscription_rejects_unsafe_endpoint(client, world, endpoint) -> 
         "/push/subscriptions", json=body(endpoint), headers=auth_header(world.student_a)
     )
     assert response.status_code == 422
+
+
+@pytest.mark.parametrize(
+    "endpoint",
+    [
+        "https://fcm.googleapis.com/fcm/send/abc",
+        "https://updates.push.services.mozilla.com/wpush/v2/abc",
+        "https://web.push.apple.com/QGm9abc",
+        "https://wns2-par02p.notify.windows.com/w/?token=abc",
+        "https://FCM.googleapis.com/fcm/send/abc",
+    ],
+)
+async def test_subscription_accepts_known_push_services(client, world, endpoint) -> None:
+    response = await client.post(
+        "/push/subscriptions", json=body(endpoint), headers=auth_header(world.student_a)
+    )
+    assert response.status_code == 201, response.text
+
+
+async def test_allowed_push_hosts_come_from_settings(client, world, monkeypatch) -> None:
+    settings = get_settings().model_copy(
+        update={"push_allowed_host_suffixes": ["push.example.org"]}
+    )
+    monkeypatch.setattr("app.schemas.push.get_settings", lambda: settings)
+    headers = auth_header(world.student_a)
+    ok = await client.post(
+        "/push/subscriptions", json=body("https://eu.push.example.org/x"), headers=headers
+    )
+    assert ok.status_code == 201, ok.text
+    denied = await client.post("/push/subscriptions", json=body(), headers=headers)
+    assert denied.status_code == 422
 
 
 async def test_subscription_rejects_bad_keys(client, world) -> None:

@@ -10,6 +10,8 @@ from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, StringConstraints, field_validator
 
+from app.core.config import get_settings
+
 SUBSCRIPTION_ID = "0192f0a0-0000-7000-8000-000000000a01"
 ENDPOINT = "https://fcm.googleapis.com/fcm/send/dXk2...abc"
 
@@ -59,7 +61,8 @@ class PushSubscriptionCreate(BaseModel):
     @classmethod
     def _endpoint(cls, value: str) -> str:
         """Лише HTTPS-адреса push-сервісу за доменним ім'ям: воркер робить на неї POST, тож
-        IP-адреси, localhost і адреси з обліковими даними відхиляємо (захист від SSRF)."""
+        IP-адреси, localhost і адреси з обліковими даними відхиляємо, а хост має належати
+        відомому push-сервісу з `PUSH_ALLOWED_HOST_SUFFIXES` (захист від SSRF)."""
         parts = urlsplit(value)
         host = (parts.hostname or "").rstrip(".")
         if (
@@ -75,8 +78,14 @@ class PushSubscriptionCreate(BaseModel):
         try:
             ipaddress.ip_address(host.strip("[]"))
         except ValueError:
-            return value
-        raise ValueError("endpoint must be an https URL of a push service")
+            pass
+        else:
+            raise ValueError("endpoint must be an https URL of a push service")
+        host = host.lower()
+        suffixes = [s.lower().strip(".") for s in get_settings().push_allowed_host_suffixes]
+        if not any(host == s or host.endswith("." + s) for s in suffixes if s):
+            raise ValueError("endpoint host is not a known Web Push service")
+        return value
 
     model_config = ConfigDict(
         json_schema_extra={

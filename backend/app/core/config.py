@@ -117,6 +117,14 @@ class Settings(BaseSettings):
     vapid_subject: str | None = None
     # Пристроїв на користувача: понад ліміт найдавніші підписки видаляються.
     push_max_subscriptions_per_user: int = 10
+    # Дозволені push-сервіси: хост endpoint підписки має збігатися із суфіксом або бути його
+    # піддоменом. Chrome — FCM, Firefox — Mozilla autopush, Safari — Apple, Edge — WNS.
+    push_allowed_host_suffixes: list[str] = [
+        "fcm.googleapis.com",
+        "push.services.mozilla.com",
+        "push.apple.com",
+        "notify.windows.com",
+    ]
 
     @property
     def push_enabled(self) -> bool:
