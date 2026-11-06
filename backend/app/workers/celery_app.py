@@ -4,6 +4,7 @@ from typing import Any
 
 import anyio
 from celery import Celery
+from celery.schedules import crontab
 from kombu import Queue
 
 from app.core.config import get_settings
@@ -62,11 +63,13 @@ celery_app.conf.update(
             "schedule": float(settings.stats_refresh_interval_s),
             "options": {"queue": "default", "expires": settings.stats_refresh_interval_s},
         },
-        # «Як ти зараз?»: сирі відповіді живуть 30 днів (docs/wellbeing-checkin.md).
+        # «Як ти зараз?»: сирі відповіді живуть 30 днів (docs/wellbeing-checkin.md). Щодня
+        # о 01:30 UTC (03:30 за Києвом узимку, 04:30 улітку); пропущений запуск надолужує
+        # старт воркера (`app.workers.wellbeing`).
         "wellbeing-purge": {
             "task": "wellbeing.purge",
-            "schedule": 86400.0,
-            "options": {"queue": "default", "expires": 86400},
+            "schedule": crontab(hour=1, minute=30),
+            "options": {"queue": "default", "expires": 6 * 3600},
         },
     },
 )

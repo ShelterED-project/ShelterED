@@ -3,6 +3,9 @@
 те, що ще лишилось."""
 
 import asyncio
+from typing import Any
+
+from celery.signals import worker_ready
 
 from app.core.db import standalone_session
 from app.services import wellbeing as wellbeing_service
@@ -18,3 +21,11 @@ async def _purge() -> dict[str, int]:
 def purge() -> dict[str, int]:
     """Повертає кількість видалених відповідей і записів журналу подій (значень не логує)."""
     return asyncio.run(_purge())
+
+
+@worker_ready.connect
+def purge_on_startup(**_: Any) -> None:
+    """Видалення ще й при старті воркера: якщо beat чи воркер лежали в час за розкладом,
+    прострочені відповіді не чекатимуть наступної доби. Кілька воркерів — кілька запусків,
+    це безпечно (ідемпотентно)."""
+    purge.apply_async(queue="default")

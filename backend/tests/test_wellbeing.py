@@ -407,10 +407,20 @@ async def test_answers_and_view_log_are_deleted_with_student(client, db_session,
     assert await logs(db_session) == []
 
 
-def test_purge_task_is_scheduled_daily() -> None:
-    import app.workers.wellbeing  # noqa: F401
+def test_purge_task_is_scheduled_daily_and_on_worker_start(monkeypatch) -> None:
+    from celery.schedules import crontab
+    from celery.signals import worker_ready
+
+    import app.workers.wellbeing as worker
     from app.workers.celery_app import celery_app
 
     entry = celery_app.conf.beat_schedule["wellbeing-purge"]
-    assert entry["task"] == "wellbeing.purge" and entry["schedule"] == 86400.0
+    assert entry["task"] == "wellbeing.purge"
+    assert entry["schedule"] == crontab(hour=1, minute=30)
+    assert entry["options"]["queue"] == "default"
     assert "wellbeing.purge" in celery_app.tasks
+
+    sent: list[dict] = []
+    monkeypatch.setattr(worker.purge, "apply_async", lambda **kw: sent.append(kw))
+    worker_ready.send(sender=None)
+    assert sent == [{"queue": "default"}]
