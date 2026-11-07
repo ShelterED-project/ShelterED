@@ -411,10 +411,24 @@ async def create_override(
 async def delete_override(
     session: AsyncSession, klass: SchoolClass, override_id: uuid.UUID
 ) -> None:
-    """Ідемпотентно: відсутнє перевизначення — теж 204."""
+    """Ідемпотентно: відсутнє перевизначення — теж 204. Додатковий урок вчителя (з `lesson_id`)
+    видаляється м'яко, як і через свій ендпоінт: інакше запізнілий повтор його створення з
+    черги вчителя воскресив би урок, а надгробок зник би."""
+    await session.execute(
+        update(ScheduleOverride)
+        .where(
+            ScheduleOverride.id == override_id,
+            ScheduleOverride.class_id == klass.id,
+            ScheduleOverride.lesson_id.is_not(None),
+            ScheduleOverride.deleted_at.is_(None),
+        )
+        .values(deleted_at=_now())
+    )
     await session.execute(
         delete(ScheduleOverride).where(
-            ScheduleOverride.id == override_id, ScheduleOverride.class_id == klass.id
+            ScheduleOverride.id == override_id,
+            ScheduleOverride.class_id == klass.id,
+            ScheduleOverride.lesson_id.is_(None),
         )
     )
     await session.commit()

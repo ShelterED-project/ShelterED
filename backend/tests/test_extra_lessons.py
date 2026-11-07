@@ -253,10 +253,42 @@ async def test_late_retry_does_not_resurrect_deleted_extra_lesson(
     )
     assert overrides.json() == []
     assert not await sync_service._student_has_lesson(db_session, world.student_a.id, lesson.id)
+    # Видалення через ендпоінт перевизначень адміністрації не прибирає надгробок.
+    resp = await client.delete(
+        f"/classes/{world.class_a.id}/schedule/overrides/{body['id']}",
+        headers=auth_header(world.admin),
+    )
+    assert resp.status_code == 204
+    assert (await client.post(url(world), json=body, headers=headers)).status_code == 410
     # Надгробок не заважає зняти урок з публікації й видалити його.
     resp = await client.post(f"/lessons/{lesson.id}/unpublish", headers=headers)
     assert resp.status_code == 200, resp.text
     assert (await client.delete(f"/lessons/{lesson.id}", headers=headers)).status_code == 204
+
+
+async def test_admin_override_delete_keeps_extra_lesson_tombstone(
+    client: AsyncClient, world, factory
+) -> None:
+    """Адміністрація видаляє додатковий урок вчителя через ендпоінт перевизначень: повтор
+    створення з черги вчителя отримує 410, урок не воскресає."""
+    subject = await factory.subject()
+    lesson = await published_lesson(factory, world.teacher_a, subject)
+    body = extra_body(lesson, MONDAY)
+    headers = auth_header(world.teacher_a)
+    assert (await client.post(url(world), json=body, headers=headers)).status_code == 201
+    resp = await client.delete(
+        f"/classes/{world.class_a.id}/schedule/overrides/{body['id']}",
+        headers=auth_header(world.admin),
+    )
+    assert resp.status_code == 204
+    resp = await client.post(url(world), json=body, headers=headers)
+    assert resp.status_code == 410 and resp.json()["error"]["code"] == "EXTRA_LESSON_DELETED"
+    sched = await client.get(
+        f"/classes/{world.class_a.id}/schedule",
+        params={"from": str(MONDAY), "days": 1},
+        headers=headers,
+    )
+    assert sched.json()["days"][0]["items"] == []
 
 
 # ---------- предмет уроку = предмет слота ----------
