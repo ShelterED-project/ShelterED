@@ -52,7 +52,8 @@ class Settings(BaseSettings):
     db_max_overflow: int = 5
     # Postgres рве з'єднання застосунку, що простоює у відкритій транзакції довше за цей час
     # (забутий commit не тримає блокувань і не будить Neon). 0 — вимкнено. Міграції (Alembic)
-    # мають власне з'єднання без цього обмеження.
+    # мають власне з'єднання без цього обмеження. З pooled endpoint Neon (`-pooler`, PgBouncer)
+    # параметр не надсилається (він відкидає server_settings) — лише попередження в лозі.
     db_idle_in_transaction_timeout_s: int = Field(default=60, ge=0)
 
     # Секрет підпису JWT: обов'язковий, значення за замовчуванням немає.

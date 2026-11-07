@@ -1,8 +1,10 @@
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from functools import lru_cache
 from typing import Any
 
+from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -13,17 +15,39 @@ from sqlalchemy.pool import NullPool
 
 from app.core.config import Settings, get_settings
 
+logger = logging.getLogger(__name__)
+
+
+def _is_pooler(settings: Settings) -> bool:
+    """Pooled endpoint Neon (хост `...-pooler...`, PgBouncer у режимі транзакцій): параметри
+    сервера в стартовому пакеті він не приймає."""
+    if settings.database_url is None:
+        return False
+    host = make_url(settings.database_url.get_secret_value()).host or ""
+    return "-pooler" in host
+
+
+@lru_cache(maxsize=1)
+def _warn_pooler() -> None:
+    logger.warning(
+        "DATABASE_URL points to a pooled (-pooler) endpoint: "
+        "idle_in_transaction_session_timeout is not set; use the direct endpoint"
+    )
+
 
 def connect_args(settings: Settings) -> dict[str, Any]:
     """Параметри asyncpg для з'єднань застосунку (API й Celery)."""
-    args: dict[str, Any] = {
-        "server_settings": {
+    args: dict[str, Any] = {}
+    if _is_pooler(settings):
+        # PgBouncer відкидає або ігнорує server_settings — без обмеження, з попередженням.
+        _warn_pooler()
+    else:
+        args["server_settings"] = {
             # У мілісекундах; задається при підключенні, тож діє на кожне з'єднання пулу.
             "idle_in_transaction_session_timeout": str(
                 settings.db_idle_in_transaction_timeout_s * 1000
             ),
         }
-    }
     if settings.database_ssl:
         # asyncpg не розуміє sslmode в URL, тому TLS передаємо напряму драйверу.
         args["ssl"] = True
