@@ -8,10 +8,26 @@ from celery.schedules import crontab
 from kombu import Queue
 
 from app.core.config import get_settings
+from app.core.db import standalone_session
+from app.models.outbox import TaskOutbox
 
 logger = logging.getLogger(__name__)
 
 settings = get_settings()
+
+# Як часто beat публікує задачі з `task_outbox`.
+OUTBOX_FLUSH_INTERVAL_S = 30
+
+# Як часто beat шукає уроки, що почалися під час активної тривоги (`alerts.lesson_starts`).
+ALERTS_LESSON_START_INTERVAL_S = 60
+
+# Ліміти часу задач за замовчуванням і для довгих задач (усі класи, прибирання пакетами).
+TASK_SOFT_TIME_LIMIT_S = 300
+LONG_TASK_SOFT_TIME_LIMIT_S = 1800
+LONG_TASK_LIMITS: dict[str, Any] = {
+    "soft_time_limit": LONG_TASK_SOFT_TIME_LIMIT_S,
+    "time_limit": LONG_TASK_SOFT_TIME_LIMIT_S + 60,
+}
 
 celery_app = Celery(
     "sheltered",
@@ -27,6 +43,7 @@ celery_app = Celery(
         "app.workers.sync",
         "app.workers.wellbeing",
         "app.workers.retention",
+        "app.workers.outbox",
     ],
 )
 
@@ -44,15 +61,39 @@ celery_app.conf.update(
     task_acks_late=True,
     task_reject_on_worker_lost=True,
     worker_prefetch_multiplier=1,
+    # Ліміти часу: завислий виклик (БД, push-сервіс, мережа) не тримає воркер вічно. М'який
+    # ліміт кидає SoftTimeLimitExceeded у задачу (транзакція відкочується), жорсткий через 30 с
+    # убиває процес. Задача, що перевищила ліміт, підтверджується (acks_on_failure_or_timeout)
+    # і не повертається в чергу по колу; періодичні задачі добере наступний запуск beat.
+    # Довгі задачі (перезбірки всіх класів, прибирання) мають свої ліміти — `LONG_TASK_LIMITS`.
+    # На Windows із `--pool=solo` ліміти не діють (лише в prefork у Docker).
+    task_soft_time_limit=TASK_SOFT_TIME_LIMIT_S,
+    task_time_limit=TASK_SOFT_TIME_LIMIT_S + 30,
     result_expires=3600,
     broker_connection_retry_on_startup=True,
     # Періодичні задачі (процес `celery beat`). expires: прострочений запуск (воркер
     # лежав) не виконується пачкою — наступний однаково прийде за розкладом.
     beat_schedule={
+        # Задачі, які не вдалося поставити, поки брокер лежав (`task_outbox`).
+        "outbox-flush": {
+            "task": "outbox.flush",
+            "schedule": float(OUTBOX_FLUSH_INTERVAL_S),
+            "options": {"queue": "default", "expires": OUTBOX_FLUSH_INTERVAL_S},
+        },
         "alerts-poll": {
             "task": "alerts.poll",
             "schedule": float(settings.alerts_poll_interval_s),
             "options": {"queue": "default", "expires": settings.alerts_poll_interval_s},
+        },
+        "alerts-auto-close": {
+            "task": "alerts.auto_close",
+            "schedule": float(settings.alerts_auto_close_interval_s),
+            "options": {"queue": "default", "expires": settings.alerts_auto_close_interval_s},
+        },
+        "alerts-lesson-starts": {
+            "task": "alerts.lesson_starts",
+            "schedule": float(ALERTS_LESSON_START_INTERVAL_S),
+            "options": {"queue": "default", "expires": ALERTS_LESSON_START_INTERVAL_S},
         },
         "packs-refresh": {
             "task": "packs.refresh_all",
@@ -83,6 +124,17 @@ celery_app.conf.update(
 )
 
 
+# Повтори задачі без періодичного «добирання» (push.send, sync.regrade_test): збій БД чи брокера
+# посеред задачі інакше губить її назавжди (acks_late повертає задачу лише при падінні воркера,
+# а не при винятку). Задачі ідемпотентні, тож повтор безпечний. Відступ 5, 10, 20 с.
+TRANSIENT_RETRY: dict[str, Any] = {
+    "autoretry_for": (Exception,),
+    "max_retries": 3,
+    "retry_backoff": 5,
+    "retry_jitter": False,
+}
+
+
 # Публікація задачі: кілька коротких повторів замість типових (до ~хвилини), щоб недоступний
 # брокер не тримав запит API.
 PUBLISH_RETRY_POLICY = {
@@ -105,11 +157,23 @@ async def enqueue(
     """Ставить задачу в чергу за іменем (без імпорту модуля задачі).
 
     Викликається ПІСЛЯ commit. `send_task` блокує (мережа до Redis, повтори), тож іде в пулі
-    потоків, а не в циклі подій. Недоступний брокер не ламає вже збережену зміну: помилка
-    логується, а наслідки підбирає повтор (ідемпотентні задачі, періодичні перезбірки,
-    `GET /alerts/active` як запасний шлях для push).
+    потоків, а не в циклі подій. Недоступний брокер не ламає вже збережену зміну й не губить
+    задачу: вона записується в `task_outbox`, і beat-задача `outbox.flush` опублікує її, щойно
+    брокер повернеться (задачі ідемпотентні, повтор безпечний). Відкладення (`countdown`)
+    при цьому не зберігається: задача з outbox іде одразу.
     """
+    args = args or []
     try:
-        await anyio.to_thread.run_sync(partial(_send, name, args or [], queue, options))
+        await anyio.to_thread.run_sync(partial(_send, name, args, queue, options))
     except Exception:
-        logger.exception("Failed to enqueue task %s", name)
+        logger.exception("Failed to enqueue task %s, storing it in the outbox", name)
+        try:
+            await _store_in_outbox(name, args, queue)
+        except Exception:
+            logger.exception("Failed to store task %s in the outbox", name)
+
+
+async def _store_in_outbox(name: str, args: list[Any], queue: str) -> None:
+    async with standalone_session() as session:
+        session.add(TaskOutbox(task_name=name, args=args, queue=queue))
+        await session.commit()

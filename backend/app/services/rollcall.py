@@ -8,10 +8,11 @@
 import datetime as dt
 import uuid
 
-from sqlalchemy import and_, select, update
+from sqlalchemy import and_, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError
+from app.models.alerts import AlertEvent
 from app.models.rollcall import RollCallSession, RollCallStatus
 from app.models.school import ClassMembership, SchoolClass, User
 from app.schemas.rollcall import (
@@ -103,23 +104,48 @@ async def current(session: AsyncSession, viewer: User, klass: SchoolClass) -> Ro
     )
 
 
+async def _covering_alert_id(
+    session: AsyncSession, klass: SchoolClass, is_drill: bool
+) -> uuid.UUID | None:
+    """Активна тривога того ж типу (справжня / навчальна), що покриває клас: ручна цього класу
+    або з API його школи. FOR SHARE: паралельний відбій дочекається commit сесії й закриє її."""
+    return await session.scalar(
+        select(AlertEvent.id)
+        .where(
+            AlertEvent.ended_at.is_(None),
+            AlertEvent.is_drill == is_drill,
+            or_(
+                AlertEvent.class_id == klass.id,
+                and_(AlertEvent.class_id.is_(None), AlertEvent.school_id == klass.school_id),
+            ),
+        )
+        .order_by(AlertEvent.started_at, AlertEvent.id)
+        .limit(1)
+        .with_for_update(read=True)
+    )
+
+
 async def start(
     session: AsyncSession, teacher: User, klass: SchoolClass, body: RollCallStart
 ) -> tuple[RollCallSessionOut, bool]:
     """Ручний старт. Ідемпотентно за `id`: повтор повертає наявну сесію (навіть уже закриту).
-    Інша відкрита сесія класу (зокрема від тривоги) — 409 ROLLCALL_ALREADY_OPEN з її id."""
+    Інша відкрита сесія класу (зокрема від тривоги) — 409 ROLLCALL_ALREADY_OPEN з її id.
+    Під час тривоги того ж типу (урок почався, коли тривога вже йшла) сесія належить їй:
+    відбій закриває перекличку й шле `all_clear`, як для сесії, відкритої тривогою."""
     existing = await session.get(RollCallSession, body.id)
+    alert_id = None
     if existing is None:
         other = await _open_session(session, klass.id)
         if other is not None:
             raise _already_open(other.id)
+        alert_id = await _covering_alert_id(session, klass, body.is_drill)
     rc, created = await insert_or_get(
         session,
         RollCallSession,
         {
             "id": body.id,
             "class_id": klass.id,
-            "alert_event_id": None,
+            "alert_event_id": alert_id,
             "opened_by": teacher.id,
             "is_drill": body.is_drill,
             "opened_at": _now(),

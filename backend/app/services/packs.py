@@ -55,6 +55,9 @@ BUILD_ATTEMPTS = 3
 
 # Розклад дня, уже розв'язаний для класу: (пояс школи, уроки дня).
 DaySchedule = tuple[ZoneInfo, list[ResolvedItem]]
+# Вміст уроку в пакеті на час однієї перезбірки класу: (урок, версія) -> (JSON, id медіа).
+# Опублікований урок незмінний, тож урок, що стоїть у кількох днях тижня, читається раз.
+LessonCache = dict[tuple[uuid.UUID, int], tuple[dict[str, Any], set[uuid.UUID]]]
 
 
 def _now() -> dt.datetime:
@@ -72,36 +75,45 @@ def content_hash(body: dict[str, Any]) -> str:
 # ---------- вміст пакета ----------
 
 
-async def _lesson_content(
-    session: AsyncSession, lesson: Lesson
-) -> tuple[PackLesson, set[uuid.UUID]]:
-    """Урок у пакеті + id його медіа (з субтитрами)."""
-    modules = list(await session.scalars(select(Module).where(Module.lesson_id == lesson.id)))
+async def _lessons_content(
+    session: AsyncSession, lessons: list[Lesson]
+) -> dict[uuid.UUID, tuple[PackLesson, set[uuid.UUID]]]:
+    """Уроки в пакеті + id їхніх медіа (з субтитрами): кілька запитів на всі уроки разом."""
+    if not lessons:
+        return {}
+    lesson_ids = [lesson.id for lesson in lessons]
+    modules = list(await session.scalars(select(Module).where(Module.lesson_id.in_(lesson_ids))))
     modules.sort(key=lambda m: (0 if m.part == "shelter" else 1, m.position))
+    lesson_of_module = {m.id: m.lesson_id for m in modules}
     cards = list(
         await session.scalars(
             select(Card)
-            .where(Card.module_id.in_([m.id for m in modules]))
+            .where(Card.module_id.in_(list(lesson_of_module)))
             .order_by(Card.module_id, Card.position)
         )
     )
     by_module: dict[uuid.UUID, list[CardOut]] = {}
-    media: set[uuid.UUID] = set()
+    media: dict[uuid.UUID, set[uuid.UUID]] = {lid: set() for lid in lesson_ids}
     for c in cards:
         by_module.setdefault(c.module_id, []).append(CardOut.model_validate(c))
         if c.media_asset_id is not None:
-            media.add(c.media_asset_id)
-    if media:
-        subtitles = await session.scalars(
-            select(MediaAsset.subtitles_id).where(
-                MediaAsset.id.in_(media), MediaAsset.subtitles_id.is_not(None)
+            media[lesson_of_module[c.module_id]].add(c.media_asset_id)
+    all_media = set().union(*media.values())
+    if all_media:
+        rows = await session.execute(
+            select(MediaAsset.id, MediaAsset.subtitles_id).where(
+                MediaAsset.id.in_(all_media), MediaAsset.subtitles_id.is_not(None)
             )
         )
-        media.update(s for s in subtitles if s is not None)
+        subtitles = {media_id: subtitles_id for media_id, subtitles_id in rows}
+        for lesson_media in media.values():
+            lesson_media.update(
+                subtitles[m] for m in list(lesson_media) if subtitles.get(m) is not None
+            )
 
     tests = list(
         await session.scalars(
-            select(Test).where(Test.lesson_id == lesson.id).order_by(Test.created_at, Test.id)
+            select(Test).where(Test.lesson_id.in_(lesson_ids)).order_by(Test.created_at, Test.id)
         )
     )
     questions = list(
@@ -111,62 +123,72 @@ async def _lesson_content(
             .order_by(Question.test_id, Question.position)
         )
     )
-    pack_tests = [
-        PackTest(
-            id=t.id,
-            title=t.title,
-            window_enabled=t.window_enabled,
-            window_hours=t.window_hours,
-            # Ключ відповідей лише в тренувальному тесті (без вікна): миттєва перевірка
-            # офлайн. Тест із вікном оцінюється — ключ не покидає сервер.
-            questions=[
-                PackQuestion(
-                    id=q.id,
-                    position=q.position,
-                    kind=q.kind,  # type: ignore[arg-type]
-                    prompt=q.prompt,
-                    options=[Option.model_validate(o) for o in q.options],
-                    points=q.points,
-                    answer_key=None if t.window_enabled else list(q.answer_key),
-                )
-                for q in questions
-                if q.test_id == t.id
-            ],
+    result = {}
+    for lesson in lessons:
+        pack_tests = [
+            PackTest(
+                id=t.id,
+                title=t.title,
+                window_enabled=t.window_enabled,
+                window_hours=t.window_hours,
+                # Ключ відповідей лише в тренувальному тесті (без вікна): миттєва перевірка
+                # офлайн. Тест із вікном оцінюється — ключ не покидає сервер.
+                questions=[
+                    PackQuestion(
+                        id=q.id,
+                        position=q.position,
+                        kind=q.kind,  # type: ignore[arg-type]
+                        prompt=q.prompt,
+                        options=[Option.model_validate(o) for o in q.options],
+                        points=q.points,
+                        answer_key=None if t.window_enabled else list(q.answer_key),
+                    )
+                    for q in questions
+                    if q.test_id == t.id
+                ],
+            )
+            for t in tests
+            if t.lesson_id == lesson.id
+        ]
+        result[lesson.id] = (
+            PackLesson(
+                id=lesson.id,
+                version=lesson.version,
+                subject_id=lesson.subject_id,
+                title=lesson.title,
+                shelter_part=lesson.shelter_part,
+                main_part=lesson.main_part,
+                modules=[
+                    ModuleOut(
+                        id=m.id,
+                        lesson_id=m.lesson_id,
+                        part=m.part,
+                        position=m.position,
+                        title=m.title,
+                        duration_min=m.duration_min,
+                        cards=by_module.get(m.id, []),
+                    )
+                    for m in modules
+                    if m.lesson_id == lesson.id
+                ],
+                tests=pack_tests,
+            ),
+            media[lesson.id],
         )
-        for t in tests
-    ]
-    return (
-        PackLesson(
-            id=lesson.id,
-            version=lesson.version,
-            subject_id=lesson.subject_id,
-            title=lesson.title,
-            shelter_part=lesson.shelter_part,
-            main_part=lesson.main_part,
-            modules=[
-                ModuleOut(
-                    id=m.id,
-                    lesson_id=m.lesson_id,
-                    part=m.part,
-                    position=m.position,
-                    title=m.title,
-                    duration_min=m.duration_min,
-                    cards=by_module.get(m.id, []),
-                )
-                for m in modules
-            ],
-            tests=pack_tests,
-        ),
-        media,
-    )
+    return result
 
 
 async def build_content(
-    session: AsyncSession, klass: SchoolClass, day: dt.date, resolved: DaySchedule | None = None
+    session: AsyncSession,
+    klass: SchoolClass,
+    day: dt.date,
+    resolved: DaySchedule | None = None,
+    cache: LessonCache | None = None,
 ) -> tuple[dict[str, Any], dict[uuid.UUID, int], set[uuid.UUID]]:
     """(вміст без id/версії/часу збірки, {lesson_id: version}, id медіа). Лише опубліковані
     уроки: якщо призначений урок знято з публікації, у розкладі пакета `lesson_id = null`.
-    `resolved` — уже розв'язаний розклад дня (інакше читається з БД)."""
+    `resolved` — уже розв'язаний розклад дня (інакше читається з БД); `cache` — вміст уроків,
+    уже прочитаний для інших днів тієї самої перезбірки."""
     if resolved is None:
         tz, days = await school_service.class_schedule(session, klass, day, 1)
         resolved = (tz, days[0][1])
@@ -185,6 +207,17 @@ async def build_content(
             item.lesson_id = None
         schedule.append(item.model_dump(mode="json"))
 
+    if cache is None:
+        cache = {}
+    loaded = await _lessons_content(
+        session, [lesson for lesson in lessons.values() if (lesson.id, lesson.version) not in cache]
+    )
+    for lesson_id, (content, lesson_media) in loaded.items():
+        cache[(lesson_id, lessons[lesson_id].version)] = (
+            content.model_dump(mode="json"),
+            lesson_media,
+        )
+
     pack_lessons: list[dict[str, Any]] = []
     versions: dict[uuid.UUID, int] = {}
     media: set[uuid.UUID] = set()
@@ -192,8 +225,8 @@ async def build_content(
         lesson = lessons.get(lesson_id)
         if lesson is None:
             continue
-        content, lesson_media = await _lesson_content(session, lesson)
-        pack_lessons.append(content.model_dump(mode="json"))
+        lesson_json, lesson_media = cache[(lesson.id, lesson.version)]
+        pack_lessons.append(lesson_json)
         versions[lesson.id] = lesson.version
         media |= lesson_media
     body = {
@@ -252,6 +285,7 @@ async def build_pack(
     settings: Settings,
     now: dt.datetime | None = None,
     resolved: DaySchedule | None = None,
+    cache: LessonCache | None = None,
 ) -> tuple[KnowledgePack | None, bool]:
     """Збирає пакет класу на дату. (пакет, True) — нова версія; (актуальний, False) — вміст
     не змінився; (None, False) — дня без уроків у розкладі ще не було в пакетах.
@@ -260,10 +294,14 @@ async def build_pack(
     Commit робить викликач."""
     now = now or _now()
     for _ in range(BUILD_ATTEMPTS):
-        pack, created, conflict = await _try_build(session, klass, day, settings, now, resolved)
+        pack, created, conflict = await _try_build(
+            session, klass, day, settings, now, resolved, cache
+        )
         if not conflict:
             return pack, created
         resolved = None  # розклад теж міг змінитися — перечитуємо все
+        if cache is not None:
+            cache.clear()
     logger.warning("Pack build gave up after version conflicts: class=%s date=%s", klass.id, day)
     return await latest_pack(session, klass.id, day), False
 
@@ -275,9 +313,10 @@ async def _try_build(
     settings: Settings,
     now: dt.datetime,
     resolved: DaySchedule | None,
+    cache: LessonCache | None,
 ) -> tuple[KnowledgePack | None, bool, bool]:
     """Одна спроба збірки: (пакет, створено, конфлікт версії)."""
-    body, versions, media = await build_content(session, klass, day, resolved)
+    body, versions, media = await build_content(session, klass, day, resolved, cache)
     latest = await latest_pack(session, klass.id, day)
     if latest is None and not body["schedule"]:
         return None, False, False
@@ -384,8 +423,9 @@ async def rebuild_class(
     built: list[KnowledgePack] = []
     # Розклад тижня — одним читанням, а не на кожен день.
     tz, days = await school_service.class_schedule(session, klass, start, HORIZON_DAYS)
+    cache: LessonCache = {}
     for day, items in days:
-        pack, created = await build_pack(session, klass, day, settings, now, (tz, items))
+        pack, created = await build_pack(session, klass, day, settings, now, (tz, items), cache)
         if created and pack is not None:
             built.append(pack)
     await session.commit()

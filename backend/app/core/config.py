@@ -2,11 +2,14 @@ from functools import lru_cache
 from importlib.metadata import version
 from typing import Literal
 
-from pydantic import SecretStr
+from pydantic import SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Єдине джерело версії — pyproject.toml (пакет встановлено через pip install -e).
 APP_VERSION = version("sheltered-backend")
+
+# Мінімальна довжина секрету підпису JWT (HS256): 32 символи ≈ 256 біт для випадкового рядка.
+JWT_SECRET_MIN_LENGTH = 32
 
 
 class Settings(BaseSettings):
@@ -19,10 +22,20 @@ class Settings(BaseSettings):
     # SHA коміту, який підставляє CI під час збірки образу.
     git_sha: str | None = None
 
+    # Swagger UI (`/docs`), ReDoc (`/redoc`) і `/openapi.json`. За замовчуванням вимкнені в
+    # prod (карта всіх ендпоінтів і схем — зайва інформація для атакувальника; контракт для
+    # фронтенду — `docs/openapi.json` у репозиторії), увімкнені деінде. API_DOCS_ENABLED
+    # перевизначає.
+    api_docs_enabled: bool | None = None
+
     log_level: str = "INFO"
     log_format: Literal["json", "text"] = "text"
 
     cors_origins: list[str] = ["http://localhost:5173"]
+
+    # Найбільше тіло запиту (крім потокового завантаження медіа з власними лімітами), байти.
+    # Пакет синхронізації зі 100 подій і урок з довгими текстами — сотні КБ.
+    max_request_body_bytes: int = 1024 * 1024
 
     # HSTS (B15.2): заголовок лише для запитів, що прийшли по HTTPS (схема від uvicorn
     # `--proxy-headers`). Увімкнено в prod завжди, деінде — через HSTS_ENABLED.
@@ -49,6 +62,10 @@ class Settings(BaseSettings):
     parent_link_code_ttl_days: int = 7
     # Дозволені client_id для OAuth 2.0 PKCE (PWA).
     oauth_client_ids: list[str] = ["sheltered-pwa"]
+    # Дозволені `redirect_uri` (точний збіг). Код повертається в тілі відповіді, а не
+    # редиректом, тож `redirect_uri` необов'язковий; якщо клієнт його надсилає — лише зі списку
+    # (інакше 400 INVALID_REDIRECT_URI ще до перевірки пароля).
+    oauth_redirect_uris: list[str] = []
 
     # Redis у Docker на 6380: 6379 на машині розробника займає нативний Redis.
     # БД 0 — брокер черг Celery, БД 1 — результати задач.
@@ -78,6 +95,10 @@ class Settings(BaseSettings):
     alerts_poll_interval_s: int = 30
     # Без успішного опитування довше за це джерело вважається недоступним (B7.6).
     alerts_source_stale_s: int = 300
+    # Забуті ручні тривоги (зокрема навчальні) і ручні переклички без тривоги закриваються
+    # автоматично через N год, якщо клас не покриває тривога з API (beat `alerts.auto_close`).
+    alerts_manual_max_hours: int = 6
+    alerts_auto_close_interval_s: int = 300
 
     # Синхронізація (docs/sync-protocol.md, розділ 6): подія «підозріла», якщо `occurred_at`
     # пізніше часу сервера або |зсув годинника пакета| більше за цей поріг. Позначка, не блокування.
@@ -114,6 +135,17 @@ class Settings(BaseSettings):
     rate_limit_join_account_all_ips: int = 100
     rate_limit_login_account_all_ips: int = 100
     rate_limit_window_s: int = 900
+    # Прив'язка батьків до дитини (`POST /parent/link`): невдалі коди на акаунт батьків і на IP
+    # за RATE_LIMIT_WINDOW_S (перебір кодів прив'язки чужих дітей).
+    rate_limit_parent_link: int = 10
+    rate_limit_parent_link_ip: int = 100
+    # Добовий ліміт невдалих входів учня на акаунт з усіх IP. PIN — 4–6 цифр (від 10 000
+    # варіантів): лише 15-хвилинне вікно (100 спроб) дає перебір 4-значного PIN зі зміною IP
+    # в середньому за ~12 год, з добовим лімітом — за ~17 днів. Компроміс: настирливий
+    # однокласник із багатьох IP може заблокувати вхід учня до кінця доби (вчитель бачить це
+    # й може скинути PIN; refresh-токен учня на його пристрої продовжує працювати).
+    rate_limit_join_account_daily: int = 300
+    rate_limit_daily_window_s: int = 86400
     # Ліміти на кількість запитів користувача (рахується кожен запит, не лише невдалий):
     # ШІ-репетитор — на учня; QR-ретрансляція подій (`POST /sync/events` від вчителя) — на вчителя.
     rate_limit_tutor: int = 20
@@ -149,6 +181,29 @@ class Settings(BaseSettings):
     # Демо-дані (`python -m app.cli seed`): спільний пароль дорослих (≥ 8 символів). Не задано —
     # генерується й друкується один раз при створенні акаунтів.
     seed_password: SecretStr | None = None
+
+    @field_validator("jwt_secret")
+    @classmethod
+    def _jwt_secret_strong(cls, value: SecretStr) -> SecretStr:
+        # `JWT_SECRET=` з `.env.example` дало б порожній ключ HS256: будь-хто підробив би токен.
+        if len(value.get_secret_value()) < JWT_SECRET_MIN_LENGTH:
+            raise ValueError(f"JWT_SECRET must be at least {JWT_SECRET_MIN_LENGTH} characters")
+        return value
+
+    @model_validator(mode="after")
+    def _prod_requires_database(self) -> "Settings":
+        # У prod без БД API не має стартувати «успішно» й падати 500 на кожному запиті.
+        if self.environment == "prod" and not (
+            self.database_url and self.database_url.get_secret_value()
+        ):
+            raise ValueError("DATABASE_URL is required when ENVIRONMENT=prod")
+        return self
+
+    @property
+    def api_docs_active(self) -> bool:
+        if self.api_docs_enabled is not None:
+            return self.api_docs_enabled
+        return self.environment != "prod"
 
     @property
     def hsts_active(self) -> bool:

@@ -55,7 +55,7 @@ OPENAPI_TITLE = "ShelterED API"
 def render_openapi() -> str:
     """Специфікація API у стабільному вигляді (відсортовані ключі), щоб diff був змістовним."""
     # Для генерації специфікації секрет не потрібен, але Settings вимагає його при імпорті.
-    os.environ.setdefault("JWT_SECRET", "openapi-export-placeholder")
+    os.environ.setdefault("JWT_SECRET", "openapi-export-placeholder-not-a-real-secret")
     from app.main import app
 
     spec = copy.deepcopy(app.openapi())

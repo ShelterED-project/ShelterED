@@ -40,6 +40,8 @@ class RollCallStatus(SyncChangeMixin, Base):
     __table_args__ = (
         CheckConstraint("status IN ('safe', 'in_shelter')", name="status"),
         Index("ix_rollcall_status_sync_changes", "student_id", "change_xid", "change_seq"),
+        # Перевірка FK під час видалення подій (як у module_progress).
+        Index("ix_rollcall_status_last_event_id", "last_event_id"),
     )
 
     session_id: Mapped[uuid.UUID] = mapped_column(

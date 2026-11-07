@@ -264,6 +264,27 @@ async def test_account_wide_limit_stops_guessing_with_rotating_ips(app: FastAPI,
         assert r.status_code == 200
 
 
+async def test_daily_account_limit_stops_slow_pin_guessing(app: FastAPI, world) -> None:
+    """15-хвилинні ліміти не зупиняють повільний перебір 4-значного PIN зі зміною IP (100 спроб
+    на вікно — у середньому ~12 год); добовий ліміт на акаунт з усіх IP — зупиняє."""
+    settings = get_settings()
+    # За добу перебирається не більше ~5 % варіантів 4-значного PIN.
+    assert settings.rate_limit_join_account_daily <= 500
+    assert settings.rate_limit_daily_window_s >= 86400
+    daily = 12
+    app.dependency_overrides[get_settings] = lambda: settings.model_copy(
+        update={"rate_limit_join_account_daily": daily}
+    )
+    for n in range(daily):
+        async with from_ip(app, f"10.3.0.{n + 1}") as bot:
+            r = await bot.post("/auth/student/join", json=join(world.class_a, pin="9999"))
+            assert r.status_code == 401
+    async with from_ip(app, "10.9.9.9") as owner:
+        r = await owner.post("/auth/student/join", json=join(world.class_a))
+        assert r.status_code == 429
+        assert int(r.headers["Retry-After"]) > settings.rate_limit_window_s
+
+
 async def test_account_wide_limit_for_adult_logins(app: FastAPI, world) -> None:
     email = world.teacher_a.email
     limit = get_settings().rate_limit_login_account_all_ips
@@ -275,6 +296,23 @@ async def test_account_wide_limit_for_adult_logins(app: FastAPI, world) -> None:
     async with from_ip(app, "10.9.9.9") as owner:
         r = await owner.post("/auth/authorize", json=authorize(email, PASSWORD))
         assert r.status_code == 429
+
+
+async def test_parent_link_code_guessing_is_limited(client: AsyncClient, world) -> None:
+    """Перебір кодів прив'язки (доступ до чужої дитини) упирається в ліміт на акаунт батьків."""
+    headers = auth_header(world.parent_a)
+    limit = get_settings().rate_limit_parent_link
+    for _ in range(limit):
+        r = await client.post("/parent/link", json={"code": "ZZZZZZZZ"}, headers=headers)
+        assert r.status_code == 400
+    r = await client.post("/parent/link", json={"code": "ZZZZZZZZ"}, headers=headers)
+    assert r.status_code == 429
+    assert r.json()["error"]["code"] == "RATE_LIMITED"
+    # Інші батьки не заблоковані.
+    r = await client.post(
+        "/parent/link", json={"code": "ZZZZZZZZ"}, headers=auth_header(world.parent_free)
+    )
+    assert r.status_code == 400
 
 
 # ---------- ліміт запитів: ШІ-репетитор і QR-ретрансляція ----------

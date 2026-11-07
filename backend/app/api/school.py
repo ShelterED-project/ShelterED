@@ -59,7 +59,7 @@ def _created(response: Response, created: bool) -> None:
 @router.get("/classes", response_model=list[ClassOut], responses={**R401, **R403})
 async def list_classes(user: Staff, session: Session) -> list[ClassOut]:
     """Адмін — усі класи своєї школи, вчитель — класи, де він веде."""
-    return [await service.class_out(session, k) for k in await service.list_classes(session, user)]
+    return await service.classes_out(session, await service.list_classes(session, user))
 
 
 @router.post(

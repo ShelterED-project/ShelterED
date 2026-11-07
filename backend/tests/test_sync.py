@@ -10,6 +10,7 @@ from typing import Any
 import pytest
 from conftest import auth_header, pushes
 from httpx import AsyncClient
+from sqlalchemy import event as event_api
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -181,6 +182,36 @@ async def test_same_id_twice_in_one_batch(client, db_session, world, c) -> None:
     results = await send(client, world.student_a, batch(e, dict(e)))
     assert statuses(results) == [("accepted", None), ("duplicate", None)]
     assert await count(db_session, SyncEvent) == 1
+
+
+async def test_batch_queries_do_not_grow_per_event_for_lookups(
+    client, db_session, world, c
+) -> None:
+    """Повтор пакета перевіряє журнал одним запитом; урок модуля й доступ до нього читаються
+    раз на пакет, а не на кожну подію."""
+    statements: list[str] = []
+
+    def record(conn, cursor, statement, *args) -> None:
+        statements.append(statement)
+
+    def lookups(prefix: str) -> int:
+        return sum(s.lstrip().startswith(prefix) for s in statements)
+
+    body = batch(*(progress(c.module.id, pct) for pct in range(10, 101, 10)))
+    engine = db_session.bind.engine.sync_engine
+    event_api.listen(engine, "before_cursor_execute", record)
+    try:
+        results = await send(client, world.student_a, body)
+        assert statuses(results) == [("accepted", None)] * 10
+        assert lookups("SELECT module.lesson_id") == 1
+        assert lookups("SELECT (EXISTS") == 1
+        statements.clear()
+        results = await send(client, world.student_a, body)
+    finally:
+        event_api.remove(engine, "before_cursor_execute", record)
+    assert statuses(results) == [("duplicate", None)] * 10
+    assert lookups("SELECT sync_event") == 1
+    assert lookups("INSERT") == 0
 
 
 async def test_rejections_with_reasons_are_stored_and_repeat_the_same(

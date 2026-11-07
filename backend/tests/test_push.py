@@ -1,6 +1,7 @@
 """Web Push (B8): ключ VAPID, підписки, одержувачі, доставка, повтори й дедуплікація."""
 
 import base64
+import datetime as dt
 import json
 import uuid
 from contextlib import asynccontextmanager
@@ -235,16 +236,18 @@ async def test_subscription_rejects_p256dh_off_curve(client, world) -> None:
 
 
 async def _subscribe_with_times(client, db_session, user, count: int) -> list[uuid.UUID]:
-    """`count` підписок; created_at — 1, 2, ... с (у тесті все в одній транзакції з тим самим
-    now()). updated_at найстарішої — найновіший, ніби її щойно чіпала спроба доставки."""
+    """`count` підписок; created_at — година тому + 1, 2, ... с (у тесті все в одній транзакції
+    з тим самим now(), тож нова підписка завжди новіша). updated_at найстарішої — найновіший,
+    ніби її щойно чіпала спроба доставки."""
     ids = []
     for i in range(count):
         data = body()
         ids.append(uuid.UUID(data["id"]))
         await client.post("/push/subscriptions", json=data, headers=auth_header(user))
         sub = await db_session.get(PushSubscription, ids[-1])
-        sub.created_at = sub.created_at.replace(microsecond=0, second=i + 1)
-        sub.updated_at = sub.created_at.replace(second=59 - i)
+        base = sub.created_at - dt.timedelta(hours=1)
+        sub.created_at = base + dt.timedelta(seconds=i + 1)
+        sub.updated_at = base + dt.timedelta(seconds=59 - i)
         await db_session.flush()
     return ids
 

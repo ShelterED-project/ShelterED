@@ -1,8 +1,12 @@
 import threading
+from contextlib import asynccontextmanager
 
 import pytest
+from sqlalchemy import select
 
+from app.models.outbox import TaskOutbox
 from app.workers import celery_app as celery_module
+from app.workers import outbox as outbox_worker
 from app.workers.celery_app import celery_app
 from app.workers.system import ping
 
@@ -35,10 +39,85 @@ async def test_enqueue_publishes_off_the_event_loop_with_short_retries(monkeypat
         if name == "broken":
             raise ConnectionError("broker down")
 
+    async def store(name, args, queue):
+        stored.append((name, args, queue))
+
+    stored = []
     monkeypatch.setattr(celery_app, "send_task", send_task)
+    monkeypatch.setattr(celery_module, "_store_in_outbox", store)
     await celery_module.enqueue("stats.recompute_student", args=["x"])
     await celery_module.enqueue("broken")
     assert [c[1] for c in calls] == ["stats.recompute_student", "broken"]
+    assert stored == [("broken", [], "default")]
     thread, _, options = calls[0]
     assert thread != loop_thread
     assert options["retry"] is True and options["retry_policy"]["max_retries"] <= 2
+
+
+def test_tasks_without_catch_up_retry_transient_errors():
+    """push.send (push тривоги) і sync.regrade_test не мають періодичного добирання: виняток
+    (БД чи брокер недоступні) має дати повтор, а не загубити задачу."""
+    for name in ("push.send", "sync.regrade_test"):
+        task = celery_app.tasks[name]
+        assert Exception in task.autoretry_for, name
+        assert task.max_retries and task.max_retries > 0, name
+
+
+def test_tasks_have_time_limits():
+    """Завислий виклик не тримає воркер вічно; довгі періодичні задачі мають більший ліміт."""
+    celery_app.loader.import_default_modules()
+    conf = celery_app.conf
+    assert 0 < conf.task_soft_time_limit < conf.task_time_limit
+    for name in ("packs.refresh_all", "stats.refresh_all", "retention.purge"):
+        task = celery_app.tasks[name]
+        assert conf.task_soft_time_limit < task.soft_time_limit < task.time_limit, name
+    # Прибирання журналу подій зупиняється само раніше за м'який ліміт.
+    from app.services.retention import SYNC_EVENT_MAX_S
+
+    assert SYNC_EVENT_MAX_S < celery_app.tasks["retention.purge"].soft_time_limit
+
+
+@pytest.mark.anyio
+async def test_task_is_kept_in_outbox_while_broker_is_down(db_session, monkeypatch, enqueued):
+    """Брокер лежить у момент постановки: задача (push тривоги) записується в `task_outbox`,
+    лишається там, доки брокер недоступний, і публікується `outbox.flush`, коли він повернувся."""
+
+    @asynccontextmanager
+    async def session():
+        yield db_session
+
+    monkeypatch.setattr(celery_module, "standalone_session", session)
+    monkeypatch.setattr(outbox_worker, "standalone_session", session)
+    working_send = celery_app.send_task
+
+    def broker_down(*args, **kwargs):
+        raise ConnectionError("broker down")
+
+    monkeypatch.setattr(celery_app, "send_task", broker_down)
+    payload = {"type": "alert", "class_id": "c1"}
+    await celery_module.enqueue("push.send", args=[payload, "k1"], queue="push")
+    row = await db_session.scalar(select(TaskOutbox))
+    assert (row.task_name, row.args, row.queue, row.sent_at) == (
+        "push.send",
+        [payload, "k1"],
+        "push",
+        None,
+    )
+
+    assert await outbox_worker._flush() == 0
+    await db_session.refresh(row)
+    assert row.sent_at is None and row.attempts == 1
+
+    monkeypatch.setattr(celery_app, "send_task", working_send)
+    assert await outbox_worker._flush() == 1
+    await db_session.refresh(row)
+    assert row.sent_at is not None
+    assert [(c.name, c.args, c.queue) for c in enqueued] == [("push.send", [payload, "k1"], "push")]
+    # Повторний прохід нічого не публікує вдруге.
+    assert await outbox_worker._flush() == 0
+    assert len(enqueued) == 1
+
+
+def test_outbox_is_flushed_by_beat():
+    entry = celery_app.conf.beat_schedule["outbox-flush"]
+    assert entry["task"] == "outbox.flush" and entry["schedule"] <= 60

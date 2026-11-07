@@ -461,6 +461,7 @@
         ],
         "properties": {
           "client_id": {
+            "maxLength": 64,
             "title": "Client Id",
             "type": "string"
           },
@@ -488,6 +489,7 @@
           "redirect_uri": {
             "anyOf": [
               {
+                "maxLength": 2048,
                 "type": "string"
               },
               {
@@ -3628,7 +3630,7 @@
                 "type": "null"
               }
             ],
-            "description": "null — відкрита вчителем вручну",
+            "description": "null — відкрита вчителем вручну поза тривогою",
             "title": "Alert Event Id"
           },
           "class_id": {
@@ -6640,7 +6642,7 @@
                 }
               }
             },
-            "description": "Невідомий client_id"
+            "description": "INVALID_CLIENT (невідомий client_id) / INVALID_REDIRECT_URI (redirect_uri не з OAUTH_REDIRECT_URIS)"
           },
           "401": {
             "content": {
@@ -6799,7 +6801,7 @@
     },
     "/auth/student/join": {
       "post": {
-        "description": "Вхід учня: код класу + імʼя + прізвище + PIN (4–6 цифр).\n\nЯкщо учня з таким імʼям у класі ще немає — його створюють, інакше перевіряють PIN.\nКод класу нормалізується (лише A-Z і 0-9; кириличні двійники латиниці замінюються).\nПрострочений код пускає лише наявних учнів із вірним PIN; для невідомого імені й хибного PIN\nвідповідь однакова: 401 `INVALID_CREDENTIALS`.\n\nЗахист від перебору PIN: невдалі спроби обмежені на пару IP + (код класу + ім'я), на IP і\nвисоким загальним лімітом на (код класу + ім'я) з усіх IP (`RATE_LIMIT_JOIN_*` за\n`RATE_LIMIT_WINDOW_S`); понад ліміт — 429 з `Retry-After`.\nБлокування акаунта немає: однокласник, що вводить чужий PIN, блокує лише себе (свій IP),\nа справжній учень входить з іншого пристрою/IP; ліміт знімається сам після вікна.",
+        "description": "Вхід учня: код класу + імʼя + прізвище + PIN (4–6 цифр).\n\nЯкщо учня з таким імʼям у класі ще немає — його створюють, інакше перевіряють PIN.\nКод класу нормалізується (лише A-Z і 0-9; кириличні двійники латиниці замінюються).\nПрострочений код пускає лише наявних учнів із вірним PIN; для невідомого імені й хибного PIN\nвідповідь однакова: 401 `INVALID_CREDENTIALS`.\n\nЗахист від перебору PIN: невдалі спроби обмежені на пару IP + (код класу + ім'я), на IP і\nвисоким загальним лімітом на (код класу + ім'я) з усіх IP (`RATE_LIMIT_JOIN_*` за\n`RATE_LIMIT_WINDOW_S`) і добовим лімітом на (код класу + ім'я) з усіх IP\n(`RATE_LIMIT_JOIN_ACCOUNT_DAILY`); понад ліміт — 429 з `Retry-After`.\nБлокування акаунта немає: однокласник, що вводить чужий PIN, блокує лише себе (свій IP),\nа справжній учень входить з іншого пристрою/IP; ліміт знімається сам після вікна.",
         "operationId": "student_join_auth_student_join_post",
         "requestBody": {
           "content": {
@@ -6953,6 +6955,7 @@
                   "redirect_uri": {
                     "anyOf": [
                       {
+                        "maxLength": 2048,
                         "type": "string"
                       },
                       {
@@ -7041,6 +7044,7 @@
                   "redirect_uri": {
                     "anyOf": [
                       {
+                        "maxLength": 2048,
                         "type": "string"
                       },
                       {
@@ -7176,7 +7180,7 @@
                 }
               }
             },
-            "description": "ID_CONFLICT / POSITION_TAKEN / LESSON_PUBLISHED"
+            "description": "LESSON_PUBLISHED / IN_USE"
           },
           "422": {
             "content": {
@@ -8088,7 +8092,7 @@
     },
     "/classes/{class_id}/rollcall": {
       "post": {
-        "description": "Вчитель класу відкриває перекличку вручну (без тривоги). При тривозі сесія\nвідкривається автоматично. Ідемпотентно за `id` (повтор — 200 з наявною сесією, навіть\nзакритою); на клас — одна відкрита сесія.",
+        "description": "Вчитель класу відкриває перекличку вручну. При тривозі під час уроку сесія\nвідкривається автоматично; якщо урок почався, коли тривога вже йшла, ручна сесія\nналежить цій тривозі (`alert_event_id`) і закривається її відбоєм. Ідемпотентно за `id`\n(повтор — 200 з наявною сесією, навіть закритою); на клас — одна відкрита сесія.",
         "operationId": "start_rollcall_classes__class_id__rollcall_post",
         "parameters": [
           {
@@ -11850,7 +11854,7 @@
                 }
               }
             },
-            "description": "ID_CONFLICT / POSITION_TAKEN / LESSON_PUBLISHED"
+            "description": "LESSON_PUBLISHED / IN_USE"
           },
           "422": {
             "content": {
@@ -12515,7 +12519,7 @@
     },
     "/parent/link": {
       "post": {
-        "description": "Прив'язує батьків до дитини за кодом від вчителя. Повторний виклик ідемпотентний.",
+        "description": "Прив'язує батьків до дитини за кодом від вчителя. Повторний виклик ідемпотентний.\nНевдалі коди обмежені на акаунт батьків і на IP (`RATE_LIMIT_PARENT_LINK*` за\n`RATE_LIMIT_WINDOW_S`); понад ліміт — 429 з `Retry-After`.",
         "operationId": "parent_link_parent_link_post",
         "requestBody": {
           "content": {
@@ -12577,6 +12581,23 @@
               }
             },
             "description": "Unprocessable Content"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RATE_LIMITED: забагато невдалих спроб; повторити після `Retry-After` с",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
           },
           "500": {
             "content": {
@@ -12874,7 +12895,7 @@
                 }
               }
             },
-            "description": "ID_CONFLICT / POSITION_TAKEN / LESSON_PUBLISHED"
+            "description": "LESSON_PUBLISHED / IN_USE"
           },
           "422": {
             "content": {
@@ -14128,7 +14149,7 @@
                 }
               }
             },
-            "description": "ID_CONFLICT / POSITION_TAKEN / LESSON_PUBLISHED"
+            "description": "LESSON_PUBLISHED / IN_USE"
           },
           "422": {
             "content": {

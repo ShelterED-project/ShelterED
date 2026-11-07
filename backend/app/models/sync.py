@@ -52,6 +52,13 @@ class SyncEvent(Base):
             "received_at",
             postgresql_where=text("device_id IS NOT NULL"),
         ),
+        # Видалення користувача (ON DELETE SET NULL) без повного сканування журналу; QR-ретрансляція
+        # рідкісна, тож індекс лише по заповнених рядках.
+        Index(
+            "ix_sync_event_relayed_by",
+            "relayed_by",
+            postgresql_where=text("relayed_by IS NOT NULL"),
+        ),
     )
 
     # Створює клієнт; вставка INSERT ... ON CONFLICT DO NOTHING.
@@ -95,6 +102,8 @@ class Attempt(SyncChangeMixin, Base):
             postgresql_where=text("credit_status = 'credited'"),
         ),
         Index("ix_attempt_sync_changes", "student_id", "change_xid", "change_seq"),
+        # Переоцінка тесту (regrade_test) і перевірка FK під час видалення тесту.
+        Index("ix_attempt_test_id", "test_id"),
     )
 
     id: Mapped[uuid.UUID] = uuid_pk()
@@ -119,6 +128,11 @@ class ModuleProgress(SyncChangeMixin, Base):
     __table_args__ = (
         CheckConstraint("progress_pct BETWEEN 0 AND 100", name="progress_range"),
         Index("ix_module_progress_sync_changes", "student_id", "change_xid", "change_seq"),
+        # Перевірка FK під час видалення подій (retention.purge, видалення учня): без індексу —
+        # повне сканування таблиці на кожну видалену подію.
+        Index("ix_module_progress_last_event_id", "last_event_id"),
+        # «Є прогрес?» перед видаленням модуля чи уроку (PK починається зі student_id).
+        Index("ix_module_progress_module_id", "module_id"),
     )
 
     student_id: Mapped[uuid.UUID] = mapped_column(

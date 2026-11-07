@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo
 import pytest
 from conftest import auth_header, pushes
 from httpx import AsyncClient
-from sqlalchemy import func, inspect, select
+from sqlalchemy import event, func, inspect, select
 
 from app.core.config import get_settings
 from app.models.lessons import Card, Lesson, MediaAsset, Module, Question, Test
@@ -208,6 +208,42 @@ async def graded_test(db, course) -> Test:
     )
     await db.flush()
     return test
+
+
+async def test_lesson_repeated_in_week_is_read_once_per_rebuild(
+    db_session, world, course, enqueued
+) -> None:
+    """Урок, що стоїть у кількох днях тижня, читається з БД раз за перезбірку, а вміст у
+    пакетах однаковий."""
+    day = course.day + dt.timedelta(days=2)
+    slot = ScheduleSlot(
+        class_id=world.class_a.id,
+        subject_id=course.subject.id,
+        weekday=day.isoweekday(),
+        starts_at=dt.time(10, 0),
+        ends_at=dt.time(10, 45),
+        valid_from=course.day - dt.timedelta(days=7),
+    )
+    db_session.add(slot)
+    await db_session.flush()
+    db_session.add(LessonAssignment(slot_id=slot.id, date=day, lesson_id=course.lesson.id))
+    await db_session.flush()
+
+    statements: list[str] = []
+
+    def record(conn, cursor, statement, *args) -> None:
+        statements.append(statement)
+
+    engine = db_session.bind.engine.sync_engine
+    event.listen(engine, "before_cursor_execute", record)
+    try:
+        built = await rebuild(db_session, world)
+    finally:
+        event.remove(engine, "before_cursor_execute", record)
+    by_day = {p.pack_date: content(p) for p in built}
+    assert by_day[day]["lessons"] == by_day[course.day]["lessons"]
+    # Один запит модулів на кожен день із новими уроками (сьогодні й завтра), а не на кожен урок.
+    assert sum("FROM module" in s and "lesson_id IN" in s for s in statements) == 2
 
 
 async def test_answer_key_only_for_practice_tests(db_session, world, course) -> None:

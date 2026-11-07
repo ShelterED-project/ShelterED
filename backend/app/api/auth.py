@@ -63,16 +63,20 @@ def _client_ip(request: Request) -> str:
 
 
 async def _limited[T](
-    limiter: RateLimiter, rules: list[Rule], call: Callable[[], Awaitable[T]]
+    limiter: RateLimiter,
+    rules: list[Rule],
+    call: Callable[[], Awaitable[T]],
+    failed: frozenset[str] | set[str] = _FAILED_LOGIN,
 ) -> T:
-    """Вхід із лімітом невдалих спроб: вичерпаний ключ — 429 з Retry-After, без виклику."""
+    """Виклик із лімітом невдалих спроб (коди помилок `failed`): вичерпаний ключ — 429 з
+    Retry-After, без виклику."""
     retry_after = await limiter.retry_after(rules)
     if retry_after is not None:
-        raise rate_limited(retry_after, "Too many failed login attempts, try again later")
+        raise rate_limited(retry_after, "Too many failed attempts, try again later")
     try:
         return await call()
     except AppError as exc:
-        if exc.code in _FAILED_LOGIN:
+        if exc.code in failed:
             await limiter.hit(rules)
         raise
 
@@ -81,7 +85,11 @@ async def _limited[T](
     "/auth/authorize",
     response_model=AuthorizeResponse,
     responses={
-        400: {"model": ErrorResponse, "description": "Невідомий client_id"},
+        400: {
+            "model": ErrorResponse,
+            "description": "INVALID_CLIENT (невідомий client_id) / INVALID_REDIRECT_URI "
+            "(redirect_uri не з OAUTH_REDIRECT_URIS)",
+        },
         401: {"model": ErrorResponse, "description": "INVALID_CREDENTIALS"},
         **R429,
     },
@@ -228,7 +236,8 @@ async def student_join(
 
     Захист від перебору PIN: невдалі спроби обмежені на пару IP + (код класу + ім'я), на IP і
     високим загальним лімітом на (код класу + ім'я) з усіх IP (`RATE_LIMIT_JOIN_*` за
-    `RATE_LIMIT_WINDOW_S`); понад ліміт — 429 з `Retry-After`.
+    `RATE_LIMIT_WINDOW_S`) і добовим лімітом на (код класу + ім'я) з усіх IP
+    (`RATE_LIMIT_JOIN_ACCOUNT_DAILY`); понад ліміт — 429 з `Retry-After`.
     Блокування акаунта немає: однокласник, що вводить чужий PIN, блокує лише себе (свій IP),
     а справжній учень входить з іншого пристрою/IP; ліміт знімається сам після вікна.
     """
@@ -240,6 +249,12 @@ async def student_join(
         rule("join:acct", f"{ip}\n{account}", settings.rate_limit_join_account, window),
         rule("join:ip", ip, settings.rate_limit_join_ip, window),
         rule("join:acct_all", account, settings.rate_limit_join_account_all_ips, window),
+        rule(
+            "join:acct_day",
+            account,
+            settings.rate_limit_join_account_daily,
+            settings.rate_limit_daily_window_s,
+        ),
     ]
     return await _limited(
         limiter,
@@ -288,11 +303,31 @@ async def create_parent_link_code(
         400: {"model": ErrorResponse, "description": "INVALID_LINK_CODE"},
         **R401,
         **R403,
+        **R429,
     },
 )
-async def parent_link(body: ParentLinkRequest, parent: Parent, session: Session):
-    """Прив'язує батьків до дитини за кодом від вчителя. Повторний виклик ідемпотентний."""
-    child = await service.link_parent(session, parent, body.code)
+async def parent_link(
+    body: ParentLinkRequest,
+    request: Request,
+    parent: Parent,
+    session: Session,
+    settings: SettingsDep,
+    limiter: Limiter,
+):
+    """Прив'язує батьків до дитини за кодом від вчителя. Повторний виклик ідемпотентний.
+    Невдалі коди обмежені на акаунт батьків і на IP (`RATE_LIMIT_PARENT_LINK*` за
+    `RATE_LIMIT_WINDOW_S`); понад ліміт — 429 з `Retry-After`."""
+    window = settings.rate_limit_window_s
+    rules = [
+        rule("link:user", str(parent.id), settings.rate_limit_parent_link, window),
+        rule("link:ip", _client_ip(request), settings.rate_limit_parent_link_ip, window),
+    ]
+    child = await _limited(
+        limiter,
+        rules,
+        lambda: service.link_parent(session, parent, body.code),
+        failed={"INVALID_LINK_CODE"},
+    )
     return ParentLinkResponse(
         child_id=child.id, display_name=child.display_name, last_name=child.last_name
     )

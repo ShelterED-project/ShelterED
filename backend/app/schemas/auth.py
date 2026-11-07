@@ -55,8 +55,8 @@ class AuthorizeRequest(BaseModel):
     password: str = Field(max_length=128)
     code_challenge: str = Field(pattern=r"^[A-Za-z0-9_-]{43,128}$")
     code_challenge_method: Literal["S256"]
-    client_id: str
-    redirect_uri: str | None = None
+    client_id: str = Field(max_length=64)
+    redirect_uri: str | None = Field(default=None, max_length=2048)
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -86,7 +86,7 @@ class TokenRequest(BaseModel):
     code: str | None = None
     code_verifier: str | None = Field(default=None, pattern=r"^[A-Za-z0-9._~-]{43,128}$")
     client_id: str | None = None
-    redirect_uri: str | None = None
+    redirect_uri: str | None = Field(default=None, max_length=2048)
     refresh_token: str | None = None
 
     model_config = ConfigDict(

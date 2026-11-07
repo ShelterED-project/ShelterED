@@ -1,9 +1,10 @@
 """Тривоги (B7): опитування API, журнал, ручна кнопка, реакція, активні тривоги.
 
 Реакція на початок тривоги: класи, у яких зараз урок → сесія переклички (B12, лише рядок) +
-push «тривога, відкрий урок» з id уроку (B8, лише постановка в чергу). Відбій закриває
-сесії переклички цієї тривоги й ставить push «відбій», якщо клас не покриває інша активна
-тривога (тоді сесія переходить до неї й лишається відкритою).
+push «тривога, відкрий урок» з id уроку (B8, лише постановка в чергу). Та сама реакція — для
+класу, у якого урок почався, коли тривога вже йшла (`react_lesson_starts`, beat щохвилини).
+Відбій закриває сесії переклички цієї тривоги й ставить push «відбій», якщо клас не покриває
+інша активна тривога (тоді сесія переходить до неї й лишається відкритою).
 
 Усі кроки ідемпотентні: повтор опитування, паралельні опитування й повтор ручної тривоги
 не створюють дублів (унікальні індекси + ON CONFLICT DO NOTHING, UPDATE ... WHERE ended_at
@@ -18,7 +19,7 @@ from dataclasses import dataclass, field
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import and_, or_, select, text, update
+from sqlalchemy import and_, exists, func, or_, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -87,7 +88,25 @@ async def open_rollcall(
         .on_conflict_do_nothing(index_elements=["class_id"], index_where=text("closed_at IS NULL"))
         .returning(RollCallSession.id)
     )
-    return await session.scalar(stmt) is not None
+    if await session.scalar(stmt) is not None:
+        return True
+    # Відкрита сесія вже є. Ручна перекличка вчителя (без тривоги) чи сесія навчальної тривоги
+    # переходить до справжньої тривоги: інакше під час тривоги перекличка лишалася б
+    # «навчальною», а відбій її не закрив би (закриваються лише сесії тривоги). Відмітки учнів
+    # зберігаються.
+    adopt = RollCallSession.alert_event_id.is_(None)
+    if not alert.is_drill:
+        adopt = or_(adopt, RollCallSession.is_drill)
+    await session.execute(
+        update(RollCallSession)
+        .where(
+            RollCallSession.class_id == class_id,
+            RollCallSession.closed_at.is_(None),
+            adopt,
+        )
+        .values(alert_event_id=alert.id, is_drill=alert.is_drill)
+    )
+    return False
 
 
 async def _covering_alert(
@@ -156,10 +175,94 @@ async def react_school_alert(
         _, _, item = await school_service.current_lesson(session, klass, at)
         if item is None:
             continue
-        await open_rollcall(session, klass.id, alert, at)
-        pushes.add("alert", klass.id, alert_id=alert.id, lesson_id=item.lesson_id)
+        await react_class(session, klass.id, alert, at, item.lesson_id, pushes)
         reacted += 1
     return reacted
+
+
+async def react_class(
+    session: AsyncSession,
+    class_id: uuid.UUID,
+    alert: AlertEvent,
+    at: dt.datetime,
+    lesson_id: uuid.UUID | None,
+    pushes: Pushes,
+) -> None:
+    """Реакція класу, у якого йде урок під час тривоги: перекличка + push «тривога, відкрий
+    урок» з id уроку (після commit)."""
+    await open_rollcall(session, class_id, alert, at)
+    pushes.add("alert", class_id, alert_id=alert.id, lesson_id=lesson_id)
+
+
+async def react_lesson_starts(
+    session: AsyncSession, window: dt.timedelta, now: dt.datetime | None = None
+) -> dict[str, int]:
+    """Урок почався, коли тривога вже йшла (beat-задача `alerts.lesson_starts`): класи під
+    активною тривогою (з API — уся школа, ручна — лише її клас), у яких поточний урок почався
+    за останні `window`, отримують ту саму реакцію, що й на початку тривоги (`react_class`).
+
+    Клас, у якого вже є перекличка (відкрита чи закрита) однієї з тривог, що його покривають,
+    пропускається: реакція на старті тривоги, попередній урок або попередній запуск задачі.
+    Перевірка й реакція — під advisory lock класу, тож повтор чи паралельний запуск не дає
+    другої переклички чи push. Справжня тривога має пріоритет над навчальною."""
+    now = now or _now()
+    alerts = list(
+        await session.scalars(
+            select(AlertEvent)
+            .where(AlertEvent.ended_at.is_(None))
+            .order_by(AlertEvent.is_drill, AlertEvent.started_at, AlertEvent.id)
+        )
+    )
+    pushes = Pushes()
+    reacted = 0
+    if alerts:
+        school_ids = {a.school_id for a in alerts if a.class_id is None}
+        class_ids = {a.class_id for a in alerts if a.class_id is not None}
+        classes = await session.scalars(
+            select(SchoolClass)
+            .where(or_(SchoolClass.school_id.in_(school_ids), SchoolClass.id.in_(class_ids)))
+            .order_by(SchoolClass.id)
+        )
+        for klass in list(classes):
+            covering = [
+                a
+                for a in alerts
+                if a.class_id == klass.id or (a.class_id is None and a.school_id == klass.school_id)
+            ]
+            _, _, item = await school_service.current_lesson(session, klass, now)
+            if item is None or not (now - window < item.starts_at_utc <= now):
+                continue
+            key = f"alert-lesson-start:{klass.id}"
+            await session.execute(select(func.pg_advisory_xact_lock(func.hashtextextended(key, 0))))
+            done = await session.scalar(
+                select(
+                    exists().where(
+                        RollCallSession.class_id == klass.id,
+                        RollCallSession.alert_event_id.in_([a.id for a in covering]),
+                    )
+                )
+            )
+            if done:
+                continue
+            # Тривога могла закінчитися після першого читання. FOR SHARE: паралельний відбій
+            # дочекається commit і закриє щойно відкриту перекличку.
+            alert = await session.scalar(
+                select(AlertEvent)
+                .where(AlertEvent.id.in_([a.id for a in covering]), AlertEvent.ended_at.is_(None))
+                .order_by(AlertEvent.is_drill, AlertEvent.started_at, AlertEvent.id)
+                .limit(1)
+                .with_for_update(read=True)
+            )
+            if alert is None:
+                continue
+            await react_class(session, klass.id, alert, now, item.lesson_id, pushes)
+            reacted += 1
+    await session.commit()
+    await pushes.send()
+    result = {"classes": reacted, "pushes": len(pushes.items)}
+    if reacted:
+        logger.info("Lessons started during an alert: %s", result)
+    return result
 
 
 async def _end_alerts(
@@ -301,6 +404,79 @@ async def source_available(
     )
     now = now or _now()
     return last is not None and now - last <= dt.timedelta(seconds=settings.alerts_source_stale_s)
+
+
+# ---------- автозакриття забутих ручних тривог і перекличок ----------
+
+
+async def _api_alert_active(session: AsyncSession, school_id: uuid.UUID) -> bool:
+    return bool(
+        await session.scalar(
+            select(
+                exists().where(
+                    AlertEvent.source == "api",
+                    AlertEvent.ended_at.is_(None),
+                    AlertEvent.school_id == school_id,
+                )
+            )
+        )
+    )
+
+
+async def auto_close_stale(
+    session: AsyncSession, settings: Settings, now: dt.datetime | None = None
+) -> dict[str, int]:
+    """Вчитель забув натиснути відбій: ручна (зокрема навчальна) тривога, старша за
+    ALERTS_MANUAL_MAX_HOURS, завершується як звичайний відбій (перекличка закривається, push
+    `all_clear`). Ручна перекличка без тривоги такого віку закривається як вчителем (без push).
+    Поки школу покриває тривога з API, нічого не чіпаємо: тривога реальна, закриється пізніше.
+    Ідемпотентно: повтор чи паралельний запуск не закриває й не шле вдруге."""
+    now = now or _now()
+    before = now - dt.timedelta(hours=settings.alerts_manual_max_hours)
+    stale = await session.execute(
+        select(AlertEvent.id, AlertEvent.school_id)
+        .where(
+            AlertEvent.source == "manual",
+            AlertEvent.ended_at.is_(None),
+            AlertEvent.started_at < before,
+        )
+        .order_by(AlertEvent.started_at, AlertEvent.id)
+    )
+    to_end = [
+        alert_id
+        for alert_id, school_id in stale.all()
+        if not await _api_alert_active(session, school_id)
+    ]
+    pushes = Pushes()
+    ended = await _end_alerts(session, to_end, now, pushes)
+
+    rollcalls = await session.execute(
+        select(RollCallSession.id, RollCallSession.class_id, SchoolClass.school_id)
+        .join(SchoolClass, SchoolClass.id == RollCallSession.class_id)
+        .where(
+            RollCallSession.alert_event_id.is_(None),
+            RollCallSession.closed_at.is_(None),
+            RollCallSession.opened_at < before,
+        )
+        .order_by(RollCallSession.id)
+        .with_for_update(of=RollCallSession)
+    )
+    closed = 0
+    for session_id, class_id, school_id in rollcalls.all():
+        if await _covering_alert(session, class_id, school_id) is not None:
+            continue
+        await session.execute(
+            update(RollCallSession)
+            .where(RollCallSession.id == session_id, RollCallSession.closed_at.is_(None))
+            .values(closed_at=now)
+        )
+        closed += 1
+    await session.commit()
+    await pushes.send()
+    result = {"alerts": len(ended), "rollcalls": closed, "pushes": len(pushes.items)}
+    if ended or closed:
+        logger.info("Stale manual alerts and roll calls closed: %s", result)
+    return result
 
 
 # ---------- ручна тривога ----------

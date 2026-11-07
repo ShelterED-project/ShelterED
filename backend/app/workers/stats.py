@@ -14,7 +14,7 @@ from redis.exceptions import RedisError
 from app.core.config import get_settings
 from app.core.db import standalone_session
 from app.services import stats as stats_service
-from app.workers.celery_app import celery_app, enqueue
+from app.workers.celery_app import LONG_TASK_LIMITS, celery_app, enqueue
 from app.workers.redis_client import redis_client
 
 logger = logging.getLogger(__name__)
@@ -85,7 +85,7 @@ def recompute_class(class_id: str) -> bool:
     return asyncio.run(_recompute_class(uuid.UUID(class_id)))
 
 
-@celery_app.task(name="stats.refresh_all")
+@celery_app.task(name="stats.refresh_all", **LONG_TASK_LIMITS)
 def refresh_all() -> dict[str, int]:
     """Періодично (beat): новий день у розкладі, зміни уроків, пропущені задачі."""
     return asyncio.run(_refresh_all())

@@ -9,6 +9,7 @@ from httpx import AsyncClient
 from test_media import MP4, VTT, upload
 
 from app.models.lessons import MediaAsset
+from app.models.sync import ModuleProgress, SyncEvent
 
 pytestmark = pytest.mark.anyio
 
@@ -345,3 +346,46 @@ async def test_subjects(client: AsyncClient, world, factory) -> None:
         for s in (await client.get("/subjects", headers=auth_header(world.teacher_a))).json()
     }
     assert names == {"Українська мова", "Робототехніка"}
+
+
+async def test_module_with_progress_cannot_be_deleted(client: AsyncClient, world, factory) -> None:
+    """Прогрес учнів — результати: видалення модуля (каскад на `module_progress`) чи уроку
+    не має його тихо стерти."""
+    subject = await factory.subject()
+    h = auth_header(world.teacher_a)
+    lesson = await create_lesson(client, world.teacher_a, subject)
+    module = (await add_module(client, world.teacher_a, lesson["id"])).json()
+    spare = (await add_module(client, world.teacher_a, lesson["id"], position=2)).json()
+    event_id = uuid.uuid4()
+    now = dt.datetime.now(dt.UTC)
+    factory.session.add(
+        SyncEvent(
+            client_event_id=event_id,
+            type="module_progress",
+            user_id=world.student_a.id,
+            device_id=uuid.uuid4(),
+            occurred_at=now,
+            payload={},
+            status="accepted",
+        )
+    )
+    await factory.session.flush()
+    factory.session.add(
+        ModuleProgress(
+            student_id=world.student_a.id,
+            module_id=uuid.UUID(module["id"]),
+            progress_pct=50,
+            last_event_id=event_id,
+        )
+    )
+    await factory.session.flush()
+
+    resp = await client.delete(f"/modules/{module['id']}", headers=h)
+    assert resp.status_code == 409 and resp.json()["error"]["code"] == "IN_USE"
+    resp = await client.delete(f"/lessons/{lesson['id']}", headers=h)
+    assert resp.status_code == 409 and resp.json()["error"]["code"] == "LESSON_IN_USE"
+    # Модуль без прогресу видаляється як і раніше.
+    assert (await client.delete(f"/modules/{spare['id']}", headers=h)).status_code == 204
+    assert (
+        await factory.session.get(ModuleProgress, (world.student_a.id, uuid.UUID(module["id"])))
+    ) is not None

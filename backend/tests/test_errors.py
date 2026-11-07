@@ -68,3 +68,15 @@ def test_unhandled_error():
     assert response.status_code == 500
     assert response.json()["error"]["code"] == "INTERNAL_ERROR"
     assert "boom" not in response.text
+
+
+def test_unhandled_error_passes_through_middleware():
+    # 500 має йти через CORS, request ID і заголовки безпеки, як і решта відповідей.
+    response = client.get(
+        "/_test/crash", headers={"Origin": "http://localhost:5173", "X-Request-ID": "crash-1"}
+    )
+    assert response.status_code == 500
+    assert response.json()["error"]["code"] == "INTERNAL_ERROR"
+    assert response.headers["X-Request-ID"] == "crash-1"
+    assert response.headers["Access-Control-Allow-Origin"] == "http://localhost:5173"
+    assert response.headers["Cache-Control"] == "no-store"

@@ -20,9 +20,10 @@ from app.api import (
     tutor,
     wellbeing,
 )
+from app.core.body_limit import BodySizeLimitMiddleware
 from app.core.config import APP_VERSION, get_settings
 from app.core.db import get_engine
-from app.core.errors import register_error_handlers
+from app.core.errors import UnhandledErrorMiddleware, register_error_handlers
 from app.core.logging import setup_logging
 from app.core.request_id import RequestIdMiddleware
 from app.core.security_headers import SecurityHeadersMiddleware
@@ -44,9 +45,16 @@ def create_app() -> FastAPI:
         title=settings.app_name,
         version=APP_VERSION,
         lifespan=lifespan,
+        docs_url="/docs" if settings.api_docs_active else None,
+        redoc_url="/redoc" if settings.api_docs_active else None,
+        openapi_url="/openapi.json" if settings.api_docs_active else None,
         responses={422: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
     )
     register_error_handlers(app)
+    # Найглибший middleware: непередбачена 500 проходить через CORS, request ID і заголовки.
+    app.add_middleware(UnhandledErrorMiddleware)
+    # Під CORS, request ID і заголовками безпеки: 413 отримує їх так само, як інші помилки.
+    app.add_middleware(BodySizeLimitMiddleware, max_bytes=settings.max_request_body_bytes)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,

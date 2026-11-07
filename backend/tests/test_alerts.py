@@ -1,5 +1,6 @@
 """Тривоги: опитування API (фейковий провайдер), реакція, ручна кнопка, активні, журнал."""
 
+import asyncio
 import datetime as dt
 import uuid
 from zoneinfo import ZoneInfo
@@ -536,3 +537,328 @@ async def test_alert_journal(client: AsyncClient, db_session, world) -> None:
     assert {r["id"] for r in other_admin.json()}.isdisjoint(set(ids.values()))
     forbidden = await client.get("/alerts", headers=auth_header(world.teacher_a))
     assert forbidden.status_code == 403
+
+
+async def test_alert_adopts_manual_and_drill_rollcall(
+    client: AsyncClient, db_session, factory, world, enqueued
+) -> None:
+    """Справжня тривога забирає відкриту перекличку без тривоги (ручний старт) чи навчальну:
+    сесія стає не навчальною, а відбій тривоги її закриває."""
+    await lesson_now(factory, world, world.class_a)
+    h = auth_header(world.teacher_a)
+    manual_id = str(uuid.uuid4())
+    started = await client.post(
+        f"/classes/{world.class_a.id}/rollcall", json={"id": manual_id, "is_drill": True}, headers=h
+    )
+    assert started.status_code == 201, started.text
+
+    provider = FakeProvider([api_alert()])
+    await service.poll(db_session, provider)
+    row = await db_session.get(RollCallSession, uuid.UUID(manual_id), populate_existing=True)
+    assert row.is_drill is False and row.alert_event_id is not None
+    assert await count(db_session, RollCallSession) == 1
+
+    provider.alerts = []
+    await service.poll(db_session, provider)
+    await db_session.refresh(row)
+    assert row.closed_at is not None
+    assert [p["class_id"] for p in pushes(enqueued, "all_clear")] == [str(world.class_a.id)]
+
+    # Навчальна ручна тривога не забирає сесію справжньої, а справжня — забирає навчальну.
+    drill = await client.post("/alerts/manual", json=manual_body(world.class_a), headers=h)
+    assert drill.status_code == 201
+    await service.poll(db_session, FakeProvider([api_alert("202")]))
+    open_row = await db_session.scalar(
+        select(RollCallSession)
+        .where(RollCallSession.closed_at.is_(None))
+        .execution_options(populate_existing=True)
+    )
+    assert open_row.is_drill is False and open_row.alert_event_id != uuid.UUID(drill.json()["id"])
+    second = await client.post("/alerts/manual", json=manual_body(world.class_a), headers=h)
+    assert second.status_code == 201
+    await db_session.refresh(open_row)
+    assert open_row.is_drill is False
+
+
+# ---------- автозакриття забутих ручних тривог і перекличок ----------
+
+
+async def test_forgotten_manual_alert_is_closed_with_all_clear(
+    client: AsyncClient, db_session, world, enqueued
+) -> None:
+    body = manual_body(world.class_a)
+    await client.post("/alerts/manual", json=body, headers=auth_header(world.teacher_a))
+    settings = get_settings()
+
+    # Ще не забута: нічого не закривається.
+    early = await service.auto_close_stale(db_session, settings, now() + dt.timedelta(hours=1))
+    assert early == {"alerts": 0, "rollcalls": 0, "pushes": 0}
+
+    later = now() + dt.timedelta(hours=settings.alerts_manual_max_hours, minutes=1)
+    assert (await service.auto_close_stale(db_session, settings, later))["alerts"] == 1
+    alert = await db_session.get(AlertEvent, uuid.UUID(body["id"]), populate_existing=True)
+    assert alert.ended_at == later
+    rc = await db_session.scalar(select(RollCallSession))
+    await db_session.refresh(rc)
+    assert rc.closed_at == later
+    assert pushes(enqueued, "all_clear") == [
+        {"type": "all_clear", "class_id": str(world.class_a.id), "alert_id": body["id"]}
+    ]
+
+    # Повтор нічого не змінює й не шле вдруге.
+    again = await service.auto_close_stale(db_session, settings, later)
+    assert again == {"alerts": 0, "rollcalls": 0, "pushes": 0}
+    assert len(pushes(enqueued, "all_clear")) == 1
+
+
+async def test_manual_alert_is_kept_while_api_alert_covers_school(
+    client: AsyncClient, db_session, world, enqueued
+) -> None:
+    body = manual_body(world.class_a)
+    await client.post("/alerts/manual", json=body, headers=auth_header(world.teacher_a))
+    db_session.add(
+        AlertEvent(
+            region_code="kyiv",
+            school_id=world.school.id,
+            source="api",
+            external_id="777",
+            is_drill=False,
+            started_at=now(),
+        )
+    )
+    await db_session.flush()
+    later = now() + dt.timedelta(hours=7)
+    result = await service.auto_close_stale(db_session, get_settings(), later)
+    assert result["alerts"] == 0
+    alert = await db_session.get(AlertEvent, uuid.UUID(body["id"]), populate_existing=True)
+    assert alert.ended_at is None
+    assert pushes(enqueued, "all_clear") == []
+
+
+async def test_forgotten_manual_rollcall_is_closed_without_push(
+    client: AsyncClient, db_session, world, enqueued
+) -> None:
+    sid = uuid.uuid4()
+    resp = await client.post(
+        f"/classes/{world.class_a.id}/rollcall",
+        json={"id": str(sid)},
+        headers=auth_header(world.teacher_a),
+    )
+    assert resp.status_code == 201, resp.text
+    later = now() + dt.timedelta(hours=7)
+    result = await service.auto_close_stale(db_session, get_settings(), later)
+    assert result == {"alerts": 0, "rollcalls": 1, "pushes": 0}
+    rc = await db_session.get(RollCallSession, sid, populate_existing=True)
+    assert rc.closed_at == later
+    assert pushes(enqueued) == []
+
+
+def test_auto_close_is_scheduled() -> None:
+    from app.workers.celery_app import celery_app
+
+    entry = celery_app.conf.beat_schedule["alerts-auto-close"]
+    assert entry["task"] == "alerts.auto_close"
+    assert "alerts.auto_close" in celery_app.tasks
+
+
+# ---------- урок почався під час активної тривоги (beat `alerts.lesson_starts`) ----------
+
+WINDOW = dt.timedelta(minutes=2)
+DAY = dt.date(2026, 11, 9)
+
+
+def kyiv(day: dt.date, hour: int, minute: int = 0, second: int = 0) -> dt.datetime:
+    return dt.datetime.combine(day, dt.time(hour, minute, second), tzinfo=KYIV)
+
+
+async def lesson_at(
+    db: AsyncSession, factory, teacher, klass, day: dt.date, start: dt.time, end: dt.time
+) -> Lesson:
+    """Урок у слоті класу на дату `day` (місцевий час школи)."""
+    subject = await factory.subject()
+    slot = ScheduleSlot(
+        class_id=klass.id,
+        subject_id=subject.id,
+        weekday=day.isoweekday(),
+        starts_at=start,
+        ends_at=end,
+        valid_from=day - dt.timedelta(days=7),
+    )
+    lesson = Lesson(
+        subject_id=subject.id,
+        author_id=teacher.id,
+        title="Дроби",
+        shelter_part="Укриття",
+        main_part="Основна",
+        status="published",
+        published_at=now(),
+    )
+    db.add_all([slot, lesson])
+    await db.flush()
+    db.add(LessonAssignment(slot_id=slot.id, date=day, lesson_id=lesson.id))
+    await db.flush()
+    return lesson
+
+
+async def school_alert(db: AsyncSession, school, started_at: dt.datetime) -> AlertEvent:
+    alert = AlertEvent(
+        region_code=school.region_code,
+        school_id=school.id,
+        source="api",
+        external_id=uuid.uuid4().hex[:8],
+        is_drill=False,
+        started_at=started_at,
+    )
+    db.add(alert)
+    await db.flush()
+    return alert
+
+
+NOTHING = {"classes": 0, "pushes": 0}
+ONE = {"classes": 1, "pushes": 1}
+
+
+async def test_lesson_start_during_alert_reacts_once(db_session, factory, world, enqueued) -> None:
+    alert = await school_alert(db_session, world.school, kyiv(DAY, 9, 30))
+    lesson = await lesson_at(
+        db_session, factory, world.teacher_a, world.class_a, DAY, dt.time(10), dt.time(10, 45)
+    )
+
+    # До початку уроку нічого.
+    assert await service.react_lesson_starts(db_session, WINDOW, kyiv(DAY, 9, 59, 30)) == NOTHING
+
+    at = kyiv(DAY, 10, 0, 30)
+    assert await service.react_lesson_starts(db_session, WINDOW, at) == ONE
+    rc = await db_session.scalar(select(RollCallSession))
+    assert rc.class_id == world.class_a.id and rc.alert_event_id == alert.id
+    assert rc.closed_at is None and rc.is_drill is False
+    assert pushes(enqueued) == [
+        {
+            "type": "alert",
+            "class_id": str(world.class_a.id),
+            "alert_id": str(alert.id),
+            "lesson_id": str(lesson.id),
+        }
+    ]
+
+    # Повтор (той самий чи наступний запуск beat) не дублює, навіть коли вчитель уже закрив
+    # перекличку.
+    assert await service.react_lesson_starts(db_session, WINDOW, at) == NOTHING
+    rc.closed_at = kyiv(DAY, 10, 1)
+    await db_session.flush()
+    assert await service.react_lesson_starts(db_session, WINDOW, kyiv(DAY, 10, 1, 30)) == NOTHING
+    assert await count(db_session, RollCallSession) == 1
+    assert len(pushes(enqueued)) == 1
+
+
+async def test_lesson_start_without_alert_does_nothing(
+    db_session, factory, world, enqueued
+) -> None:
+    await lesson_at(
+        db_session, factory, world.teacher_a, world.class_a, DAY, dt.time(10), dt.time(10, 45)
+    )
+    ended = await school_alert(db_session, world.school, kyiv(DAY, 9))
+    ended.ended_at = kyiv(DAY, 9, 50)
+    await db_session.flush()
+    assert await service.react_lesson_starts(db_session, WINDOW, kyiv(DAY, 10, 0, 30)) == NOTHING
+    assert await count(db_session, RollCallSession) == 0
+    assert pushes(enqueued) == []
+
+
+async def test_lesson_started_long_ago_is_not_reacted(db_session, factory, world, enqueued) -> None:
+    await school_alert(db_session, world.school, kyiv(DAY, 9, 30))
+    await lesson_at(
+        db_session, factory, world.teacher_a, world.class_a, DAY, dt.time(10), dt.time(10, 45)
+    )
+    assert await service.react_lesson_starts(db_session, WINDOW, kyiv(DAY, 10, 5)) == NOTHING
+
+
+async def test_class_reacted_at_alert_start_gets_nothing_new(
+    db_session, factory, world, enqueued
+) -> None:
+    for start in (9, 10):
+        await lesson_at(
+            db_session,
+            factory,
+            world.teacher_a,
+            world.class_a,
+            DAY,
+            dt.time(start),
+            dt.time(start, 45),
+        )
+    alert = ProviderAlert(external_id="101", region_code="kyiv", started_at=kyiv(DAY, 9, 10))
+    await service.poll(db_session, FakeProvider([alert]), kyiv(DAY, 9, 10, 30))
+    assert len(pushes(enqueued, "alert")) == 1
+
+    assert await service.react_lesson_starts(db_session, WINDOW, kyiv(DAY, 10, 0, 30)) == NOTHING
+    assert await count(db_session, RollCallSession) == 1
+    assert len(pushes(enqueued)) == 1
+
+
+async def test_manual_alert_reacts_only_for_its_class(db_session, factory, world, enqueued) -> None:
+    manual = AlertEvent(
+        region_code=world.school.region_code,
+        school_id=world.school.id,
+        class_id=world.class_a.id,
+        source="manual",
+        is_drill=True,
+        started_at=kyiv(DAY, 9, 30),
+        created_by=world.teacher_a.id,
+    )
+    db_session.add(manual)
+    await db_session.flush()
+    for klass in (world.class_a, world.class_b):
+        await lesson_at(
+            db_session, factory, world.teacher_a, klass, DAY, dt.time(10), dt.time(10, 45)
+        )
+
+    assert await service.react_lesson_starts(db_session, WINDOW, kyiv(DAY, 10, 0, 30)) == ONE
+    rc = await db_session.scalar(select(RollCallSession))
+    assert rc.class_id == world.class_a.id and rc.alert_event_id == manual.id and rc.is_drill
+    assert [p["class_id"] for p in pushes(enqueued, "alert")] == [str(world.class_a.id)]
+
+
+async def test_lesson_start_on_dst_change_day(db_session, factory, world, enqueued) -> None:
+    # 25.10.2026 о 04:00 Київ переходить на зимовий час (UTC+3 → UTC+2): урок о 09:00 за
+    # Києвом починається о 07:00 UTC, а не о 06:00.
+    day = dt.date(2026, 10, 25)
+    await school_alert(db_session, world.school, dt.datetime(2026, 10, 25, 5, tzinfo=dt.UTC))
+    await lesson_at(
+        db_session, factory, world.teacher_a, world.class_a, day, dt.time(9), dt.time(9, 45)
+    )
+
+    summer_offset = dt.datetime(2026, 10, 25, 6, 0, 30, tzinfo=dt.UTC)
+    assert await service.react_lesson_starts(db_session, WINDOW, summer_offset) == NOTHING
+    start = dt.datetime(2026, 10, 25, 7, 0, 30, tzinfo=dt.UTC)
+    assert await service.react_lesson_starts(db_session, WINDOW, start) == ONE
+
+
+async def test_parallel_lesson_start_runs_react_once(committed, enqueued) -> None:
+    f = committed.factory
+    school = await f.school()
+    klass = await f.klass(school)
+    teacher = await f.teacher(school, klass)
+    await school_alert(committed.session, school, kyiv(DAY, 9, 30))
+    await lesson_at(committed.session, f, teacher, klass, DAY, dt.time(10), dt.time(10, 45))
+    await committed.session.commit()
+
+    at = kyiv(DAY, 10, 0, 30)
+
+    async def run() -> dict[str, int]:
+        async with committed.maker() as db:
+            return await service.react_lesson_starts(db, WINDOW, at)
+
+    results = await asyncio.gather(run(), run())
+    assert sorted(r["classes"] for r in results) == [0, 1]
+    async with committed.maker() as db:
+        assert await count(db, RollCallSession) == 1
+    assert len(pushes(enqueued, "alert")) == 1
+
+
+def test_lesson_starts_is_scheduled() -> None:
+    from app.workers.celery_app import celery_app
+
+    entry = celery_app.conf.beat_schedule["alerts-lesson-starts"]
+    assert entry["task"] == "alerts.lesson_starts"
+    assert entry["schedule"] == 60.0
+    assert "alerts.lesson_starts" in celery_app.tasks

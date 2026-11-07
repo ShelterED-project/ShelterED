@@ -66,6 +66,12 @@ R409 = {
 REPEAT = {200: {"description": "Повтор із тим самим id і даними: наявний ресурс"}}
 ACCESS = {**R401, **R403, **R404}
 WRITE = {**ACCESS, **R409}
+# Видалення частини уроку: опублікований урок не змінюється; модуль із прогресом учнів чи
+# елемент, на який посилаються результати, не видаляється.
+DELETE = {
+    **ACCESS,
+    409: {"model": ErrorResponse, "description": "LESSON_PUBLISHED / IN_USE"},
+}
 
 
 def _created(response: Response, created: bool) -> None:
@@ -240,7 +246,7 @@ async def update_module(body: ModuleUpdate, module: EditableModule, session: Ses
     return ModuleOut.model_validate(await service.update_module(session, module, body))
 
 
-@router.delete("/modules/{module_id}", status_code=status.HTTP_204_NO_CONTENT, responses=WRITE)
+@router.delete("/modules/{module_id}", status_code=status.HTTP_204_NO_CONTENT, responses=DELETE)
 async def delete_module(module: EditableModule, session: Session) -> Response:
     await service.delete_child(session, module)
     return _no_content()
@@ -275,7 +281,7 @@ async def update_card(
     return CardOut.model_validate(await service.update_card(session, teacher, card, body))
 
 
-@router.delete("/cards/{card_id}", status_code=status.HTTP_204_NO_CONTENT, responses=WRITE)
+@router.delete("/cards/{card_id}", status_code=status.HTTP_204_NO_CONTENT, responses=DELETE)
 async def delete_card(card: EditableCard, session: Session) -> Response:
     await service.delete_child(session, card)
     return _no_content()
@@ -308,7 +314,7 @@ async def update_test(body: TestUpdate, test: EditableTest, session: Session) ->
     return TestOut.model_validate(test)
 
 
-@router.delete("/tests/{test_id}", status_code=status.HTTP_204_NO_CONTENT, responses=WRITE)
+@router.delete("/tests/{test_id}", status_code=status.HTTP_204_NO_CONTENT, responses=DELETE)
 async def delete_test(test: EditableTest, session: Session) -> Response:
     await service.delete_child(session, test)
     return _no_content()
@@ -343,7 +349,7 @@ async def update_question(
     return QuestionOut.model_validate(question)
 
 
-@router.delete("/questions/{question_id}", status_code=status.HTTP_204_NO_CONTENT, responses=WRITE)
+@router.delete("/questions/{question_id}", status_code=status.HTTP_204_NO_CONTENT, responses=DELETE)
 async def delete_question(question: EditableQuestion, session: Session) -> Response:
     test_id = question.test_id
     await service.delete_child(session, question)

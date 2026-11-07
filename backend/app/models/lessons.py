@@ -105,6 +105,8 @@ class Test(TimestampMixin, Base):
     __table_args__ = (
         CheckConstraint("window_hours IN (24, 48, 72)", name="window_hours_values"),
         CheckConstraint("window_enabled = false OR window_hours IS NOT NULL", name="window_hours"),
+        # Тести уроку: збірка пакета, агрегати, каскад від уроку.
+        Index("ix_test_lesson_id", "lesson_id"),
     )
 
     id: Mapped[uuid.UUID] = uuid_pk()

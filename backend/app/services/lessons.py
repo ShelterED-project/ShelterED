@@ -13,13 +13,14 @@ from collections.abc import Iterable
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import Select, Text, cast, func, or_, select
+from sqlalchemy import Select, Text, cast, exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
 from app.core.errors import AppError
 from app.models.lessons import Card, Lesson, MediaAsset, Module, Question, Subject, Test
 from app.models.school import LessonAssignment, ScheduleSlot, SchoolClass, User
+from app.models.sync import ModuleProgress
 from app.schemas.lessons import (
     CardCreate,
     CardOut,
@@ -227,6 +228,24 @@ async def update_lesson(
     return lesson
 
 
+async def _has_progress(session: AsyncSession, modules_filter: Any) -> bool:
+    """Прогрес учнів у модулях — результати: `module_progress` видаляється каскадом від модуля,
+    тож без цієї перевірки видалення модуля чи уроку тихо стерло б прогрес (а офлайн-події
+    до нього стали б `unknown_entity`). Модулі блокуються FOR UPDATE: вставка прогресу тримає
+    на рядку модуля FOR KEY SHARE, тож паралельна синхронізація або закомітиться до перевірки,
+    або чекатиме на видалення."""
+    await session.execute(select(Module.id).where(modules_filter).with_for_update())
+    return bool(
+        await session.scalar(
+            select(
+                exists().where(
+                    ModuleProgress.module_id.in_(select(Module.id).where(modules_filter))
+                )
+            )
+        )
+    )
+
+
 async def delete_lesson(session: AsyncSession, lesson: Lesson) -> None:
     """Лише чернетку, на яку ніщо не посилається (розклад, спроби, пакети)."""
     in_use = AppError(
@@ -234,6 +253,8 @@ async def delete_lesson(session: AsyncSession, lesson: Lesson) -> None:
         "Lesson is scheduled or has results and cannot be deleted",
         status_code=409,
     )
+    if await _has_progress(session, Module.lesson_id == lesson.id):
+        raise in_use
     async with integrity_errors(session, {"fk_": in_use}):
         await session.delete(lesson)
     await session.commit()
@@ -410,6 +431,8 @@ async def update_question(
 
 async def delete_child(session: AsyncSession, obj: Module | Card | Test | Question) -> None:
     in_use = AppError("IN_USE", "Item has student results", status_code=409)
+    if isinstance(obj, Module) and await _has_progress(session, Module.id == obj.id):
+        raise in_use
     async with integrity_errors(session, {"fk_": in_use}):
         await session.delete(obj)
     await session.commit()

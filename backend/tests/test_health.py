@@ -1,3 +1,4 @@
+import pytest
 from fastapi.testclient import TestClient
 
 from app.core.db import get_session
@@ -55,3 +56,28 @@ def test_version():
     body = response.json()
     assert body["version"] == "0.1.0"
     assert body["profile"] == "cloud"
+
+
+@pytest.mark.parametrize(
+    ("env", "enabled"),
+    [
+        ({"ENVIRONMENT": "dev"}, True),
+        ({"ENVIRONMENT": "prod"}, False),
+        ({"ENVIRONMENT": "prod", "API_DOCS_ENABLED": "true"}, True),
+    ],
+)
+def test_api_docs_are_disabled_in_prod_by_default(monkeypatch, env, enabled):
+    from fastapi.testclient import TestClient
+
+    from app.core.config import get_settings
+    from app.main import create_app
+
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    get_settings.cache_clear()
+    try:
+        client = TestClient(create_app())
+        for path in ("/docs", "/redoc", "/openapi.json"):
+            assert (client.get(path).status_code == 200) is enabled, path
+    finally:
+        get_settings.cache_clear()

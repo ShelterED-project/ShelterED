@@ -10,6 +10,7 @@ from test_sync import attempt, batch, content, progress, send
 
 from app.core.config import get_settings
 from app.models.auth import AuthCode, ParentLinkCode, RefreshToken
+from app.models.outbox import TaskOutbox
 from app.models.sync import Attempt, ModuleProgress, SyncEvent
 from app.models.wellbeing import WellbeingViewLog
 from app.services import retention
@@ -174,3 +175,16 @@ async def test_retention_index_is_used_for_old_events(db_session) -> None:
         )
     )
     assert "ix_sync_event_retention" in plan
+
+
+async def test_published_outbox_tasks_are_deleted(db_session) -> None:
+    now = dt.datetime.now(dt.UTC)
+    old = TaskOutbox(task_name="a", args=[], queue="default", sent_at=now - dt.timedelta(days=2))
+    fresh = TaskOutbox(task_name="b", args=[], queue="default", sent_at=now)
+    pending = TaskOutbox(task_name="c", args=[], queue="default")
+    db_session.add_all([old, fresh, pending])
+    await db_session.flush()
+    counts = await retention.purge(db_session, get_settings(), now)
+    assert counts["task_outbox"] == 1
+    left = set(await db_session.scalars(select(TaskOutbox.task_name)))
+    assert left == {"b", "c"}

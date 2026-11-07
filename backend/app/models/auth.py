@@ -14,6 +14,12 @@ class RefreshToken(Base):
     __table_args__ = (
         Index("ix_refresh_token_family_id", "family_id"),
         Index("ix_refresh_token_user_id", "user_id"),
+        # Перевірка самопосилання FK під час видалення прострочених токенів (retention.purge).
+        Index(
+            "ix_refresh_token_replaced_by_id",
+            "replaced_by_id",
+            postgresql_where=text("replaced_by_id IS NOT NULL"),
+        ),
     )
 
     id: Mapped[uuid.UUID] = uuid_pk()

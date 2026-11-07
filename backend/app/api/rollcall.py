@@ -86,9 +86,10 @@ async def current_rollcall(
 async def start_rollcall(
     body: RollCallStart, klass: TeacherClass, user: Teacher, session: Session, response: Response
 ) -> RollCallSessionOut:
-    """Вчитель класу відкриває перекличку вручну (без тривоги). При тривозі сесія
-    відкривається автоматично. Ідемпотентно за `id` (повтор — 200 з наявною сесією, навіть
-    закритою); на клас — одна відкрита сесія."""
+    """Вчитель класу відкриває перекличку вручну. При тривозі під час уроку сесія
+    відкривається автоматично; якщо урок почався, коли тривога вже йшла, ручна сесія
+    належить цій тривозі (`alert_event_id`) і закривається її відбоєм. Ідемпотентно за `id`
+    (повтор — 200 з наявною сесією, навіть закритою); на клас — одна відкрита сесія."""
     out, created = await service.start(session, user, klass, body)
     response.status_code = status.HTTP_201_CREATED if created else status.HTTP_200_OK
     return out
