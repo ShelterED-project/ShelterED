@@ -1,16 +1,30 @@
-FROM python:3.11-slim
+# Один образ для API, Celery-воркера й beat; команду для воркера/beat задає compose.
+FROM python:3.13-slim AS build
+
+WORKDIR /src
+COPY pyproject.toml ./
+COPY app ./app
+# Лише runtime-залежності з pyproject.toml (без pytest/ruff/flake8 з requirements.txt).
+RUN pip install --no-cache-dir --prefix=/install .
+
+FROM python:3.13-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    ENVIRONMENT=prod \
+    MEDIA_ROOT=/app/media
+
+RUN useradd --create-home --uid 1000 app
 
 WORKDIR /app
+COPY --from=build /install /usr/local
+COPY alembic.ini ./
+COPY alembic ./alembic
+COPY app ./app
+# Том для медіа монтується сюди; власник — непривілейований користувач.
+RUN mkdir -p /app/media && chown app:app /app/media
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    libpq5 \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
-
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-COPY . /app
+USER app
 
 EXPOSE 8000
 
