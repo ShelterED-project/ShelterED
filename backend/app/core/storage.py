@@ -27,15 +27,24 @@ class MediaStorage(ABC):
 
 class LocalMediaStorage(MediaStorage):
     def __init__(self, root: str | Path, url_prefix: str) -> None:
-        self.root = Path(root).resolve()
+        # Корінь створюємо й розв'язуємо один раз: на Windows resolve() шляху, каталоги якого
+        # саме створюють паралельні завантаження, інколи повертає інше написання шляху.
+        root = Path(root)
+        root.mkdir(parents=True, exist_ok=True)
+        self.root = root.resolve()
         self.url_prefix = url_prefix.rstrip("/")
 
     def _path(self, key: str) -> Path:
         # Ключі генерує сервер, але все одно не випускаємо шлях за межі кореня.
         parts = PurePosixPath(key).parts
-        if not parts or any(p in ("..", "") or p.startswith("/") for p in parts):
+        # «:» і «\» відсікають диски й розділювачі Windows (C:, ..\) у частинах ключа.
+        if not parts or any(
+            p in (".", "..", "") or p.startswith("/") or ":" in p or "\\" in p for p in parts
+        ):
             raise ValueError("Invalid storage key")
-        path = self.root.joinpath(*parts).resolve()
+        # Шлях будуємо від уже розв'язаного кореня без resolve(): «..» та абсолютні частини
+        # відкинуто вище, тож лексична перевірка достатня.
+        path = self.root.joinpath(*parts)
         if not path.is_relative_to(self.root):
             raise ValueError("Invalid storage key")
         return path

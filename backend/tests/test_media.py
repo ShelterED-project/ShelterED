@@ -204,14 +204,14 @@ async def test_png_with_metadata_always_converted(
 async def test_bad_images_rejected(client: AsyncClient, world, media_storage) -> None:
     t = world.teacher_a
     corrupt = await upload(client, t, "image", "image/png", PNG[:40])
-    assert corrupt.status_code == 400 and corrupt.json()["error"]["code"] == "INVALID_IMAGE"
+    assert corrupt.status_code == 422 and corrupt.json()["error"]["code"] == "INVALID_IMAGE"
     garbage = await upload(client, t, "image", "image/jpeg", b"\xff\xd8\xff" + b"\x00" * 300)
-    assert garbage.status_code == 400 and garbage.json()["error"]["code"] == "INVALID_IMAGE"
+    assert garbage.status_code == 422 and garbage.json()["error"]["code"] == "INVALID_IMAGE"
     # «Бомба»: мало байтів, забагато пікселів — відмова до декодування.
     bomb = _encode(Image.new("1", (8000, 6000)), "PNG")
     assert len(bomb) < get_settings().media_max_image_bytes
     resp = await upload(client, t, "image", "image/png", bomb)
-    assert resp.status_code == 400 and resp.json()["error"]["code"] == "IMAGE_TOO_LARGE"
+    assert resp.status_code == 422 and resp.json()["error"]["code"] == "IMAGE_TOO_LARGE"
     assert stored_files(media_storage) == []
 
 
@@ -242,9 +242,6 @@ async def test_identical_content_shares_one_file(client: AsyncClient, world, med
 async def test_parallel_uploads_of_same_content_keep_files(committed, tmp_path) -> None:
     """Паралельні завантаження однакового вмісту: усі записи створені, кожен URL веде на файл
     (у гіршому разі — дві копії, але жодної втраченої)."""
-    # Каталог створюємо заздалегідь: на Windows Path.resolve() у момент паралельного mkdir
-    # іноді дає інший шлях (лише тестове середовище, у контейнері Linux цього немає).
-    (tmp_path / "media" / "image").mkdir(parents=True)
     storage = LocalMediaStorage(tmp_path / "media", "/media")
     committed.app.dependency_overrides[get_storage] = lambda: storage
     f = committed.factory
@@ -259,3 +256,11 @@ async def test_parallel_uploads_of_same_content_keep_files(committed, tmp_path) 
     urls = {r.json()["url"] for r in responses}
     files = {p.relative_to(storage.root).as_posix() for p in stored_files(storage)}
     assert {u.removeprefix("/media/") for u in urls} == files
+
+
+def test_storage_rejects_keys_outside_root(tmp_path) -> None:
+    storage = LocalMediaStorage(tmp_path / "media", "/media")
+    for key in ("../x.webp", "image/../../x", "/etc/passwd", "C:/x", "image/..\\x", ""):
+        with pytest.raises(ValueError):
+            storage._path(key)
+    assert storage._path("image/ab/cd.webp") == storage.root / "image" / "ab" / "cd.webp"
