@@ -13,6 +13,8 @@ from PIL import Image, PngImagePlugin
 from app.api.deps import get_storage
 from app.core.config import get_settings
 from app.core.storage import LocalMediaStorage
+from app.models.lessons import MediaAsset
+from app.services import lessons as lessons_service
 
 pytestmark = pytest.mark.anyio
 
@@ -254,6 +256,27 @@ async def test_identical_content_shares_one_file(client: AsyncClient, world, med
     )
     assert conflict.status_code == 409
     assert stored_files(media_storage) == files
+
+
+async def test_shared_file_counted_once_in_pack_size(world, db_session) -> None:
+    """Записи зі спільним файлом (однаковий вміст) у ліміті пакета — один файл."""
+
+    def asset(key: str, size: int) -> MediaAsset:
+        return MediaAsset(
+            kind="image",
+            storage_key=key,
+            mime_type="image/webp",
+            size_bytes=size,
+            sha256=key,
+            source_sha256=key,
+            uploaded_by=world.teacher_a.id,
+        )
+
+    rows = [asset("aa/same.webp", 1000), asset("aa/same.webp", 1000), asset("bb/other.webp", 500)]
+    db_session.add_all(rows)
+    await db_session.flush()
+    assert await lessons_service.media_size(db_session, [r.id for r in rows]) == 1500
+    assert await lessons_service.media_size(db_session, [rows[0].id, rows[1].id]) == 1000
 
 
 async def test_parallel_uploads_of_same_content_keep_files(committed, tmp_path) -> None:

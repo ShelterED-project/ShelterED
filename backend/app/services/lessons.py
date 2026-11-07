@@ -476,15 +476,18 @@ async def _text_bytes(session: AsyncSession, ids: set[uuid.UUID]) -> int:
 
 
 async def media_size(session: AsyncSession, media_ids: Iterable[uuid.UUID] | Select) -> int:
-    """Розмір медіа разом з їхніми субтитрами; кожен файл рахується один раз."""
+    """Розмір медіа разом з їхніми субтитрами; кожен файл рахується один раз — і той, що
+    спільний для кількох записів з однаковим вмістом (один `storage_key`)."""
     subtitle_ids = select(MediaAsset.subtitles_id).where(
         MediaAsset.id.in_(media_ids), MediaAsset.subtitles_id.is_not(None)
     )
-    total = await session.scalar(
-        select(func.coalesce(func.sum(MediaAsset.size_bytes), 0)).where(
-            or_(MediaAsset.id.in_(media_ids), MediaAsset.id.in_(subtitle_ids))
-        )
+    files = (
+        select(func.max(MediaAsset.size_bytes).label("size_bytes"))
+        .where(or_(MediaAsset.id.in_(media_ids), MediaAsset.id.in_(subtitle_ids)))
+        .group_by(MediaAsset.storage_key)
+        .subquery()
     )
+    total = await session.scalar(select(func.coalesce(func.sum(files.c.size_bytes), 0)))
     return int(total or 0)
 
 
