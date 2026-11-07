@@ -7176,7 +7176,7 @@
                 }
               }
             },
-            "description": "ID_CONFLICT / POSITION_TAKEN / LESSON_PUBLISHED"
+            "description": "LESSON_PUBLISHED / IN_USE"
           },
           "422": {
             "content": {
@@ -11850,7 +11850,7 @@
                 }
               }
             },
-            "description": "ID_CONFLICT / POSITION_TAKEN / LESSON_PUBLISHED"
+            "description": "LESSON_PUBLISHED / IN_USE"
           },
           "422": {
             "content": {
@@ -12874,7 +12874,7 @@
                 }
               }
             },
-            "description": "ID_CONFLICT / POSITION_TAKEN / LESSON_PUBLISHED"
+            "description": "LESSON_PUBLISHED / IN_USE"
           },
           "422": {
             "content": {
@@ -14128,7 +14128,7 @@
                 }
               }
             },
-            "description": "ID_CONFLICT / POSITION_TAKEN / LESSON_PUBLISHED"
+            "description": "LESSON_PUBLISHED / IN_USE"
           },
           "422": {
             "content": {
