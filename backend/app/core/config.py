@@ -22,6 +22,12 @@ class Settings(BaseSettings):
     # SHA коміту, який підставляє CI під час збірки образу.
     git_sha: str | None = None
 
+    # Swagger UI (`/docs`), ReDoc (`/redoc`) і `/openapi.json`. За замовчуванням вимкнені в
+    # prod (карта всіх ендпоінтів і схем — зайва інформація для атакувальника; контракт для
+    # фронтенду — `docs/openapi.json` у репозиторії), увімкнені деінде. API_DOCS_ENABLED
+    # перевизначає.
+    api_docs_enabled: bool | None = None
+
     log_level: str = "INFO"
     log_format: Literal["json", "text"] = "text"
 
@@ -184,6 +190,12 @@ class Settings(BaseSettings):
         ):
             raise ValueError("DATABASE_URL is required when ENVIRONMENT=prod")
         return self
+
+    @property
+    def api_docs_active(self) -> bool:
+        if self.api_docs_enabled is not None:
+            return self.api_docs_enabled
+        return self.environment != "prod"
 
     @property
     def hsts_active(self) -> bool:

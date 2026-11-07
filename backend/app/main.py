@@ -45,6 +45,9 @@ def create_app() -> FastAPI:
         title=settings.app_name,
         version=APP_VERSION,
         lifespan=lifespan,
+        docs_url="/docs" if settings.api_docs_active else None,
+        redoc_url="/redoc" if settings.api_docs_active else None,
+        openapi_url="/openapi.json" if settings.api_docs_active else None,
         responses={422: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
     )
     register_error_handlers(app)
