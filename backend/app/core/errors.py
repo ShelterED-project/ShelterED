@@ -6,6 +6,7 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from app.schemas.errors import ErrorBody, ErrorResponse
 
@@ -63,6 +64,41 @@ async def validation_error_handler(request: Request, exc: RequestValidationError
 async def unhandled_error_handler(request: Request, exc: Exception) -> JSONResponse:
     logger.exception("Unhandled error")
     return error_response(500, "INTERNAL_ERROR", "Internal server error")
+
+
+class UnhandledErrorMiddleware:
+    """Непередбачена помилка → 500 INTERNAL_ERROR усередині стеку middleware.
+
+    Обробник `Exception` у Starlette виконує зовнішній `ServerErrorMiddleware`, тож його
+    відповідь минає CORS, request ID і заголовки безпеки (`Cache-Control: no-store`): PWA з
+    іншого origin не може прочитати тіло й не бачить X-Request-ID. Цей middleware додається
+    першим (найглибшим), тож 500 проходить через усі інші. Якщо відповідь уже почалася —
+    помилка йде далі.
+    """
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        started = False
+
+        async def send_tracking(message: Message) -> None:
+            nonlocal started
+            if message["type"] == "http.response.start":
+                started = True
+            await send(message)
+
+        try:
+            await self.app(scope, receive, send_tracking)
+        except Exception:
+            if started:
+                raise
+            logger.exception("Unhandled error")
+            response = error_response(500, "INTERNAL_ERROR", "Internal server error")
+            await response(scope, receive, send)
 
 
 def register_error_handlers(app: FastAPI) -> None:

@@ -22,7 +22,7 @@ from app.api import (
 )
 from app.core.config import APP_VERSION, get_settings
 from app.core.db import get_engine
-from app.core.errors import register_error_handlers
+from app.core.errors import UnhandledErrorMiddleware, register_error_handlers
 from app.core.logging import setup_logging
 from app.core.request_id import RequestIdMiddleware
 from app.core.security_headers import SecurityHeadersMiddleware
@@ -47,6 +47,8 @@ def create_app() -> FastAPI:
         responses={422: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
     )
     register_error_handlers(app)
+    # Найглибший middleware: непередбачена 500 проходить через CORS, request ID і заголовки.
+    app.add_middleware(UnhandledErrorMiddleware)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
