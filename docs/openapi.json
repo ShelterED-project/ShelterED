@@ -5906,10 +5906,6 @@
       },
       "VersionResponse": {
         "properties": {
-          "environment": {
-            "title": "Environment",
-            "type": "string"
-          },
           "git_sha": {
             "anyOf": [
               {
@@ -5933,8 +5929,7 @@
         "required": [
           "version",
           "git_sha",
-          "profile",
-          "environment"
+          "profile"
         ],
         "title": "VersionResponse",
         "type": "object"
@@ -14913,6 +14908,7 @@
     },
     "/version": {
       "get": {
+        "description": "Версія й коміт збірки. Середовище (dev/prod) не розкривається без автентифікації.",
         "operationId": "get_version_version_get",
         "responses": {
           "200": {

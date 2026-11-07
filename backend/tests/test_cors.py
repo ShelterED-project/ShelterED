@@ -14,7 +14,8 @@ def test_preflight_allowed_origin():
     )
     assert response.status_code == 200
     assert response.headers["access-control-allow-origin"] == PWA
-    assert response.headers["access-control-allow-credentials"] == "true"
+    # Лише Bearer-токен, без cookie: credentials не дозволяються.
+    assert "access-control-allow-credentials" not in response.headers
 
 
 def test_exposes_request_id():

@@ -31,6 +31,8 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     log_format: Literal["json", "text"] = "text"
 
+    # Origin-и PWA. Авторизація лише Bearer-токеном (без cookie), тож CORS без credentials.
+    # У prod — лише явні https-origin-и (без `*`).
     cors_origins: list[str] = ["http://localhost:5173"]
 
     # Найбільше тіло запиту (крім потокового завантаження медіа з власними лімітами), байти.
@@ -215,6 +217,17 @@ class Settings(BaseSettings):
             self.database_url and self.database_url.get_secret_value()
         ):
             raise ValueError("DATABASE_URL is required when ENVIRONMENT=prod")
+        return self
+
+    @model_validator(mode="after")
+    def _prod_cors_origins_https(self) -> "Settings":
+        # У prod `*` відкрив би API будь-якому сайту, а http-origin — сторінці без TLS.
+        if self.environment == "prod":
+            bad = [o for o in self.cors_origins if o == "*" or not o.startswith("https://")]
+            if bad:
+                raise ValueError(
+                    f"CORS_ORIGINS must list explicit https:// origins when ENVIRONMENT=prod: {bad}"
+                )
         return self
 
     @property

@@ -24,7 +24,6 @@ class VersionResponse(BaseModel):
     version: str
     git_sha: str | None
     profile: str
-    environment: str
 
 
 @router.get("/health", response_model=HealthResponse)
@@ -50,9 +49,9 @@ async def ready(session: Annotated[AsyncSession, Depends(get_session)]) -> Healt
 
 @router.get("/version", response_model=VersionResponse)
 async def get_version(settings: Annotated[Settings, Depends(get_settings)]) -> VersionResponse:
+    """Версія й коміт збірки. Середовище (dev/prod) не розкривається без автентифікації."""
     return VersionResponse(
         version=APP_VERSION,
         git_sha=settings.git_sha,
         profile=settings.profile,
-        environment=settings.environment,
     )

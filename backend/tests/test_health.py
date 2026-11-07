@@ -56,14 +56,22 @@ def test_version():
     body = response.json()
     assert body["version"] == "0.1.0"
     assert body["profile"] == "cloud"
+    assert "environment" not in body
 
 
 @pytest.mark.parametrize(
     ("env", "enabled"),
     [
         ({"ENVIRONMENT": "dev"}, True),
-        ({"ENVIRONMENT": "prod"}, False),
-        ({"ENVIRONMENT": "prod", "API_DOCS_ENABLED": "true"}, True),
+        ({"ENVIRONMENT": "prod", "CORS_ORIGINS": '["https://app.example"]'}, False),
+        (
+            {
+                "ENVIRONMENT": "prod",
+                "CORS_ORIGINS": '["https://app.example"]',
+                "API_DOCS_ENABLED": "true",
+            },
+            True,
+        ),
     ],
 )
 def test_api_docs_are_disabled_in_prod_by_default(monkeypatch, env, enabled):
