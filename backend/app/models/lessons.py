@@ -70,11 +70,16 @@ class Module(TimestampMixin, Base):
 
 class MediaAsset(TimestampMixin, Base):
     __tablename__ = "media_asset"
-    __table_args__ = (CheckConstraint("kind IN ('video', 'image', 'subtitles')", name="kind"),)
+    __table_args__ = (
+        CheckConstraint("kind IN ('video', 'image', 'subtitles')", name="kind"),
+        # Пошук уже збереженого файла з тим самим вмістом (дедуплікація при завантаженні).
+        Index("ix_media_asset_sha256", "sha256"),
+    )
 
     id: Mapped[uuid.UUID] = uuid_pk()
     kind: Mapped[str]
-    storage_key: Mapped[str] = mapped_column(unique=True)
+    # Не унікальний: однаковий вміст — один файл на кілька записів (див. services/media).
+    storage_key: Mapped[str]
     mime_type: Mapped[str]
     size_bytes: Mapped[int] = mapped_column(BigInteger)
     # sha256 збереженого файла (що роздається за URL); source_sha256 — файла, який надіслав

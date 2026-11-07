@@ -1,5 +1,6 @@
 """Завантаження медіа: формат, сигнатура, ліміти, ідемпотентність, права."""
 
+import asyncio
 import io
 import random
 import uuid
@@ -9,7 +10,9 @@ from conftest import auth_header
 from httpx import AsyncClient
 from PIL import Image
 
+from app.api.deps import get_storage
 from app.core.config import get_settings
+from app.core.storage import LocalMediaStorage
 
 pytestmark = pytest.mark.anyio
 
@@ -210,3 +213,49 @@ async def test_bad_images_rejected(client: AsyncClient, world, media_storage) ->
     resp = await upload(client, t, "image", "image/png", bomb)
     assert resp.status_code == 400 and resp.json()["error"]["code"] == "IMAGE_TOO_LARGE"
     assert stored_files(media_storage) == []
+
+
+async def test_identical_content_shares_one_file(client: AsyncClient, world, media_storage) -> None:
+    """Той самий вміст під іншими id (і від іншого вчителя) — окремі записи, один файл."""
+    photo, video = _photo(1600, 1200), MP4 + b"same video"
+    first = await upload(client, world.teacher_a, "image", "image/jpeg", photo)
+    second = await upload(client, world.teacher_a, "image", "image/jpeg", photo)
+    third = await upload(client, world.teacher_b, "image", "image/jpeg", photo)
+    assert {r.status_code for r in (first, second, third)} == {201}
+    assert len({r.json()["id"] for r in (first, second, third)}) == 3
+    assert first.json()["url"] == second.json()["url"] == third.json()["url"]
+    v1 = (await upload(client, world.teacher_a, "video", "video/mp4", video)).json()
+    v2 = (await upload(client, world.teacher_a, "video", "video/mp4", video)).json()
+    assert v1["url"] == v2["url"] and v1["id"] != v2["id"]
+    other = (await upload(client, world.teacher_a, "image", "image/png", PNG)).json()
+    assert other["url"] != first.json()["url"]
+    files = stored_files(media_storage)
+    assert len(files) == 3
+    # Відмова (той самий id з іншим вмістом) не чіпає спільний файл.
+    conflict = await upload(
+        client, world.teacher_a, "image", "image/png", PNG, uuid.UUID(first.json()["id"])
+    )
+    assert conflict.status_code == 409
+    assert stored_files(media_storage) == files
+
+
+async def test_parallel_uploads_of_same_content_keep_files(committed, tmp_path) -> None:
+    """Паралельні завантаження однакового вмісту: усі записи створені, кожен URL веде на файл
+    (у гіршому разі — дві копії, але жодної втраченої)."""
+    # Каталог створюємо заздалегідь: на Windows Path.resolve() у момент паралельного mkdir
+    # іноді дає інший шлях (лише тестове середовище, у контейнері Linux цього немає).
+    (tmp_path / "media" / "image").mkdir(parents=True)
+    storage = LocalMediaStorage(tmp_path / "media", "/media")
+    committed.app.dependency_overrides[get_storage] = lambda: storage
+    f = committed.factory
+    teacher = await f.teacher(await f.school())
+    await committed.session.commit()
+    photo = _photo(1600, 1200)
+    ids = [uuid.uuid4() for _ in range(4)]
+    responses = await asyncio.gather(
+        *(upload(committed.client, teacher, "image", "image/jpeg", photo, i) for i in ids * 2)
+    )
+    assert sorted(r.status_code for r in responses) == [200] * 4 + [201] * 4
+    urls = {r.json()["url"] for r in responses}
+    files = {p.relative_to(storage.root).as_posix() for p in stored_files(storage)}
+    assert {u.removeprefix("/media/") for u in urls} == files

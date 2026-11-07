@@ -13,6 +13,12 @@
 - `source_sha256` — хеш файла, який надіслав клієнт. За ним перевіряється ідемпотентність:
   повтор того самого файла під тим самим `media_id` → наявний запис, без повторного перекодування.
 Для відео й субтитрів вони однакові.
+
+Дедуплікація: якщо файл з таким самим вмістом (sha256, розмір, тип) уже є у сховищі, новий запис
+посилається на його `storage_key`, а щойно записана копія видаляється. Тож один файл може
+належати кільком `MediaAsset`: видаляти файл зі сховища можна лише тоді, коли на його
+`storage_key` не посилається жоден запис (перевіряти в тій самій транзакції, що й видалення
+рядка). Завантаження ніколи не видаляє чужий (спільний) файл — лише власну щойно записану копію.
 """
 
 import codecs
@@ -266,16 +272,29 @@ async def upload(
         await storage.save(key, stream)
         size, sha = stream.size, stream.sha.hexdigest()
         source_sha = sha
+    # Спершу пишемо, потім шукаємо дубль: паралельні завантаження однакового вмісту в гіршому
+    # разі лишать дві копії, але ніколи не втратять файл.
+    shared_key = await session.scalar(
+        select(MediaAsset.storage_key)
+        .where(
+            MediaAsset.sha256 == sha,
+            MediaAsset.size_bytes == size,
+            MediaAsset.kind == kind,
+            MediaAsset.mime_type == mime,
+        )
+        .limit(1)
+    )
     values = {
         "id": media_id,
         "kind": kind,
-        "storage_key": key,
+        "storage_key": shared_key or key,
         "mime_type": mime,
         "size_bytes": size,
         "sha256": sha,
         "source_sha256": source_sha,
         "uploaded_by": user.id,
     }
+    keep_new = False
     try:
         media, created = await insert_or_get(
             session,
@@ -285,11 +304,11 @@ async def upload(
         )
         if created:
             await session.commit()
-    except BaseException:
-        await storage.delete(key)
-        raise
-    if not created:  # паралельний повтор встиг першим: наш файл зайвий
-        await storage.delete(key)
+        keep_new = created and shared_key is None
+    finally:
+        # Наша копія зайва: помилка, паралельний повтор встиг першим або файл уже був.
+        if not keep_new:
+            await storage.delete(key)
     return media, created
 
 
