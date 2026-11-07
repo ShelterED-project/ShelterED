@@ -7615,7 +7615,7 @@
                 }
               }
             },
-            "description": "Конфлікт (ID_CONFLICT та ін.)"
+            "description": "ID_CONFLICT: id зайнятий іншим класом; CLASS_NAME_TAKEN: клас із такою назвою вже є в школі цього навчального року"
           },
           "422": {
             "content": {
@@ -7899,7 +7899,7 @@
                 }
               }
             },
-            "description": "Конфлікт (ID_CONFLICT та ін.)"
+            "description": "CLASS_NAME_TAKEN: клас із такою назвою вже є в школі цього навчального року"
           },
           "422": {
             "content": {
@@ -10869,7 +10869,7 @@
                 }
               }
             },
-            "description": "Service Unavailable"
+            "description": "DB_UNAVAILABLE: немає з'єднання з БД"
           }
         },
         "summary": "Ready",
@@ -13507,7 +13507,7 @@
                 }
               }
             },
-            "description": "DELETION_REQUEST_EXISTS: в учня вже є відкритий запит; ID_CONFLICT: id зайнятий іншим запитом"
+            "description": "DELETION_REQUEST_EXISTS: в учня вже є відкритий запит; ID_CONFLICT: id зайнятий іншим запитом; STUDENT_WITHOUT_SCHOOL: учень не прив'язаний до школи (нікому підтвердити запит)"
           },
           "422": {
             "content": {

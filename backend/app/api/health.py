@@ -35,7 +35,9 @@ async def health() -> HealthResponse:
 @router.get(
     "/health/ready",
     response_model=HealthResponse,
-    responses={503: {"model": ErrorResponse}},
+    responses={
+        503: {"model": ErrorResponse, "description": "DB_UNAVAILABLE: немає з'єднання з БД"}
+    },
 )
 async def ready(session: Annotated[AsyncSession, Depends(get_session)]) -> HealthResponse:
     """Readiness: API може обслуговувати запити (є з'єднання з БД)."""

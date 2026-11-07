@@ -44,7 +44,8 @@ DECIDE = {
         409: {
             "model": ErrorResponse,
             "description": "DELETION_REQUEST_EXISTS: в учня вже є відкритий запит; "
-            "ID_CONFLICT: id зайнятий іншим запитом",
+            "ID_CONFLICT: id зайнятий іншим запитом; STUDENT_WITHOUT_SCHOOL: учень не "
+            "прив'язаний до школи (нікому підтвердити запит)",
         },
     },
 )

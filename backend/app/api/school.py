@@ -69,7 +69,16 @@ async def list_classes(user: Staff, session: Session) -> list[ClassOut]:
     "/classes",
     response_model=ClassOut,
     status_code=status.HTTP_201_CREATED,
-    responses={**REPEAT, **R401, **R403, **R409},
+    responses={
+        **REPEAT,
+        **R401,
+        **R403,
+        409: {
+            "model": ErrorResponse,
+            "description": "ID_CONFLICT: id зайнятий іншим класом; CLASS_NAME_TAKEN: клас із "
+            "такою назвою вже є в школі цього навчального року",
+        },
+    },
 )
 async def create_class(
     body: ClassCreate, admin: Admin, session: Session, response: Response
@@ -87,7 +96,18 @@ async def get_class(klass: StaffClass, session: Session) -> ClassOut:
     return await service.class_out(session, klass)
 
 
-@router.patch("/classes/{class_id}", response_model=ClassOut, responses={**ACCESS, **R409})
+@router.patch(
+    "/classes/{class_id}",
+    response_model=ClassOut,
+    responses={
+        **ACCESS,
+        409: {
+            "model": ErrorResponse,
+            "description": "CLASS_NAME_TAKEN: клас із такою назвою вже є в школі цього "
+            "навчального року",
+        },
+    },
+)
 async def update_class(body: ClassUpdate, klass: AdminClass, session: Session) -> ClassOut:
     return await service.class_out(session, await service.update_class(session, klass, body))
 
