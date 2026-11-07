@@ -214,6 +214,28 @@ async def test_batch_queries_do_not_grow_per_event_for_lookups(
     assert lookups("INSERT") == 0
 
 
+async def test_batch_reads_membership_and_questions_once(client, db_session, world, c) -> None:
+    """Членство в класі переклички й питання тесту читаються раз на пакет."""
+    statements: list[str] = []
+
+    def record(conn, cursor, statement, *args) -> None:
+        statements.append(statement.lstrip())
+
+    events = []
+    for i in range(5):
+        events.append(attempt(c.test.id, {c.q1.id: ["a"]}, now() - dt.timedelta(minutes=i)))
+        events.append(rollcall(c.rc.id, "safe", now() - dt.timedelta(seconds=i)))
+    engine = db_session.bind.engine.sync_engine
+    event_api.listen(engine, "before_cursor_execute", record)
+    try:
+        results = await send(client, world.student_a, batch(*events))
+    finally:
+        event_api.remove(engine, "before_cursor_execute", record)
+    assert statuses(results) == [("accepted", None)] * 10
+    assert sum(s.startswith("SELECT class_membership.user_id") for s in statements) == 1
+    assert sum(s.startswith("SELECT question.id") for s in statements) == 1
+
+
 async def test_rejections_with_reasons_are_stored_and_repeat_the_same(
     client, db_session, world, factory, c
 ) -> None:
