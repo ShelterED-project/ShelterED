@@ -89,14 +89,14 @@ def _invalid(message: str) -> AppError:
 
 
 def _bad_image() -> AppError:
-    return AppError("INVALID_IMAGE", "Image is corrupt or unsupported", status_code=400)
+    return AppError("INVALID_IMAGE", "Image is corrupt or unsupported", status_code=422)
 
 
 def _too_many_pixels(limit: int) -> AppError:
     return AppError(
         "IMAGE_TOO_LARGE",
         "Image has too many pixels",
-        status_code=400,
+        status_code=422,
         details={"max_pixels": limit},
     )
 

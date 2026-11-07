@@ -11707,16 +11707,6 @@
             },
             "description": "Successful Response"
           },
-          "400": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "INVALID_IMAGE (пошкоджене), IMAGE_TOO_LARGE (забагато пікселів)"
-          },
           "401": {
             "content": {
               "application/json": {
@@ -11785,7 +11775,7 @@
                 }
               }
             },
-            "description": "INVALID_MEDIA (сигнатура, UTF-8, порожній)"
+            "description": "INVALID_MEDIA (сигнатура, UTF-8, порожній), INVALID_IMAGE (пошкоджене зображення), IMAGE_TOO_LARGE (забагато пікселів)"
           },
           "500": {
             "content": {

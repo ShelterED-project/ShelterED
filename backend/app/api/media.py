@@ -35,15 +35,15 @@ _BINARY = {"schema": {"type": "string", "format": "binary"}}
     },
     responses={
         200: {"description": "Повтор того самого файла з тим самим id: наявний запис"},
-        400: {
-            "model": ErrorResponse,
-            "description": "INVALID_IMAGE (пошкоджене), IMAGE_TOO_LARGE (забагато пікселів)",
-        },
         **ACCESS,
         409: {"model": ErrorResponse, "description": "ID_CONFLICT: інший файл під цим id"},
         413: {"model": ErrorResponse, "description": "MEDIA_TOO_LARGE"},
         415: {"model": ErrorResponse, "description": "UNSUPPORTED_MEDIA_TYPE"},
-        422: {"model": ErrorResponse, "description": "INVALID_MEDIA (сигнатура, UTF-8, порожній)"},
+        422: {
+            "model": ErrorResponse,
+            "description": "INVALID_MEDIA (сигнатура, UTF-8, порожній), INVALID_IMAGE (пошкоджене "
+            "зображення), IMAGE_TOO_LARGE (забагато пікселів)",
+        },
     },
 )
 async def upload_media(
