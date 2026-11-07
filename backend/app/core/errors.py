@@ -48,8 +48,13 @@ async def app_error_handler(request: Request, exc: AppError) -> JSONResponse:
 
 
 async def http_error_handler(request: Request, exc: StarletteHTTPException) -> JSONResponse:
-    code = HTTPStatus(exc.status_code).name
-    message = exc.detail if isinstance(exc.detail, str) else HTTPStatus(exc.status_code).phrase
+    try:
+        status = HTTPStatus(exc.status_code)
+        code, phrase = status.name, status.phrase
+    except ValueError:
+        # Нестандартний код (напр. 499 від стороннього middleware): не падаємо з 500.
+        code, phrase = f"HTTP_{exc.status_code}", "HTTP error"
+    message = exc.detail if isinstance(exc.detail, str) else phrase
     return error_response(exc.status_code, code, message, headers=exc.headers)
 
 

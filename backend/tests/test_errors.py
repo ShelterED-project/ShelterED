@@ -80,3 +80,26 @@ def test_unhandled_error_passes_through_middleware():
     assert response.headers["X-Request-ID"] == "crash-1"
     assert response.headers["Access-Control-Allow-Origin"] == "http://localhost:5173"
     assert response.headers["Cache-Control"] == "no-store"
+
+
+@app.get("/_test/nonstandard-status")
+async def nonstandard_status():
+    raise HTTPException(status_code=499, detail="Client closed request")
+
+
+@app.get("/_test/nonstandard-status-no-detail")
+async def nonstandard_status_no_detail():
+    raise HTTPException(status_code=599, detail=None)
+
+
+def test_nonstandard_http_status_does_not_crash():
+    response = client.get("/_test/nonstandard-status")
+    assert response.status_code == 499
+    assert response.json()["error"] == {
+        "code": "HTTP_499",
+        "message": "Client closed request",
+        "details": None,
+    }
+    response = client.get("/_test/nonstandard-status-no-detail")
+    assert response.status_code == 599
+    assert response.json()["error"]["code"] == "HTTP_599"
