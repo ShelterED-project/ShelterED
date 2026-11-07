@@ -735,3 +735,14 @@ def test_workers_share_one_cached_redis_client() -> None:
     worker.claim(key, sub)
     worker.release(key, sub)
     assert shared.redis_client() is client and client.connection_pool is pool
+
+
+async def test_pin_reset_deletes_student_push_subscriptions(client, db_session, world) -> None:
+    """Загублений телефон: після скидання PIN він більше не отримує сповіщень класу."""
+    subs = await _subscribe(db_session, world.student_a, world.student_b, world.teacher_a)
+    url = f"/classes/{world.class_a.id}/students/{world.student_a.id}/pin-reset"
+    assert (await client.post(url, headers=auth_header(world.teacher_a))).status_code == 204
+    assert await _left(db_session, world.student_a) == set()
+    # Підписки інших користувачів не зачеплені.
+    assert await _left(db_session, world.student_b) == {subs[world.student_b.id]}
+    assert await _left(db_session, world.teacher_a) == {subs[world.teacher_a.id]}

@@ -25,6 +25,12 @@ async def enqueue_recompute_student(student_id: uuid.UUID) -> None:
     await enqueue("stats.recompute_student", args=[str(student_id)])
 
 
+async def enqueue_recompute_alert_study(school_id: uuid.UUID) -> None:
+    """Після commit відбою: навчання під час тривог школи одразу, а не за годину в
+    `stats.refresh_all` (пізні синхронізації однаково доберуть періодичний перерахунок)."""
+    await enqueue("stats.recompute_alert_study", args=[str(school_id)])
+
+
 def _pending_key(class_id: uuid.UUID) -> str:
     return f"sheltered:stats:class_pending:{class_id}"
 
@@ -68,6 +74,13 @@ async def _recompute_class(class_id: uuid.UUID) -> bool:
         return done
 
 
+async def _recompute_alert_study(school_id: uuid.UUID) -> int:
+    async with standalone_session() as session:
+        rows = await stats_service.recompute_alert_study(session, school_id, get_settings())
+        await session.commit()
+        return rows
+
+
 async def _refresh_all() -> dict[str, int]:
     async with standalone_session() as session:
         return await stats_service.refresh_all(session, get_settings())
@@ -83,6 +96,12 @@ def recompute_student(student_id: str) -> int:
 def recompute_class(class_id: str) -> bool:
     """Рядки класу з уже закомічених рядків учнів (відкладено, одна в очікуванні на клас)."""
     return asyncio.run(_recompute_class(uuid.UUID(class_id)))
+
+
+@celery_app.task(name="stats.recompute_alert_study")
+def recompute_alert_study(school_id: str) -> int:
+    """Навчання під час тривог школи (після відбою). Повертає кількість рядків тривог."""
+    return asyncio.run(_recompute_alert_study(uuid.UUID(school_id)))
 
 
 @celery_app.task(name="stats.refresh_all", **LONG_TASK_LIMITS)

@@ -13,13 +13,13 @@ from collections.abc import Iterable
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import Select, Text, cast, exists, func, or_, select
+from sqlalchemy import Select, Text, cast, delete, exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
 from app.core.errors import AppError
 from app.models.lessons import Card, Lesson, MediaAsset, Module, Question, Subject, Test
-from app.models.school import SchoolClass, User
+from app.models.school import ScheduleOverride, SchoolClass, User
 from app.models.sync import ModuleProgress
 from app.schemas.lessons import (
     CardCreate,
@@ -255,6 +255,13 @@ async def delete_lesson(session: AsyncSession, lesson: Lesson) -> None:
     )
     if await _has_progress(session, Module.lesson_id == lesson.id):
         raise in_use
+    # Надгробки видалених додаткових уроків не тримають урок: після видалення уроку повтор
+    # їхнього створення однаково отримає 404 (уроку немає), а не воскресить урок.
+    await session.execute(
+        delete(ScheduleOverride).where(
+            ScheduleOverride.lesson_id == lesson.id, ScheduleOverride.deleted_at.is_not(None)
+        )
+    )
     async with integrity_errors(session, {"fk_": in_use}):
         await session.delete(lesson)
     await session.commit()
@@ -469,15 +476,18 @@ async def _text_bytes(session: AsyncSession, ids: set[uuid.UUID]) -> int:
 
 
 async def media_size(session: AsyncSession, media_ids: Iterable[uuid.UUID] | Select) -> int:
-    """Розмір медіа разом з їхніми субтитрами; кожен файл рахується один раз."""
+    """Розмір медіа разом з їхніми субтитрами; кожен файл рахується один раз — і той, що
+    спільний для кількох записів з однаковим вмістом (один `storage_key`)."""
     subtitle_ids = select(MediaAsset.subtitles_id).where(
         MediaAsset.id.in_(media_ids), MediaAsset.subtitles_id.is_not(None)
     )
-    total = await session.scalar(
-        select(func.coalesce(func.sum(MediaAsset.size_bytes), 0)).where(
-            or_(MediaAsset.id.in_(media_ids), MediaAsset.id.in_(subtitle_ids))
-        )
+    files = (
+        select(func.max(MediaAsset.size_bytes).label("size_bytes"))
+        .where(or_(MediaAsset.id.in_(media_ids), MediaAsset.id.in_(subtitle_ids)))
+        .group_by(MediaAsset.storage_key)
+        .subquery()
     )
+    total = await session.scalar(select(func.coalesce(func.sum(files.c.size_bytes), 0)))
     return int(total or 0)
 
 

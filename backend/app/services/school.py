@@ -1,10 +1,11 @@
 """Класи, вчителі класу, код класу, розклад і прив'язка уроків до слотів."""
 
 import datetime as dt
+import time
 import uuid
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from sqlalchemy import delete, select, union_all
+from sqlalchemy import delete, select, union_all, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
@@ -236,13 +237,35 @@ async def unassign_teacher(
 # ---------- розклад: слоти й перевизначення ----------
 
 
+# Пояс школи майже не змінюється (ендпоінта зміни школи немає; seed — окремий процес), а
+# потрібен майже кожному запиту з розкладом: кеш на процес із коротким TTL економить запит.
+SCHOOL_TZ_CACHE_TTL_S = 300
+_SCHOOL_TZ_CACHE_MAX = 4096
+_school_tz_cache: dict[uuid.UUID, tuple[ZoneInfo, float]] = {}
+
+
+def clear_school_tz_cache() -> None:
+    _school_tz_cache.clear()
+
+
 async def school_tz(session: AsyncSession, school_id: uuid.UUID | None) -> ZoneInfo:
-    """Пояс школи; без школи чи з невідомою назвою поясу — Europe/Kyiv."""
-    school = await session.get(School, school_id) if school_id is not None else None
-    try:
-        return ZoneInfo(school.timezone if school else schedule.DEFAULT_TZ)
-    except (ZoneInfoNotFoundError, ValueError):
+    """Пояс школи; без школи чи з невідомою назвою поясу — Europe/Kyiv. Кешується на процес
+    на SCHOOL_TZ_CACHE_TTL_S."""
+    if school_id is None:
         return ZoneInfo(schedule.DEFAULT_TZ)
+    cached = _school_tz_cache.get(school_id)
+    if cached is not None and cached[1] > time.monotonic():
+        return cached[0]
+    name = await session.scalar(select(School.timezone).where(School.id == school_id))
+    try:
+        tz = ZoneInfo(name or schedule.DEFAULT_TZ)
+    except (ZoneInfoNotFoundError, ValueError):
+        tz = ZoneInfo(schedule.DEFAULT_TZ)
+    if name is not None:
+        if len(_school_tz_cache) >= _SCHOOL_TZ_CACHE_MAX:
+            _school_tz_cache.clear()
+        _school_tz_cache[school_id] = (tz, time.monotonic() + SCHOOL_TZ_CACHE_TTL_S)
+    return tz
 
 
 async def list_slots(session: AsyncSession, class_id: uuid.UUID) -> list[ScheduleSlot]:
@@ -344,6 +367,7 @@ async def list_overrides(
                 ScheduleOverride.class_id == class_id,
                 ScheduleOverride.date >= date_from,
                 ScheduleOverride.date <= date_to,
+                ScheduleOverride.deleted_at.is_(None),
             )
             .order_by(ScheduleOverride.date, ScheduleOverride.starts_at, ScheduleOverride.id)
         )
@@ -387,10 +411,24 @@ async def create_override(
 async def delete_override(
     session: AsyncSession, klass: SchoolClass, override_id: uuid.UUID
 ) -> None:
-    """Ідемпотентно: відсутнє перевизначення — теж 204."""
+    """Ідемпотентно: відсутнє перевизначення — теж 204. Додатковий урок вчителя (з `lesson_id`)
+    видаляється м'яко, як і через свій ендпоінт: інакше запізнілий повтор його створення з
+    черги вчителя воскресив би урок, а надгробок зник би."""
+    await session.execute(
+        update(ScheduleOverride)
+        .where(
+            ScheduleOverride.id == override_id,
+            ScheduleOverride.class_id == klass.id,
+            ScheduleOverride.lesson_id.is_not(None),
+            ScheduleOverride.deleted_at.is_(None),
+        )
+        .values(deleted_at=_now())
+    )
     await session.execute(
         delete(ScheduleOverride).where(
-            ScheduleOverride.id == override_id, ScheduleOverride.class_id == klass.id
+            ScheduleOverride.id == override_id,
+            ScheduleOverride.class_id == klass.id,
+            ScheduleOverride.lesson_id.is_(None),
         )
     )
     await session.commit()
@@ -588,8 +626,11 @@ async def create_extra_lesson(
 ) -> tuple[ScheduleOverride, bool, int]:
     """Додатковий урок на дату без слота: перевизначення `extra` з `lesson_id` (предмет —
     предмет уроку). Правила ті самі, що й для прив'язки до слота: опублікований урок своєї
-    школи, пакет дня ≤ ліміту. Ідемпотентно за `id`; (override, created, розмір пакета дня)."""
+    школи, пакет дня ≤ ліміту. Ідемпотентно за `id`; (override, created, розмір пакета дня).
+    `id` видаленого уроку — 410 EXTRA_LESSON_DELETED: запізнілий повтор не воскрешає урок."""
     existing = await session.get(ScheduleOverride, body.id)
+    if existing is not None and existing.deleted_at is not None:
+        raise _extra_lesson_deleted()
     if existing is None:
         lesson = await _schedulable_lesson(session, teacher, body.lesson_id)
         subject_id = lesson.subject_id
@@ -614,7 +655,14 @@ async def create_extra_lesson(
         },
         compare=("class_id", "date", "kind", "slot_id", "lesson_id", "starts_at", "ends_at"),
     )
-    if not created:
+    if override.deleted_at is not None:  # видалили між читанням і вставкою
+        raise _extra_lesson_deleted()
+    if created and existing is not None:
+        # Запис зник між читанням і вставкою (паралельне видалення), і повтор створив його
+        # знову — перевіряємо як нове створення (вставка відкотиться разом із помилкою).
+        await _schedulable_lesson(session, teacher, body.lesson_id)
+        size = await _check_day_size(session, klass, body.date, body.lesson_id, settings)
+    elif not created:
         size = await lessons_service.pack_size(
             session, await day_lesson_ids(session, klass, body.date)
         )
@@ -622,17 +670,29 @@ async def create_extra_lesson(
     return override, created, size
 
 
+def _extra_lesson_deleted() -> AppError:
+    return AppError(
+        "EXTRA_LESSON_DELETED",
+        "Extra lesson with this id was deleted; create a new one with a new id",
+        status_code=410,
+    )
+
+
 async def delete_extra_lesson(
     session: AsyncSession, klass: SchoolClass, extra_id: uuid.UUID
 ) -> None:
-    """Ідемпотентно: відсутній урок — теж 204. Інші перевизначення (адміністрації) не чіпає."""
+    """Ідемпотентно: відсутній урок — теж 204. Інші перевизначення (адміністрації) не чіпає.
+    М'яке видалення (`deleted_at`): рядок лишається надгробком для запізнілих повторів."""
     await session.execute(
-        delete(ScheduleOverride).where(
+        update(ScheduleOverride)
+        .where(
             ScheduleOverride.id == extra_id,
             ScheduleOverride.class_id == klass.id,
             ScheduleOverride.kind == "extra",
             ScheduleOverride.lesson_id.is_not(None),
+            ScheduleOverride.deleted_at.is_(None),
         )
+        .values(deleted_at=_now())
     )
     await session.commit()
 
@@ -650,5 +710,5 @@ def scheduled_lessons():
             ScheduleOverride.class_id.label("class_id"),
             ScheduleOverride.date.label("date"),
             ScheduleOverride.lesson_id.label("lesson_id"),
-        ).where(ScheduleOverride.lesson_id.is_not(None)),
+        ).where(ScheduleOverride.lesson_id.is_not(None), ScheduleOverride.deleted_at.is_(None)),
     ).subquery("scheduled_lesson")

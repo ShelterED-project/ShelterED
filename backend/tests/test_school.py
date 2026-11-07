@@ -537,3 +537,55 @@ async def test_only_admin_lists_users(client: AsyncClient, world) -> None:
         "/admin/users", params={"role": "parent"}, headers=auth_header(world.admin)
     )
     assert bad.status_code == 422
+
+
+async def test_school_timezone_is_cached_per_process(
+    client: AsyncClient, db_session, world
+) -> None:
+    """Типовий запит з розкладом (маніфест пакетів) з теплим кешем поясу школи робить на
+    один запит до БД менше."""
+    from sqlalchemy import event
+
+    from app.services import school as school_service
+
+    statements: list[str] = []
+
+    def count(conn, cursor, statement, *args) -> None:
+        statements.append(statement)
+
+    url = f"/packs/manifest?class_id={world.class_a.id}"
+    headers = auth_header(world.student_a)
+    sync_conn = (await db_session.connection()).sync_connection
+    event.listen(sync_conn, "before_cursor_execute", count)
+    try:
+        school_service.clear_school_tz_cache()
+        db_session.expunge_all()
+        assert (await client.get(url, headers=headers)).status_code == 200
+        cold = len(statements)
+        statements.clear()
+        db_session.expunge_all()
+        assert (await client.get(url, headers=headers)).status_code == 200
+        warm = len(statements)
+    finally:
+        event.remove(sync_conn, "before_cursor_execute", count)
+        school_service.clear_school_tz_cache()
+    assert warm == cold - 1, (cold, warm)
+    tz = await school_service.school_tz(db_session, world.school.id)
+    assert tz.key == world.school.timezone
+
+
+async def test_db_pool_timeout_comes_from_settings(monkeypatch) -> None:
+    from app.core import db
+    from app.core.config import get_settings
+
+    monkeypatch.setenv("DB_POOL_TIMEOUT_S", "7")
+    get_settings.cache_clear()
+    db.get_engine.cache_clear()
+    try:
+        engine = db.get_engine()
+        assert engine.pool.timeout() == 7
+        assert engine.pool.size() == get_settings().db_pool_size
+        await engine.dispose()
+    finally:
+        get_settings.cache_clear()
+        db.get_engine.cache_clear()

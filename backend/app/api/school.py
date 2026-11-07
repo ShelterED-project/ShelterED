@@ -69,7 +69,16 @@ async def list_classes(user: Staff, session: Session) -> list[ClassOut]:
     "/classes",
     response_model=ClassOut,
     status_code=status.HTTP_201_CREATED,
-    responses={**REPEAT, **R401, **R403, **R409},
+    responses={
+        **REPEAT,
+        **R401,
+        **R403,
+        409: {
+            "model": ErrorResponse,
+            "description": "ID_CONFLICT: id зайнятий іншим класом; CLASS_NAME_TAKEN: клас із "
+            "такою назвою вже є в школі цього навчального року",
+        },
+    },
 )
 async def create_class(
     body: ClassCreate, admin: Admin, session: Session, response: Response
@@ -87,7 +96,18 @@ async def get_class(klass: StaffClass, session: Session) -> ClassOut:
     return await service.class_out(session, klass)
 
 
-@router.patch("/classes/{class_id}", response_model=ClassOut, responses={**ACCESS, **R409})
+@router.patch(
+    "/classes/{class_id}",
+    response_model=ClassOut,
+    responses={
+        **ACCESS,
+        409: {
+            "model": ErrorResponse,
+            "description": "CLASS_NAME_TAKEN: клас із такою назвою вже є в школі цього "
+            "навчального року",
+        },
+    },
+)
 async def update_class(body: ClassUpdate, klass: AdminClass, session: Session) -> ClassOut:
     return await service.class_out(session, await service.update_class(session, klass, body))
 
@@ -344,6 +364,11 @@ async def unassign_lesson(
         **REPEAT,
         **ACCESS,
         409: {"model": ErrorResponse, "description": "LESSON_NOT_PUBLISHED / ID_CONFLICT"},
+        410: {
+            "model": ErrorResponse,
+            "description": "EXTRA_LESSON_DELETED: урок із цим id уже видалено (повтор не "
+            "воскрешає його; приберіть подію з черги)",
+        },
         422: {"model": ErrorResponse, "description": "PACK_DAY_LIMIT_EXCEEDED / VALIDATION_ERROR"},
     },
 )
@@ -381,6 +406,8 @@ async def create_extra_lesson(
 async def delete_extra_lesson(
     klass: TeacherClass, extra_id: uuid.UUID, session: Session
 ) -> Response:
+    """Ідемпотентно (відсутній урок — теж 204). Запізнілий повтор створення з цим `id`
+    після видалення отримує 410 EXTRA_LESSON_DELETED і урок не воскрешає."""
     await service.delete_extra_lesson(session, klass, extra_id)
     await enqueue_rebuild_class(klass.id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

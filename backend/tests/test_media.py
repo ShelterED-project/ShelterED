@@ -8,11 +8,13 @@ import uuid
 import pytest
 from conftest import auth_header
 from httpx import AsyncClient
-from PIL import Image, PngImagePlugin
+from PIL import Image, ImageCms, PngImagePlugin
 
 from app.api.deps import get_storage
 from app.core.config import get_settings
 from app.core.storage import LocalMediaStorage
+from app.models.lessons import MediaAsset
+from app.services import lessons as lessons_service
 
 pytestmark = pytest.mark.anyio
 
@@ -232,6 +234,54 @@ async def test_bad_images_rejected(client: AsyncClient, world, media_storage) ->
     assert stored_files(media_storage) == []
 
 
+async def test_pixel_cap_depends_on_decode_cost(client: AsyncClient, world, media_storage) -> None:
+    """Звичайний JPEG декодується зменшеним (draft) — до 40 Мп; PNG і прогресивний JPEG
+    декодуються цілими — до 24 Мп."""
+    settings = get_settings()
+    big = Image.new("RGB", (6000, 5000), (120, 80, 40))  # 30 Мп
+    t = world.teacher_a
+    resp = await upload(client, t, "image", "image/jpeg", _encode(big, "JPEG"))
+    assert resp.status_code == 201, resp.text
+    [stored] = stored_files(media_storage)
+    assert Image.open(stored).size == (1280, 1067)
+    full = settings.media_image_max_pixels_full_decode
+    for mime, data in (
+        ("image/png", _encode(Image.new("1", (6000, 5000)), "PNG")),
+        ("image/jpeg", _encode(big, "JPEG", progressive=True)),
+    ):
+        resp = await upload(client, t, "image", mime, data)
+        assert resp.status_code == 422, mime
+        err = resp.json()["error"]
+        assert err["code"] == "IMAGE_TOO_LARGE" and err["details"]["max_pixels"] == full
+    # Під межею PNG приймається.
+    ok = _encode(Image.new("1", (5000, 4800)), "PNG")
+    assert (await upload(client, t, "image", "image/png", ok)).status_code == 201
+
+
+async def test_cmyk_jpeg_converted_without_mismatching_icc(
+    client: AsyncClient, world, media_storage
+) -> None:
+    """CMYK JPEG → RGB WebP без чужого профілю (CMYK-профіль на RGB-пікселях спотворює
+    кольори); RGB-профіль RGB-фото лишається."""
+    srgb = ImageCms.ImageCmsProfile(ImageCms.createProfile("sRGB")).tobytes()
+    cyan = Image.new("CMYK", (64, 64), (255, 0, 0, 0))
+    for icc in (None, srgb):  # без профілю і з профілем, що не відповідає CMYK
+        params = {"icc_profile": icc} if icc else {}
+        resp = await upload(
+            client, world.teacher_a, "image", "image/jpeg", _encode(cyan, "JPEG", **params)
+        )
+        assert resp.status_code == 201, resp.text
+        assert resp.json()["mime_type"] == "image/webp"
+        img = Image.open(media_storage.root / resp.json()["url"].removeprefix("/media/"))
+        assert img.mode == "RGB" and "icc_profile" not in img.info
+        r, g, b = img.getpixel((10, 10))
+        assert r < 30 and g > 220 and b > 220
+    rgb = _encode(Image.new("RGB", (64, 64), (200, 30, 30)), "JPEG", icc_profile=srgb)
+    resp = await upload(client, world.teacher_a, "image", "image/jpeg", rgb)
+    img = Image.open(media_storage.root / resp.json()["url"].removeprefix("/media/"))
+    assert img.info.get("icc_profile") == srgb
+
+
 async def test_identical_content_shares_one_file(client: AsyncClient, world, media_storage) -> None:
     """Той самий вміст під іншими id (і від іншого вчителя) — окремі записи, один файл."""
     photo, video = _photo(1600, 1200), MP4 + b"same video"
@@ -254,6 +304,27 @@ async def test_identical_content_shares_one_file(client: AsyncClient, world, med
     )
     assert conflict.status_code == 409
     assert stored_files(media_storage) == files
+
+
+async def test_shared_file_counted_once_in_pack_size(world, db_session) -> None:
+    """Записи зі спільним файлом (однаковий вміст) у ліміті пакета — один файл."""
+
+    def asset(key: str, size: int) -> MediaAsset:
+        return MediaAsset(
+            kind="image",
+            storage_key=key,
+            mime_type="image/webp",
+            size_bytes=size,
+            sha256=key,
+            source_sha256=key,
+            uploaded_by=world.teacher_a.id,
+        )
+
+    rows = [asset("aa/same.webp", 1000), asset("aa/same.webp", 1000), asset("bb/other.webp", 500)]
+    db_session.add_all(rows)
+    await db_session.flush()
+    assert await lessons_service.media_size(db_session, [r.id for r in rows]) == 1500
+    assert await lessons_service.media_size(db_session, [rows[0].id, rows[1].id]) == 1000
 
 
 async def test_parallel_uploads_of_same_content_keep_files(committed, tmp_path) -> None:

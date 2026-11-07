@@ -66,7 +66,9 @@ def test_hsts_off_by_default_even_over_https(make_client):
 
 
 def test_hsts_on_in_prod(make_client):
-    response = make_client("https://test", ENVIRONMENT="prod").get("/health")
+    response = make_client(
+        "https://test", ENVIRONMENT="prod", CORS_ORIGINS='["https://app.example"]'
+    ).get("/health")
     assert response.headers["Strict-Transport-Security"].startswith("max-age=")
 
 

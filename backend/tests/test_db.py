@@ -148,3 +148,26 @@ async def test_app_connections_limit_idle_in_transaction(migrated_db, monkeypatc
         await engine.dispose()
     finally:
         get_settings.cache_clear()
+
+
+def test_pooler_endpoint_gets_no_server_settings(monkeypatch, caplog):
+    """PgBouncer (pooled endpoint Neon) не приймає server_settings: не надсилаємо їх,
+    попереджаємо в лозі один раз."""
+    from pydantic import SecretStr
+
+    from app.core import db
+    from app.core.config import get_settings
+
+    settings = get_settings().model_copy()
+    direct = "postgresql+asyncpg://u:p@ep-x-123.eu-central-1.aws.neon.tech/db"
+    settings.database_url = SecretStr(direct)
+    assert "server_settings" in db.connect_args(settings)
+
+    db._warn_pooler.cache_clear()
+    settings.database_url = SecretStr(direct.replace("ep-x-123", "ep-x-123-pooler"))
+    with caplog.at_level("WARNING", logger="app.core.db"):
+        assert "server_settings" not in db.connect_args(settings)
+        assert "server_settings" not in db.connect_args(settings)
+    assert [r.message for r in caplog.records].count(caplog.records[0].message) == 1
+    assert "-pooler" in caplog.records[0].message
+    db._warn_pooler.cache_clear()

@@ -9,13 +9,15 @@ from zoneinfo import ZoneInfo
 import pytest
 from conftest import auth_header
 from httpx import AsyncClient
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from app.core.config import get_settings
 from app.models.lessons import Lesson
 from app.models.packs import KnowledgePack
-from app.models.school import LessonAssignment
+from app.models.school import LessonAssignment, ScheduleOverride
+from app.schemas.school import ExtraLessonCreate
 from app.services import packs as packs_service
+from app.services import school as school_service
 from app.services import sync as sync_service
 from app.services.schedule import to_utc
 
@@ -201,6 +203,92 @@ async def test_extra_lesson_roles_and_rules(
         headers=headers,
     )
     assert {o["id"] for o in overrides.json()} == {cancel_id, body["id"]}
+
+
+async def test_extra_lesson_retry_racing_hard_delete(
+    client: AsyncClient, world, factory, db_session
+) -> None:
+    """Повтор бачить запис, але до вставки його видаляють (тут — перевизначення
+    адміністрації): вставка створює запис знову з перевірками й розміром пакета, без 500."""
+    subject = await factory.subject()
+    lesson = await published_lesson(factory, world.teacher_a, subject)
+    body = extra_body(lesson, MONDAY)
+    headers = auth_header(world.teacher_a)
+    assert (await client.post(url(world), json=body, headers=headers)).status_code == 201
+    # Запис лишається в identity map сесії, а з БД зникає повз ORM (як паралельне видалення).
+    assert await db_session.get(ScheduleOverride, uuid.UUID(body["id"])) is not None
+    await db_session.execute(
+        text("DELETE FROM schedule_override WHERE id = :id"), {"id": body["id"]}
+    )
+    extra, created, size = await school_service.create_extra_lesson(
+        db_session, world.teacher_a, world.class_a, ExtraLessonCreate(**body), get_settings()
+    )
+    assert created and extra.lesson_id == lesson.id and size > 0
+
+
+async def test_late_retry_does_not_resurrect_deleted_extra_lesson(
+    client: AsyncClient, world, factory, db_session
+) -> None:
+    subject = await factory.subject()
+    lesson = await published_lesson(factory, world.teacher_a, subject)
+    body = extra_body(lesson, MONDAY)
+    headers = auth_header(world.teacher_a)
+    assert (await client.post(url(world), json=body, headers=headers)).status_code == 201
+    assert (await client.delete(f"{url(world)}/{body['id']}", headers=headers)).status_code == 204
+    # Запізнілий повтор створення з офлайн-черги — 410, урок не повертається.
+    for data in (body, {**body, "starts_at": "10:00:00", "ends_at": "10:45:00"}):
+        resp = await client.post(url(world), json=data, headers=headers)
+        assert resp.status_code == 410, resp.text
+        assert resp.json()["error"]["code"] == "EXTRA_LESSON_DELETED"
+    assert (await client.delete(f"{url(world)}/{body['id']}", headers=headers)).status_code == 204
+    params = {"from": str(MONDAY), "days": 1}
+    sched = await client.get(
+        f"/classes/{world.class_a.id}/schedule", params=params, headers=headers
+    )
+    assert sched.json()["days"][0]["items"] == []
+    overrides = await client.get(
+        f"/classes/{world.class_a.id}/schedule/overrides",
+        params={"from": str(MONDAY), "to": str(MONDAY)},
+        headers=headers,
+    )
+    assert overrides.json() == []
+    assert not await sync_service._student_has_lesson(db_session, world.student_a.id, lesson.id)
+    # Видалення через ендпоінт перевизначень адміністрації не прибирає надгробок.
+    resp = await client.delete(
+        f"/classes/{world.class_a.id}/schedule/overrides/{body['id']}",
+        headers=auth_header(world.admin),
+    )
+    assert resp.status_code == 204
+    assert (await client.post(url(world), json=body, headers=headers)).status_code == 410
+    # Надгробок не заважає зняти урок з публікації й видалити його.
+    resp = await client.post(f"/lessons/{lesson.id}/unpublish", headers=headers)
+    assert resp.status_code == 200, resp.text
+    assert (await client.delete(f"/lessons/{lesson.id}", headers=headers)).status_code == 204
+
+
+async def test_admin_override_delete_keeps_extra_lesson_tombstone(
+    client: AsyncClient, world, factory
+) -> None:
+    """Адміністрація видаляє додатковий урок вчителя через ендпоінт перевизначень: повтор
+    створення з черги вчителя отримує 410, урок не воскресає."""
+    subject = await factory.subject()
+    lesson = await published_lesson(factory, world.teacher_a, subject)
+    body = extra_body(lesson, MONDAY)
+    headers = auth_header(world.teacher_a)
+    assert (await client.post(url(world), json=body, headers=headers)).status_code == 201
+    resp = await client.delete(
+        f"/classes/{world.class_a.id}/schedule/overrides/{body['id']}",
+        headers=auth_header(world.admin),
+    )
+    assert resp.status_code == 204
+    resp = await client.post(url(world), json=body, headers=headers)
+    assert resp.status_code == 410 and resp.json()["error"]["code"] == "EXTRA_LESSON_DELETED"
+    sched = await client.get(
+        f"/classes/{world.class_a.id}/schedule",
+        params={"from": str(MONDAY), "days": 1},
+        headers=headers,
+    )
+    assert sched.json()["days"][0]["items"] == []
 
 
 # ---------- предмет уроку = предмет слота ----------

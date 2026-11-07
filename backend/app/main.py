@@ -58,7 +58,8 @@ def create_app() -> FastAPI:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
-        allow_credentials=True,
+        # Без cookie: токен іде в заголовку Authorization, credentials не потрібні.
+        allow_credentials=False,
         allow_methods=["*"],
         allow_headers=["*"],
         expose_headers=["X-Request-ID", "ETag", "Retry-After"],

@@ -420,3 +420,37 @@ async def test_enforce_is_atomic_in_redis() -> None:
     finally:
         await limiter.redis.delete(rules[0].key)
         await limiter.close()
+
+
+async def test_new_student_creation_is_limited_per_ip_and_class(app: FastAPI, world) -> None:
+    """Код класу знають усі: з однієї адреси в клас — не більше N нових учнів за вікно; вхід
+    наявних учнів, інший клас та інша адреса не зачеплені."""
+    settings = get_settings()
+    app.dependency_overrides[get_settings] = lambda: settings.model_copy(
+        update={"rate_limit_join_new_students": 3}
+    )
+    async with from_ip(app, "10.0.0.7") as flooder, from_ip(app, "10.0.0.8") as other:
+        for i in range(3):
+            r = await flooder.post("/auth/student/join", json=join(world.class_a, f"Фейк{i}"))
+            assert r.status_code == 200
+        r = await flooder.post("/auth/student/join", json=join(world.class_a, "Фейк9"))
+        assert r.status_code == 429
+        assert r.json()["error"]["code"] == "RATE_LIMITED"
+        assert 0 < int(r.headers["Retry-After"]) <= settings.rate_limit_join_new_students_window_s
+        # Наявні учні входять (зокрема щойно створені) — ліміт лише на створення.
+        for _ in range(5):
+            r = await flooder.post("/auth/student/join", json=join(world.class_a, "Фейк0"))
+            assert r.status_code == 200
+        # Інший клас з тієї ж адреси й той самий клас з іншої адреси — окремі лічильники.
+        r = await flooder.post("/auth/student/join", json=join(world.class_b, "Фейк9"))
+        assert r.status_code == 200
+        r = await other.post("/auth/student/join", json=join(world.class_a, "Фейк9"))
+        assert r.status_code == 200
+
+
+async def test_whole_class_joins_from_one_nat(client: AsyncClient, world) -> None:
+    """Ліміт нових учнів за замовчуванням пропускає звичайний клас (30+) з одного NAT."""
+    assert get_settings().rate_limit_join_new_students >= 40
+    for i in range(35):
+        r = await client.post("/auth/student/join", json=join(world.class_a, f"Учень{i}"))
+        assert r.status_code == 200

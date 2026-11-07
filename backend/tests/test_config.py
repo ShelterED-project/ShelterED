@@ -38,6 +38,20 @@ def test_jwt_secret_too_short_rejected(monkeypatch):
         Settings(_env_file=None)
 
 
+@pytest.mark.parametrize(
+    "origins",
+    ['["*"]', '["http://app.example"]', '["https://app.example", "http://localhost:5173"]'],
+)
+def test_prod_rejects_wildcard_and_plain_http_cors_origins(monkeypatch, origins):
+    monkeypatch.setenv("ENVIRONMENT", "prod")
+    monkeypatch.setenv("CORS_ORIGINS", origins)
+    with pytest.raises(ValidationError, match="CORS_ORIGINS"):
+        Settings(_env_file=None)
+    # Поза prod (розробка) http://localhost дозволено.
+    monkeypatch.setenv("ENVIRONMENT", "dev")
+    Settings(_env_file=None)
+
+
 def test_prod_requires_database_url(monkeypatch):
     monkeypatch.setenv("ENVIRONMENT", "prod")
     monkeypatch.delenv("DATABASE_URL", raising=False)

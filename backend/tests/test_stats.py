@@ -326,3 +326,30 @@ async def test_admin_sees_study_time_during_school_alerts(client, db_session, wo
     for user in (world.teacher_a, world.student_a, world.parent_a):
         r = await client.get("/alerts/study", headers=auth_header(user))
         assert r.status_code == 403, user.role
+
+
+async def test_alert_study_task_recomputes_one_school(
+    client, db_session, world, c, worker_session
+) -> None:
+    """Задача після відбою рахує навчання під час тривог лише своєї школи (без refresh_all)."""
+    from app.models.alerts import AlertEvent
+
+    t = now()
+    alert = AlertEvent(
+        region_code="kyiv",
+        school_id=world.school.id,
+        source="api",
+        external_id="study-task",
+        started_at=t - dt.timedelta(hours=1),
+        ended_at=t - dt.timedelta(minutes=10),
+    )
+    db_session.add(alert)
+    await db_session.flush()
+    await send(
+        client, world.student_a, batch(progress(c.module.id, 100, t - dt.timedelta(minutes=30)))
+    )
+    assert "stats.recompute_alert_study" in celery_app.tasks
+    assert await stats_worker._recompute_alert_study(world.school.id) >= 1
+    data = await get(client, world.admin, "/alerts/study")
+    by_id = {a["alert_id"]: a for a in data["alerts"]}
+    assert by_id[str(alert.id)]["students"] == 1 and by_id[str(alert.id)]["study_minutes"] == 4

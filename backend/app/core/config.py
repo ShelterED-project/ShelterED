@@ -31,6 +31,8 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     log_format: Literal["json", "text"] = "text"
 
+    # Origin-и PWA. Авторизація лише Bearer-токеном (без cookie), тож CORS без credentials.
+    # У prod — лише явні https-origin-и (без `*`).
     cors_origins: list[str] = ["http://localhost:5173"]
 
     # Найбільше тіло запиту (крім потокового завантаження медіа з власними лімітами), байти.
@@ -48,11 +50,17 @@ class Settings(BaseSettings):
     database_url_direct: SecretStr | None = None
     # Neon вимагає TLS; для локальної БД у Docker вимикаємо.
     database_ssl: bool = True
-    db_pool_size: int = 5
-    db_max_overflow: int = 5
+    # Пул з'єднань на процес API: pool_size + max_overflow, помножене на кількість воркерів
+    # uvicorn (і задач Celery, що працюють одночасно), має лишатися нижче за ліміт з'єднань Neon.
+    db_pool_size: int = 10
+    db_max_overflow: int = 10
+    # Скільки секунд запит чекає на вільне з'єднання пулу, доки не отримає помилку (замість
+    # того, щоб висіти до таймауту клієнта).
+    db_pool_timeout_s: float = Field(default=10.0, gt=0)
     # Postgres рве з'єднання застосунку, що простоює у відкритій транзакції довше за цей час
     # (забутий commit не тримає блокувань і не будить Neon). 0 — вимкнено. Міграції (Alembic)
-    # мають власне з'єднання без цього обмеження.
+    # мають власне з'єднання без цього обмеження. З pooled endpoint Neon (`-pooler`, PgBouncer)
+    # параметр не надсилається (він відкидає server_settings) — лише попередження в лозі.
     db_idle_in_transaction_timeout_s: int = Field(default=60, ge=0)
 
     # Секрет підпису JWT: обов'язковий, значення за замовчуванням немає.
@@ -87,6 +95,9 @@ class Settings(BaseSettings):
     media_image_max_side: int = 1280
     media_image_webp_quality: int = 80
     media_image_max_pixels: int = 40_000_000
+    # Нижча межа для форматів, які декодуються в повному розмірі (PNG, WebP, прогресивний JPEG):
+    # 24 Мп RGBA — ~96 МБ на запит. Звичайний JPEG декодується зменшеним (draft), йому — 40 Мп.
+    media_image_max_pixels_full_decode: int = 24_000_000
     # Ліміт пакета класу на день; той самий ліміт діє на один урок.
     pack_max_day_bytes: int = 50 * 1024 * 1024
     # Ліміт «Рюкзака» класу на 7 днів (пакети + унікальні медіа). Перевищення лише логується:
@@ -100,6 +111,8 @@ class Settings(BaseSettings):
     alerts_api_token: SecretStr | None = None
     alerts_api_url: str = "https://api.alerts.in.ua/v1/alerts/active.json"
     alerts_http_timeout_s: float = 10.0
+    # Найбільша (розпакована) відповідь API тривог, байти; більша — збій джерела, не відбій.
+    alerts_max_response_bytes: int = 2 * 1024 * 1024
     # Інтервал опитування (ліміт alerts.in.ua — 8–10 запитів на хвилину з IP).
     alerts_poll_interval_s: int = 30
     # Без успішного опитування довше за це джерело вважається недоступним (B7.6).
@@ -155,6 +168,11 @@ class Settings(BaseSettings):
     # й може скинути PIN; refresh-токен учня на його пристрої продовжує працювати).
     rate_limit_join_account_daily: int = 300
     rate_limit_daily_window_s: int = 86400
+    # Створення нових учнів (`POST /auth/student/join` з новим ім'ям) на пару IP + клас: рахується
+    # кожне створення. Код класу знають усі учні — без ліміту клас можна засипати вигаданими
+    # іменами. Ліміт вищий за розмір класу: увесь клас може вперше входити з одного шкільного NAT.
+    rate_limit_join_new_students: int = 40
+    rate_limit_join_new_students_window_s: int = 900
     # Ліміти на кількість запитів користувача (рахується кожен запит, не лише невдалий):
     # ШІ-репетитор — на учня; QR-ретрансляція подій (`POST /sync/events` від вчителя) — на вчителя.
     rate_limit_tutor: int = 20
@@ -206,6 +224,17 @@ class Settings(BaseSettings):
             self.database_url and self.database_url.get_secret_value()
         ):
             raise ValueError("DATABASE_URL is required when ENVIRONMENT=prod")
+        return self
+
+    @model_validator(mode="after")
+    def _prod_cors_origins_https(self) -> "Settings":
+        # У prod `*` відкрив би API будь-якому сайту, а http-origin — сторінці без TLS.
+        if self.environment == "prod":
+            bad = [o for o in self.cors_origins if o == "*" or not o.startswith("https://")]
+            if bad:
+                raise ValueError(
+                    f"CORS_ORIGINS must list explicit https:// origins when ENVIRONMENT=prod: {bad}"
+                )
         return self
 
     @property

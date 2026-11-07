@@ -5906,10 +5906,6 @@
       },
       "VersionResponse": {
         "properties": {
-          "environment": {
-            "title": "Environment",
-            "type": "string"
-          },
           "git_sha": {
             "anyOf": [
               {
@@ -5933,8 +5929,7 @@
         "required": [
           "version",
           "git_sha",
-          "profile",
-          "environment"
+          "profile"
         ],
         "title": "VersionResponse",
         "type": "object"
@@ -6976,7 +6971,7 @@
     },
     "/auth/student/join": {
       "post": {
-        "description": "Вхід учня: код класу + імʼя + прізвище + PIN (4–6 цифр).\n\nЯкщо учня з таким імʼям у класі ще немає — його створюють, інакше перевіряють PIN.\nКод класу нормалізується (лише A-Z і 0-9; кириличні двійники латиниці замінюються).\nПрострочений код пускає лише наявних учнів із вірним PIN; для невідомого імені й хибного PIN\nвідповідь однакова: 401 `INVALID_CREDENTIALS`.\n\nЗахист від перебору PIN: невдалі спроби обмежені на пару IP + (код класу + ім'я), на IP і\nвисоким загальним лімітом на (код класу + ім'я) з усіх IP (`RATE_LIMIT_JOIN_*` за\n`RATE_LIMIT_WINDOW_S`) і добовим лімітом на (код класу + ім'я) з усіх IP\n(`RATE_LIMIT_JOIN_ACCOUNT_DAILY`); понад ліміт — 429 з `Retry-After`.\nБлокування акаунта немає: однокласник, що вводить чужий PIN, блокує лише себе (свій IP),\nа справжній учень входить з іншого пристрою/IP; ліміт знімається сам після вікна.",
+        "description": "Вхід учня: код класу + імʼя + прізвище + PIN (4–6 цифр).\n\nЯкщо учня з таким імʼям у класі ще немає — його створюють, інакше перевіряють PIN.\nКод класу нормалізується (лише A-Z і 0-9; кириличні двійники латиниці замінюються).\nПрострочений код пускає лише наявних учнів із вірним PIN; для невідомого імені й хибного PIN\nвідповідь однакова: 401 `INVALID_CREDENTIALS`.\n\nЗахист від перебору PIN: невдалі спроби обмежені на пару IP + (код класу + ім'я), на IP і\nвисоким загальним лімітом на (код класу + ім'я) з усіх IP (`RATE_LIMIT_JOIN_*` за\n`RATE_LIMIT_WINDOW_S`) і добовим лімітом на (код класу + ім'я) з усіх IP\n(`RATE_LIMIT_JOIN_ACCOUNT_DAILY`); понад ліміт — 429 з `Retry-After`.\nБлокування акаунта немає: однокласник, що вводить чужий PIN, блокує лише себе (свій IP),\nа справжній учень входить з іншого пристрою/IP; ліміт знімається сам після вікна.\n\nСтворення нових учнів обмежене на пару IP + клас (`RATE_LIMIT_JOIN_NEW_STUDENTS` за\n`RATE_LIMIT_JOIN_NEW_STUDENTS_WINDOW_S`): хто знає код, не засипле клас вигаданими іменами.\nЛіміт розрахований на весь клас за одним NAT; вхід наявних учнів він не зачіпає.",
         "operationId": "student_join_auth_student_join_post",
         "requestBody": {
           "content": {
@@ -7037,7 +7032,7 @@
                 }
               }
             },
-            "description": "RATE_LIMITED: забагато невдалих спроб; повторити після `Retry-After` с",
+            "description": "RATE_LIMITED: забагато невдалих спроб або нових учнів з однієї адреси в клас; повторити після `Retry-After` с",
             "headers": {
               "Retry-After": {
                 "schema": {
@@ -7620,7 +7615,7 @@
                 }
               }
             },
-            "description": "Конфлікт (ID_CONFLICT та ін.)"
+            "description": "ID_CONFLICT: id зайнятий іншим класом; CLASS_NAME_TAKEN: клас із такою назвою вже є в школі цього навчального року"
           },
           "422": {
             "content": {
@@ -7904,7 +7899,7 @@
                 }
               }
             },
-            "description": "Конфлікт (ID_CONFLICT та ін.)"
+            "description": "CLASS_NAME_TAKEN: клас із такою назвою вже є в школі цього навчального року"
           },
           "422": {
             "content": {
@@ -9011,6 +9006,16 @@
             },
             "description": "LESSON_NOT_PUBLISHED / ID_CONFLICT"
           },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "EXTRA_LESSON_DELETED: урок із цим id уже видалено (повтор не воскрешає його; приберіть подію з черги)"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -9045,6 +9050,7 @@
     },
     "/classes/{class_id}/schedule/extra-lessons/{extra_id}": {
       "delete": {
+        "description": "Ідемпотентно (відсутній урок — теж 204). Запізнілий повтор створення з цим `id`\nпісля видалення отримує 410 EXTRA_LESSON_DELETED і урок не воскрешає.",
         "operationId": "delete_extra_lesson_classes__class_id__schedule_extra_lessons__extra_id__delete",
         "parameters": [
           {
@@ -10077,7 +10083,7 @@
     },
     "/classes/{class_id}/students/{student_id}/pin-reset": {
       "post": {
-        "description": "Скидає PIN учня (вчитель цього класу або адмін школи): наступний вхід задасть новий.\nУсі сесії учня (access- і refresh-токени) перестають діяти.",
+        "description": "Скидає PIN учня (вчитель цього класу або адмін школи): наступний вхід задасть новий.\nУсі сесії учня (access- і refresh-токени) і його push-підписки перестають діяти.",
         "operationId": "pin_reset_classes__class_id__students__student_id__pin_reset_post",
         "parameters": [
           {
@@ -10863,7 +10869,7 @@
                 }
               }
             },
-            "description": "Service Unavailable"
+            "description": "DB_UNAVAILABLE: немає з'єднання з БД"
           }
         },
         "summary": "Ready",
@@ -13501,7 +13507,7 @@
                 }
               }
             },
-            "description": "DELETION_REQUEST_EXISTS: в учня вже є відкритий запит; ID_CONFLICT: id зайнятий іншим запитом"
+            "description": "DELETION_REQUEST_EXISTS: в учня вже є відкритий запит; ID_CONFLICT: id зайнятий іншим запитом; STUDENT_WITHOUT_SCHOOL: учень не прив'язаний до школи (нікому підтвердити запит)"
           },
           "422": {
             "content": {
@@ -14902,6 +14908,7 @@
     },
     "/version": {
       "get": {
+        "description": "Версія й коміт збірки. Середовище (dev/prod) не розкривається без автентифікації.",
         "operationId": "get_version_version_get",
         "responses": {
           "200": {
