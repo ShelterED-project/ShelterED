@@ -1,5 +1,9 @@
 """extra lesson outside the schedule
 
+Увага, downgrade незворотно ВИДАЛЯЄ всі додаткові уроки вчителів (рядки schedule_override
+з lesson_id): без колонки lesson_id вони втратили б урок, а старий код не вміє показати
+extra без уроку й часу. Повторний upgrade їх не повертає.
+
 Revision ID: c930d9500c52
 Revises: bc349e3a514a
 Create Date: 2026-11-07 22:01:50.350591+00:00
