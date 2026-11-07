@@ -22,3 +22,14 @@ def poll() -> dict[str, int | str]:
     if not settings.alerts_polling_enabled:
         return {"skipped": "disabled"}
     return asyncio.run(_poll(AlertsInUaProvider(settings)))
+
+
+async def _auto_close() -> dict[str, int]:
+    async with standalone_session() as session:
+        return await alerts_service.auto_close_stale(session, get_settings())
+
+
+@celery_app.task(name="alerts.auto_close")
+def auto_close() -> dict[str, int]:
+    """Забуті ручні тривоги й переклички (ALERTS_MANUAL_MAX_HOURS). Ідемпотентна."""
+    return asyncio.run(_auto_close())

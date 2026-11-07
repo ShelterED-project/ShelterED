@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import and_, or_, select, text, update
+from sqlalchemy import and_, exists, or_, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -319,6 +319,79 @@ async def source_available(
     )
     now = now or _now()
     return last is not None and now - last <= dt.timedelta(seconds=settings.alerts_source_stale_s)
+
+
+# ---------- автозакриття забутих ручних тривог і перекличок ----------
+
+
+async def _api_alert_active(session: AsyncSession, school_id: uuid.UUID) -> bool:
+    return bool(
+        await session.scalar(
+            select(
+                exists().where(
+                    AlertEvent.source == "api",
+                    AlertEvent.ended_at.is_(None),
+                    AlertEvent.school_id == school_id,
+                )
+            )
+        )
+    )
+
+
+async def auto_close_stale(
+    session: AsyncSession, settings: Settings, now: dt.datetime | None = None
+) -> dict[str, int]:
+    """Вчитель забув натиснути відбій: ручна (зокрема навчальна) тривога, старша за
+    ALERTS_MANUAL_MAX_HOURS, завершується як звичайний відбій (перекличка закривається, push
+    `all_clear`). Ручна перекличка без тривоги такого віку закривається як вчителем (без push).
+    Поки школу покриває тривога з API, нічого не чіпаємо: тривога реальна, закриється пізніше.
+    Ідемпотентно: повтор чи паралельний запуск не закриває й не шле вдруге."""
+    now = now or _now()
+    before = now - dt.timedelta(hours=settings.alerts_manual_max_hours)
+    stale = await session.execute(
+        select(AlertEvent.id, AlertEvent.school_id)
+        .where(
+            AlertEvent.source == "manual",
+            AlertEvent.ended_at.is_(None),
+            AlertEvent.started_at < before,
+        )
+        .order_by(AlertEvent.started_at, AlertEvent.id)
+    )
+    to_end = [
+        alert_id
+        for alert_id, school_id in stale.all()
+        if not await _api_alert_active(session, school_id)
+    ]
+    pushes = Pushes()
+    ended = await _end_alerts(session, to_end, now, pushes)
+
+    rollcalls = await session.execute(
+        select(RollCallSession.id, RollCallSession.class_id, SchoolClass.school_id)
+        .join(SchoolClass, SchoolClass.id == RollCallSession.class_id)
+        .where(
+            RollCallSession.alert_event_id.is_(None),
+            RollCallSession.closed_at.is_(None),
+            RollCallSession.opened_at < before,
+        )
+        .order_by(RollCallSession.id)
+        .with_for_update(of=RollCallSession)
+    )
+    closed = 0
+    for session_id, class_id, school_id in rollcalls.all():
+        if await _covering_alert(session, class_id, school_id) is not None:
+            continue
+        await session.execute(
+            update(RollCallSession)
+            .where(RollCallSession.id == session_id, RollCallSession.closed_at.is_(None))
+            .values(closed_at=now)
+        )
+        closed += 1
+    await session.commit()
+    await pushes.send()
+    result = {"alerts": len(ended), "rollcalls": closed, "pushes": len(pushes.items)}
+    if ended or closed:
+        logger.info("Stale manual alerts and roll calls closed: %s", result)
+    return result
 
 
 # ---------- ручна тривога ----------

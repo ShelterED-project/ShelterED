@@ -82,6 +82,11 @@ celery_app.conf.update(
             "schedule": float(settings.alerts_poll_interval_s),
             "options": {"queue": "default", "expires": settings.alerts_poll_interval_s},
         },
+        "alerts-auto-close": {
+            "task": "alerts.auto_close",
+            "schedule": float(settings.alerts_auto_close_interval_s),
+            "options": {"queue": "default", "expires": settings.alerts_auto_close_interval_s},
+        },
         "packs-refresh": {
             "task": "packs.refresh_all",
             "schedule": float(settings.packs_refresh_interval_s),

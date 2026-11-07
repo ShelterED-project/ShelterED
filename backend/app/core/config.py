@@ -81,6 +81,10 @@ class Settings(BaseSettings):
     alerts_poll_interval_s: int = 30
     # Без успішного опитування довше за це джерело вважається недоступним (B7.6).
     alerts_source_stale_s: int = 300
+    # Забуті ручні тривоги (зокрема навчальні) і ручні переклички без тривоги закриваються
+    # автоматично через N год, якщо клас не покриває тривога з API (beat `alerts.auto_close`).
+    alerts_manual_max_hours: int = 6
+    alerts_auto_close_interval_s: int = 300
 
     # Синхронізація (docs/sync-protocol.md, розділ 6): подія «підозріла», якщо `occurred_at`
     # пізніше часу сервера або |зсув годинника пакета| більше за цей поріг. Позначка, не блокування.

@@ -577,3 +577,84 @@ async def test_alert_adopts_manual_and_drill_rollcall(
     assert second.status_code == 201
     await db_session.refresh(open_row)
     assert open_row.is_drill is False
+
+
+# ---------- автозакриття забутих ручних тривог і перекличок ----------
+
+
+async def test_forgotten_manual_alert_is_closed_with_all_clear(
+    client: AsyncClient, db_session, world, enqueued
+) -> None:
+    body = manual_body(world.class_a)
+    await client.post("/alerts/manual", json=body, headers=auth_header(world.teacher_a))
+    settings = get_settings()
+
+    # Ще не забута: нічого не закривається.
+    early = await service.auto_close_stale(db_session, settings, now() + dt.timedelta(hours=1))
+    assert early == {"alerts": 0, "rollcalls": 0, "pushes": 0}
+
+    later = now() + dt.timedelta(hours=settings.alerts_manual_max_hours, minutes=1)
+    assert (await service.auto_close_stale(db_session, settings, later))["alerts"] == 1
+    alert = await db_session.get(AlertEvent, uuid.UUID(body["id"]), populate_existing=True)
+    assert alert.ended_at == later
+    rc = await db_session.scalar(select(RollCallSession))
+    await db_session.refresh(rc)
+    assert rc.closed_at == later
+    assert pushes(enqueued, "all_clear") == [
+        {"type": "all_clear", "class_id": str(world.class_a.id), "alert_id": body["id"]}
+    ]
+
+    # Повтор нічого не змінює й не шле вдруге.
+    again = await service.auto_close_stale(db_session, settings, later)
+    assert again == {"alerts": 0, "rollcalls": 0, "pushes": 0}
+    assert len(pushes(enqueued, "all_clear")) == 1
+
+
+async def test_manual_alert_is_kept_while_api_alert_covers_school(
+    client: AsyncClient, db_session, world, enqueued
+) -> None:
+    body = manual_body(world.class_a)
+    await client.post("/alerts/manual", json=body, headers=auth_header(world.teacher_a))
+    db_session.add(
+        AlertEvent(
+            region_code="kyiv",
+            school_id=world.school.id,
+            source="api",
+            external_id="777",
+            is_drill=False,
+            started_at=now(),
+        )
+    )
+    await db_session.flush()
+    later = now() + dt.timedelta(hours=7)
+    result = await service.auto_close_stale(db_session, get_settings(), later)
+    assert result["alerts"] == 0
+    alert = await db_session.get(AlertEvent, uuid.UUID(body["id"]), populate_existing=True)
+    assert alert.ended_at is None
+    assert pushes(enqueued, "all_clear") == []
+
+
+async def test_forgotten_manual_rollcall_is_closed_without_push(
+    client: AsyncClient, db_session, world, enqueued
+) -> None:
+    sid = uuid.uuid4()
+    resp = await client.post(
+        f"/classes/{world.class_a.id}/rollcall",
+        json={"id": str(sid)},
+        headers=auth_header(world.teacher_a),
+    )
+    assert resp.status_code == 201, resp.text
+    later = now() + dt.timedelta(hours=7)
+    result = await service.auto_close_stale(db_session, get_settings(), later)
+    assert result == {"alerts": 0, "rollcalls": 1, "pushes": 0}
+    rc = await db_session.get(RollCallSession, sid, populate_existing=True)
+    assert rc.closed_at == later
+    assert pushes(enqueued) == []
+
+
+def test_auto_close_is_scheduled() -> None:
+    from app.workers.celery_app import celery_app
+
+    entry = celery_app.conf.beat_schedule["alerts-auto-close"]
+    assert entry["task"] == "alerts.auto_close"
+    assert "alerts.auto_close" in celery_app.tasks
