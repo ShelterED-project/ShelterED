@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
-import database, models
+import database, models , pytz
 
 models.Base.metadata.create_all(bind=database.engine)
 
@@ -25,9 +25,14 @@ def get_db():
 def read_root(request: Request, db: Session = Depends(get_db)):
     students = db.query(models.RollCall).all()
 
-    # Додаємо 3 години для київського часу
+
     for student in students:
-        student.created_at = student.created_at + timedelta(hours=3)
+        kyiv_tz = pytz.timezone('Europe/Kyiv')
+        for student in students:
+            # Робимо час "обізнаним" про часовий пояс (UTC), а потім переводимо в Київ
+            utc_time = pytz.utc.localize(student.created_at)
+            kyiv_time = utc_time.astimezone(kyiv_tz)
+            student.created_at = kyiv_time
 
     return templates.TemplateResponse(
         request=request,
@@ -49,3 +54,23 @@ def mark_roll_call(student_name: str = Form(...), db: Session = Depends(get_db))
 @app.get("/health")
 def health_check():
     return {"status": "ok", "message": "Локальний сервер працює"}
+
+
+@app.get("/teacher", response_class=HTMLResponse)
+def teacher_dashboard(request: Request, db: Session = Depends(get_db)):
+    students = db.query(models.RollCall).all()
+
+    # Перетворюємо час на київський
+    for student in students:
+        kyiv_tz = pytz.timezone('Europe/Kyiv')
+        for student in students:
+            # Робимо час "обізнаним" про часовий пояс (UTC), а потім переводимо в Київ
+            utc_time = pytz.utc.localize(student.created_at)
+            kyiv_time = utc_time.astimezone(kyiv_tz)
+            student.created_at = kyiv_time
+
+    return templates.TemplateResponse(
+        request=request,
+        name="teacher.html",
+        context={"students": students}
+    )
