@@ -446,6 +446,8 @@ async def test_get_pack_etag_and_gzip(client: AsyncClient, db_session, world, co
     assert resp.headers["content-encoding"] == "gzip"
     assert resp.headers["etag"] == f'"{pack.content_hash}"'
     assert "Accept-Encoding" in resp.headers["vary"]
+    # Власний кеш пакета, а не `no-store` за замовчуванням.
+    assert resp.headers["cache-control"] == "private, no-cache"
     body = resp.json()
     assert body["id"] == str(pack.id) and body["version"] == 1
     assert body["lessons"][0]["id"] == str(course.lesson.id)

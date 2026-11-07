@@ -19,7 +19,8 @@ def test_preflight_allowed_origin():
 
 def test_exposes_request_id():
     response = client.get("/health", headers={"Origin": PWA})
-    assert "X-Request-ID" in response.headers["access-control-expose-headers"]
+    exposed = response.headers["access-control-expose-headers"]
+    assert {"X-Request-ID", "ETag", "Retry-After"} <= set(exposed.split(", ")), exposed
 
 
 def test_unknown_origin_not_allowed():

@@ -4,7 +4,7 @@ from collections.abc import Awaitable, Callable
 from typing import Annotated, Literal
 from urllib.parse import parse_qsl
 
-from fastapi import APIRouter, Header, Query, Request, Response, status
+from fastapi import APIRouter, Query, Request, Response, status
 from pydantic import ValidationError
 
 from app.api.deps import (
@@ -19,7 +19,7 @@ from app.api.deps import (
     StaffClass,
 )
 from app.core.errors import AppError
-from app.core.rate_limit import RateLimiter, Rule, rule
+from app.core.rate_limit import RateLimiter, Rule, rate_limited, rule
 from app.core.security import normalize_link_code
 from app.schemas.auth import (
     AdminCreateUserRequest,
@@ -39,8 +39,6 @@ from app.services import auth as service
 from app.services import school as school_service
 
 router = APIRouter(tags=["auth"])
-
-UserAgent = Annotated[str | None, Header()]
 
 R401 = {401: {"model": ErrorResponse, "description": "Не автентифіковано"}}
 R403 = {403: {"model": ErrorResponse, "description": "Недостатньо прав"}}
@@ -70,13 +68,7 @@ async def _limited[T](
     """Вхід із лімітом невдалих спроб: вичерпаний ключ — 429 з Retry-After, без виклику."""
     retry_after = await limiter.retry_after(rules)
     if retry_after is not None:
-        raise AppError(
-            "RATE_LIMITED",
-            "Too many failed login attempts, try again later",
-            status_code=429,
-            details={"retry_after": retry_after},
-            headers={"Retry-After": str(retry_after)},
-        )
+        raise rate_limited(retry_after, "Too many failed login attempts, try again later")
     try:
         return await call()
     except AppError as exc:
@@ -173,9 +165,7 @@ async def _read_token_request(request: Request) -> TokenRequest:
     },
     responses={400: {"model": ErrorResponse, "description": "INVALID_GRANT / INVALID_REQUEST"}},
 )
-async def token(
-    request: Request, session: Session, settings: SettingsDep, user_agent: UserAgent = None
-) -> TokenResponse:
+async def token(request: Request, session: Session, settings: SettingsDep) -> TokenResponse:
     """Обмін `code` + `code_verifier` на токени або ротація `refresh_token` (RFC 6749).
 
     Тіло: JSON або `application/x-www-form-urlencoded`. Refresh-токен ротується; повтор уже
@@ -195,11 +185,10 @@ async def token(
             client_id=body.client_id,
             redirect_uri=body.redirect_uri,
             settings=settings,
-            user_agent=user_agent,
         )
     if not body.refresh_token:
         raise AppError("INVALID_REQUEST", "refresh_token is required", 400)
-    return await service.refresh_tokens(session, body.refresh_token, settings, user_agent)
+    return await service.refresh_tokens(session, body.refresh_token, settings)
 
 
 @router.post("/auth/logout", status_code=status.HTTP_204_NO_CONTENT)
@@ -229,7 +218,6 @@ async def student_join(
     session: Session,
     settings: SettingsDep,
     limiter: Limiter,
-    user_agent: UserAgent = None,
 ) -> TokenResponse:
     """Вхід учня: код класу + імʼя + прізвище + PIN (4–6 цифр).
 
@@ -263,7 +251,6 @@ async def student_join(
             last_name=body.last_name,
             pin=body.pin,
             settings=settings,
-            user_agent=user_agent,
         ),
     )
 

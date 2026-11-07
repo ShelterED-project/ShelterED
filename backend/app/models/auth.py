@@ -28,7 +28,6 @@ class RefreshToken(Base):
     # Найновіший токен, виданий замість цього (при повторі переставляється на новіший).
     replaced_by_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("refresh_token.id"))
     created_at: Mapped[dt.datetime] = mapped_column(server_default=func.now())
-    user_agent: Mapped[str | None]
     # Версія облікових даних користувача на момент видачі (див. User.token_version).
     token_version: Mapped[int] = mapped_column(default=0, server_default=text("0"))
 

@@ -26,6 +26,7 @@ celery_app = Celery(
         "app.workers.stats",
         "app.workers.sync",
         "app.workers.wellbeing",
+        "app.workers.retention",
     ],
 )
 
@@ -69,6 +70,13 @@ celery_app.conf.update(
         "wellbeing-purge": {
             "task": "wellbeing.purge",
             "schedule": crontab(hour=1, minute=30),
+            "options": {"queue": "default", "expires": 6 * 3600},
+        },
+        # Строки зберігання (app/services/retention.py): щодня о 02:00 UTC. Пропущений запуск
+        # не страшний — наступний прибере все прострочене.
+        "retention-purge": {
+            "task": "retention.purge",
+            "schedule": crontab(hour=2, minute=0),
             "options": {"queue": "default", "expires": 6 * 3600},
         },
     },

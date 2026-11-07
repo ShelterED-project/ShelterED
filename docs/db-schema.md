@@ -102,7 +102,6 @@ UNIQUE (`school_id`, `academic_year`, `name`).
 | name_key | text NULL, індекс | нормалізовані імʼя+прізвище учня для пошуку в класі; у дорослих NULL |
 | token_version | integer NOT NULL default 0 | епоха облікових даних: скидання PIN збільшує; access-токен несе `ver`, refresh-токен зберігає версію |
 | is_active | boolean default true | |
-| last_seen_at | timestamptz NULL | |
 
 CHECK: `role <> 'student' OR (email IS NULL AND password_hash IS NULL)`; `role = 'student' OR pin_hash IS NULL`.
 
@@ -290,18 +289,18 @@ UNIQUE (`lesson_id`, `part`, `position`).
 | client_event_id | uuid PK | створює клієнт; `INSERT ... ON CONFLICT DO NOTHING` |
 | type | text CHECK IN (`module_progress`, `test_attempt`, `rollcall_status`, `survey_answer`) | |
 | user_id | uuid FK → app_user | автор події (учень) |
-| device_id | uuid NOT NULL | id пристрою, який створює клієнт ❓7 |
+| device_id | uuid NULL | id пристрою, який створює клієнт ❓7; NULL — стерто за строком зберігання (180 днів) |
 | occurred_at | timestamptz NOT NULL | годинник пристрою |
 | received_at | timestamptz default now() | годинник сервера |
-| clock_skew_ms | bigint NULL | зсув годинника пристрою з пакета (B9.4) |
-| is_suspicious | boolean default false | час у майбутньому / великий зсув — позначка, не блокування |
+| clock_skew_ms | bigint NULL | зсув годинника пристрою з пакета (B9.4); стирається разом із payload |
+| is_suspicious | boolean default false | час у майбутньому / великий зсув — позначка, не блокування; за строком не стирається |
 | source | text CHECK IN (`online`, `qr`) default `online` | QR — B10 |
 | relayed_by | uuid FK → app_user NULL | вчитель, який передав QR-події (B10.3) |
 | payload | jsonb NOT NULL | |
 | status | text CHECK IN (`accepted`, `rejected`) | |
 | reject_reason | text NULL | |
 
-Індекс: (`user_id`, `received_at`). Курсор для `GET /sync/changes` -- див. «Рішення B9».
+Індекси: (`user_id`, `received_at`); частковий `ix_sync_event_retention` (`received_at`) WHERE `device_id IS NOT NULL` — пакетне прибирання за строком. Курсор для `GET /sync/changes` -- див. «Рішення B9».
 
 ### `attempt`
 Спроба тесту.
@@ -413,7 +412,6 @@ UNIQUE (`lesson_id`, `part`, `position`).
 | replaced_by_id | uuid FK → refresh_token NULL | найновіший токен, виданий замість цього (при повторі переставляється) |
 | token_version | integer NOT NULL default 0 | `app_user.token_version` на момент видачі |
 | created_at | timestamptz default now() | |
-| user_agent | text NULL | без IP-адреси |
 
 ### `auth_code`
 Код авторизації OAuth 2.0 PKCE.
@@ -596,3 +594,28 @@ UNIQUE (`student_id`, `answered_on`) — одна відповідь на ден
 - **Відправка** (Celery, черга `push`): `push.send(payload, key)` визначає одержувачів і ставить `push.deliver(subscription_id, payload, key)` на кожну підписку. 2xx → `last_success_at`; 404/410 → підписка видаляється; 429/5xx/мережа → повтор із відступом 30 с · 2ⁿ (не менше `Retry-After`, не більше 15 хв), до 5 повторів, далі `failed_at`; інші 4xx → `failed_at` без повтору; ключі підписки, якими не зашифрувати payload (p256dh не точка P-256), → підписка видаляється без повторів (при підписці такі ключі вже відхиляються з 422). HTTP-запит іде в потоці й поза транзакцією БД: поля підписки читаються, транзакція закривається, результат пишеться окремою короткою транзакцією (якщо підписку тим часом перевидали з іншим endpoint чи ключами, результат старої відправки її не чіпає).
 - **Ідемпотентність:** ключ повідомлення `key` — за замовчуванням sha256 payload (тривога/відбій класу, пакет), для `rollcall_status` — `rollcall_status:<client_event_id>`. Перед відправкою — Redis `SET NX` на (ключ, підписка) з TTL 24 год (БД `REDIS_URL`); тимчасова помилка знімає ключ перед повтором. Redis недоступний — надсилаємо без дедуплікації (fail-open: дубль тривоги кращий за пропущену). Збій воркера між `SET NX` і відправкою — це повідомлення цій підписці не дійде (актуальний стан клієнт однаково бере з API: `GET /alerts/active`, `GET /students/{id}/rollcall/current`, маніфест пакетів).
 - **Логи:** лише id підписки, хост push-сервісу й HTTP-статус; повний `endpoint`, ключі підписки й VAPID-ключ не логуються. Метрики B8.5 — поки лише в логах (`fan-out: N subscriptions`, відхилення, вичерпані повтори).
+
+## Рішення B15 «Безпека даних» (06.11.2026)
+
+Міграції `cd5251c1640d` (запити на видалення; підтверджені запити — журнал видалень) і `ab864a5a777c` (прибрано `app_user.last_seen_at` і `refresh_token.user_agent` — не читалися; `sync_event.device_id` став NULL; індекс `ix_sync_event_retention`). Інвентаризація даних про дітей і строки зберігання — `docs/data-inventory.md`.
+
+### `data_deletion_request`
+| Поле | Тип | Примітка |
+|---|---|---|
+| id | uuid PK | створює клієнт; повтор — той самий запит |
+| student_id | uuid FK → app_user ON DELETE SET NULL NULL | NULL після видалення учня |
+| student_hash | text NOT NULL | sha256(`student:<id>`): псевдонім учня, лишається після видалення |
+| school_id | uuid FK → school ON DELETE SET NULL NULL | школа учня; рішення — лише адміністрація цієї школи; NULL після видалення школи (запис аудиту лишається) |
+| requested_by | uuid FK → app_user ON DELETE SET NULL NULL | батьки або адміністратор |
+| requested_by_role | text CHECK IN (`parent`, `admin`) | |
+| reason | text NULL CHECK IN (`left_school`, `consent_withdrawn`, `duplicate_account`, `other`) | лише перелік, вільного тексту немає |
+| status | text CHECK IN (`pending`, `confirmed`, `rejected`) default `pending` | |
+| created_at, decided_at | timestamptz | |
+| decided_by | uuid FK → app_user ON DELETE SET NULL NULL | |
+
+Частковий UNIQUE `uq_data_deletion_request_student_id_pending` (`student_id`) WHERE `status = 'pending'` — один відкритий запит на учня. Індекси (`school_id`, `status`), `requested_by`.
+
+- **Видалення:** `POST /deletion-requests/{id}/confirm` видаляє рядок `app_user` учня, решту — каскадом (членство, прив'язки батьків і коди, токени, коди авторизації, push-підписки, `sync_event` → `attempt`, `module_progress`, `rollcall_status`, `wellbeing_*`, агрегати учня); `stats.recompute_class` для його класів. Запит блокується `FOR UPDATE`; повтор підтвердження — той самий результат. Окремого журналу немає: підтверджені запити (без персональних даних, `student_hash`) зберігаються безстроково й переживають видалення школи. `GET /deletion-requests`: адміністрація — запити своєї школи; батьки — запити щодо своїх дітей (і створені школою чи другим із батьків) та власні; автор — лише роллю.
+- **Строки зберігання** (`retention.purge`, crontab 02:00 UTC, ідемпотентно): `sync_event` старші за `RETENTION_SYNC_EVENT_DAYS` (180) — payload `{}`, `device_id` і `clock_skew_ms` NULL (`is_suspicious` лишається), відхилені видаляються; пакетами по 5000 рядків, кожен у своїй транзакції, до 300 с за запуск; `refresh_token` і `auth_code` — через `RETENTION_AUTH_DAYS` (7) після `expires_at` (посилання `replaced_by_id` спершу обнуляються); `parent_link_code` — через `RETENTION_PARENT_LINK_CODE_DAYS` (30) після `expires_at`; `wellbeing_view_log` — `RETENTION_WELLBEING_VIEW_LOG_DAYS` (365). Рядки прийнятих подій лишаються: на них ідемпотентність і FK (`attempt.client_event_id` ON DELETE CASCADE!). Тригер стрічки змін на `sync_event` не стоїть, тож курсор `/sync/changes` не зачіпається.
+- **Заголовки безпеки й ліміти:** без змін схеми — див. `backend/README.md`.
+

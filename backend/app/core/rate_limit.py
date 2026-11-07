@@ -1,4 +1,5 @@
-"""Rate limiting входу (B15.3): захист PIN учня і пароля дорослих від перебору.
+"""Rate limiting (B15.3): вхід (захист PIN учня і пароля дорослих від перебору) і ліміт
+запитів користувача для ШІ-репетитора та QR-ретрансляції (`enforce`).
 
 Рахуються лише **невдалі** спроби (хибний PIN/пароль, невідомий код класу) у фіксованому
 вікні на кожен ключ; коли лічильник досяг ліміту, наступні запити з цим ключем отримують
@@ -25,6 +26,8 @@ from typing import Protocol
 from redis.asyncio import Redis
 from redis.exceptions import RedisError
 
+from app.core.errors import AppError
+
 logger = logging.getLogger(__name__)
 
 
@@ -47,27 +50,58 @@ class RateLimiter(Protocol):
         """Секунди до кінця вікна, якщо хоч один ключ вичерпав ліміт, інакше None."""
         ...
 
-    async def hit(self, rules: list[Rule]) -> None:
-        """Зарахувати невдалу спробу всім ключам."""
+    async def hit(self, rules: list[Rule]) -> int | None:
+        """Атомарно зарахувати спробу всім ключам. Секунди до кінця вікна, якщо після цього
+        хоч один ключ перевищив ліміт (лічильник > `limit`), інакше None."""
         ...
 
 
 # Атомарно для кожного ключа: INCR і TTL вікна в одному скрипті. Окремі `SET NX EX` + `INCR`
 # могли б (ключ прострочився між ними) створити ключ без TTL — вічне блокування. TTL -1
 # (ключ без строку з будь-якої причини) теж лікується: вікно ставиться заново.
+# ARGV: вікна ключів, потім їхні ліміти. Повертає {перевищено (0/1), секунди до кінця вікна}.
 _HIT_SCRIPT = """
+local n_keys = #KEYS
+local over, wait = 0, 0
 for i, key in ipairs(KEYS) do
   local n = redis.call('INCR', key)
-  if n == 1 or redis.call('TTL', key) < 0 then
+  local ttl = redis.call('TTL', key)
+  if n == 1 or ttl < 0 then
     redis.call('EXPIRE', key, ARGV[i])
+    ttl = tonumber(ARGV[i])
+  end
+  if n > tonumber(ARGV[n_keys + i]) then
+    over = 1
+    if ttl > wait then wait = ttl end
   end
 end
-return #KEYS
+return {over, wait}
 """
 
 
+def rate_limited(retry_after: int, message: str = "Too many requests, try again later") -> AppError:
+    """429 `RATE_LIMITED` з `Retry-After` — однаковий для входу й лімітів запитів."""
+    return AppError(
+        "RATE_LIMITED",
+        message,
+        status_code=429,
+        details={"retry_after": retry_after},
+        headers={"Retry-After": str(retry_after)},
+    )
+
+
+async def enforce(limiter: RateLimiter, rules: list[Rule]) -> None:
+    """Ліміт запитів: кожен виклик рахується атомарно (INCR) і отримує свій номер у вікні, тож
+    паралельні запити не проходять понад ліміт; номер понад `limit` — 429 `RATE_LIMITED` з
+    `Retry-After`."""
+    retry_after = await limiter.hit(rules)
+    if retry_after is not None:
+        raise rate_limited(retry_after)
+
+
 class RedisRateLimiter:
-    """Фіксоване вікно в Redis: атомарний Lua-скрипт `INCR` + `EXPIRE` на першій спробі вікна.
+    """Фіксоване вікно в Redis: атомарний Lua-скрипт `INCR` + `EXPIRE` на першій спробі вікна
+    (він же повертає, чи перевищено ліміт).
     Короткі таймаути: повільний Redis не має гальмувати вхід."""
 
     def __init__(self, url: str, timeout_s: float = 0.5) -> None:
@@ -96,11 +130,16 @@ class RedisRateLimiter:
             return None
         return max(wait) if wait else None
 
-    async def hit(self, rules: list[Rule]) -> None:
+    async def hit(self, rules: list[Rule]) -> int | None:
         try:
-            await self._hit(keys=[r.key for r in rules], args=[r.window_s for r in rules])
+            over, wait = await self._hit(
+                keys=[r.key for r in rules],
+                args=[r.window_s for r in rules] + [r.limit for r in rules],
+            )
         except (RedisError, OSError) as exc:
             logger.warning("Rate limiter unavailable, attempt not counted: %s", type(exc).__name__)
+            return None
+        return max(int(wait), 1) if int(over) else None
 
     async def close(self) -> None:
         await self.redis.aclose()
@@ -127,7 +166,11 @@ class MemoryRateLimiter:
                 wait.append(max(int(item[1] - time.monotonic()) + 1, 1))
         return max(wait) if wait else None
 
-    async def hit(self, rules: list[Rule]) -> None:
+    async def hit(self, rules: list[Rule]) -> int | None:
+        wait = []
         for r in rules:
             count, expires = self._get(r.key) or (0, time.monotonic() + r.window_s)
             self.counters[r.key] = (count + 1, expires)
+            if count + 1 > r.limit:
+                wait.append(max(int(expires - time.monotonic()) + 1, 1))
+        return max(wait) if wait else None

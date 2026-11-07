@@ -11,6 +11,7 @@ from app.api import (
     lessons,
     media,
     packs,
+    privacy,
     push,
     rollcall,
     school,
@@ -24,6 +25,7 @@ from app.core.db import get_engine
 from app.core.errors import register_error_handlers
 from app.core.logging import setup_logging
 from app.core.request_id import RequestIdMiddleware
+from app.core.security_headers import SecurityHeadersMiddleware
 from app.schemas.errors import ErrorResponse
 
 
@@ -51,7 +53,11 @@ def create_app() -> FastAPI:
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
-        expose_headers=["X-Request-ID", "ETag"],
+        expose_headers=["X-Request-ID", "ETag", "Retry-After"],
+    )
+    app.add_middleware(
+        SecurityHeadersMiddleware,
+        hsts_max_age_s=settings.hsts_max_age_s if settings.hsts_active else None,
     )
     # Додана останньою — виконується першою, тож request ID є і в CORS-відповідях.
     app.add_middleware(RequestIdMiddleware)
@@ -68,6 +74,7 @@ def create_app() -> FastAPI:
     app.include_router(push.router)
     app.include_router(tutor.router)
     app.include_router(wellbeing.router)
+    app.include_router(privacy.router)
     return app
 
 

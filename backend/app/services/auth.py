@@ -63,7 +63,6 @@ async def issue_tokens(
     settings: Settings,
     *,
     family_id: uuid.UUID | None = None,
-    user_agent: str | None = None,
 ) -> tuple[TokenResponse, RefreshToken]:
     """Видає пару токенів. Commit робить викликач."""
     raw = new_opaque_token()
@@ -72,7 +71,6 @@ async def issue_tokens(
         family_id=family_id or uuid.uuid4(),
         token_hash=hash_token(raw),
         expires_at=_now() + dt.timedelta(days=settings.refresh_token_ttl_days),
-        user_agent=user_agent[:200] if user_agent else None,
         token_version=user.token_version,
     )
     session.add(row)
@@ -95,7 +93,7 @@ async def _revoke_tokens(session: AsyncSession, *criteria) -> None:
 
 
 async def refresh_tokens(
-    session: AsyncSession, raw_token: str, settings: Settings, user_agent: str | None = None
+    session: AsyncSession, raw_token: str, settings: Settings
 ) -> TokenResponse:
     """Ротація refresh-токена.
 
@@ -141,9 +139,7 @@ async def refresh_tokens(
         or user.token_version != row.token_version
     ):
         raise _invalid_grant()
-    response, new_row = await issue_tokens(
-        session, user, settings, family_id=row.family_id, user_agent=user_agent
-    )
+    response, new_row = await issue_tokens(session, user, settings, family_id=row.family_id)
     # Повтор лишає токен «ротованим» з початковим часом; перша ротація ставить час.
     row.replaced_by_id = new_row.id
     if row.rotated_at is None:
@@ -206,7 +202,6 @@ async def exchange_code(
     client_id: str,
     redirect_uri: str | None,
     settings: Settings,
-    user_agent: str | None = None,
 ) -> TokenResponse:
     row = await session.scalar(
         select(AuthCode).where(AuthCode.code_hash == hash_token(code)).with_for_update()
@@ -226,7 +221,7 @@ async def exchange_code(
     user = await session.get(User, row.user_id)
     if user is None or not user.is_active:
         raise _invalid_grant()
-    response, _ = await issue_tokens(session, user, settings, user_agent=user_agent)
+    response, _ = await issue_tokens(session, user, settings)
     await session.commit()
     return response
 
@@ -275,7 +270,7 @@ async def _find_student(session: AsyncSession, class_id: uuid.UUID, key: str) ->
 
 
 async def _login_existing_student(
-    session: AsyncSession, student: User, pin: str, settings: Settings, user_agent: str | None
+    session: AsyncSession, student: User, pin: str, settings: Settings
 ) -> TokenResponse:
     if not student.is_active:
         raise _invalid_credentials()
@@ -298,7 +293,7 @@ async def _login_existing_student(
             raise _invalid_credentials()
     elif pin_hash is None:
         student.pin_hash = new_hash
-    response, _ = await issue_tokens(session, student, settings, user_agent=user_agent)
+    response, _ = await issue_tokens(session, student, settings)
     await session.commit()
     return response
 
@@ -311,7 +306,6 @@ async def student_join(
     last_name: str,
     pin: str,
     settings: Settings,
-    user_agent: str | None = None,
 ) -> TokenResponse:
     # Код класу зберігається у нормалізованому вигляді (normalize_link_code).
     code = normalize_link_code(join_code)
@@ -329,7 +323,7 @@ async def student_join(
     # Наявний учень входить і після завершення терміну коду: він лише обмежує створення нових.
     student = await _find_student(session, class_id, key)
     if student is not None:
-        return await _login_existing_student(session, student, pin, settings, user_agent)
+        return await _login_existing_student(session, student, pin, settings)
     if _join_code_expired(klass):
         # Той самий 401, що й для хибного PIN: не розкриваємо, які імена є в класі.
         await verify_secret_async(pin, None)
@@ -351,7 +345,7 @@ async def student_join(
     if student is not None:
         # Паралельний запит встиг створити учня: звільняємо блокування класу (commit) до argon2.
         await session.commit()
-        return await _login_existing_student(session, student, pin, settings, user_agent)
+        return await _login_existing_student(session, student, pin, settings)
     if _join_code_expired(klass):
         raise _invalid_credentials()
 
@@ -366,7 +360,7 @@ async def student_join(
     session.add(student)
     await session.flush()
     session.add(ClassMembership(class_id=class_id, user_id=student.id, member_role="student"))
-    response, _ = await issue_tokens(session, student, settings, user_agent=user_agent)
+    response, _ = await issue_tokens(session, student, settings)
     await session.commit()
     return response
 

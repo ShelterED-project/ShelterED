@@ -24,6 +24,11 @@ class Settings(BaseSettings):
 
     cors_origins: list[str] = ["http://localhost:5173"]
 
+    # HSTS (B15.2): заголовок лише для запитів, що прийшли по HTTPS (схема від uvicorn
+    # `--proxy-headers`). Увімкнено в prod завжди, деінде — через HSTS_ENABLED.
+    hsts_enabled: bool = False
+    hsts_max_age_s: int = 31536000
+
     # SecretStr: пароль не з'явиться в repr/логах, значення — через .get_secret_value().
     database_url: SecretStr | None = None
     # Міграції Alembic — завжди через direct endpoint Neon.
@@ -109,6 +114,21 @@ class Settings(BaseSettings):
     rate_limit_join_account_all_ips: int = 100
     rate_limit_login_account_all_ips: int = 100
     rate_limit_window_s: int = 900
+    # Ліміти на кількість запитів користувача (рахується кожен запит, не лише невдалий):
+    # ШІ-репетитор — на учня; QR-ретрансляція подій (`POST /sync/events` від вчителя) — на вчителя.
+    rate_limit_tutor: int = 20
+    rate_limit_tutor_window_s: int = 600
+    rate_limit_qr_relay: int = 120
+    rate_limit_qr_relay_window_s: int = 600
+
+    # Строки зберігання (B15.1, docs/data-inventory.md; щоденна задача `retention.purge`).
+    # Журнал подій: payload стирається, відхилені події видаляються (рядки прийнятих лишаються
+    # для ідемпотентності). Має бути значно більшим за горизонт офлайну пристрою.
+    retention_sync_event_days: int = 180
+    # Прострочені refresh-токени й коди авторизації — через N днів після закінчення строку.
+    retention_auth_days: int = 7
+    retention_parent_link_code_days: int = 30
+    retention_wellbeing_view_log_days: int = 365
 
     # Web Push (B8): пара ключів VAPID (`python -m app.cli gen-vapid`) і контакт `mailto:` для
     # push-сервісів. Не задано — відправка пропускається з попередженням у лог.
@@ -129,6 +149,10 @@ class Settings(BaseSettings):
     # Демо-дані (`python -m app.cli seed`): спільний пароль дорослих (≥ 8 символів). Не задано —
     # генерується й друкується один раз при створенні акаунтів.
     seed_password: SecretStr | None = None
+
+    @property
+    def hsts_active(self) -> bool:
+        return self.hsts_enabled or self.environment == "prod"
 
     @property
     def push_enabled(self) -> bool:
