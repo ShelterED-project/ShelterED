@@ -9,13 +9,15 @@ from zoneinfo import ZoneInfo
 import pytest
 from conftest import auth_header
 from httpx import AsyncClient
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from app.core.config import get_settings
 from app.models.lessons import Lesson
 from app.models.packs import KnowledgePack
-from app.models.school import LessonAssignment
+from app.models.school import LessonAssignment, ScheduleOverride
+from app.schemas.school import ExtraLessonCreate
 from app.services import packs as packs_service
+from app.services import school as school_service
 from app.services import sync as sync_service
 from app.services.schedule import to_utc
 
@@ -201,6 +203,27 @@ async def test_extra_lesson_roles_and_rules(
         headers=headers,
     )
     assert {o["id"] for o in overrides.json()} == {cancel_id, body["id"]}
+
+
+async def test_extra_lesson_retry_racing_hard_delete(
+    client: AsyncClient, world, factory, db_session
+) -> None:
+    """Повтор бачить запис, але до вставки його видаляють (тут — перевизначення
+    адміністрації): вставка створює запис знову з перевірками й розміром пакета, без 500."""
+    subject = await factory.subject()
+    lesson = await published_lesson(factory, world.teacher_a, subject)
+    body = extra_body(lesson, MONDAY)
+    headers = auth_header(world.teacher_a)
+    assert (await client.post(url(world), json=body, headers=headers)).status_code == 201
+    # Запис лишається в identity map сесії, а з БД зникає повз ORM (як паралельне видалення).
+    assert await db_session.get(ScheduleOverride, uuid.UUID(body["id"])) is not None
+    await db_session.execute(
+        text("DELETE FROM schedule_override WHERE id = :id"), {"id": body["id"]}
+    )
+    extra, created, size = await school_service.create_extra_lesson(
+        db_session, world.teacher_a, world.class_a, ExtraLessonCreate(**body), get_settings()
+    )
+    assert created and extra.lesson_id == lesson.id and size > 0
 
 
 # ---------- предмет уроку = предмет слота ----------

@@ -614,7 +614,12 @@ async def create_extra_lesson(
         },
         compare=("class_id", "date", "kind", "slot_id", "lesson_id", "starts_at", "ends_at"),
     )
-    if not created:
+    if created and existing is not None:
+        # Запис зник між читанням і вставкою (паралельне видалення), і повтор створив його
+        # знову — перевіряємо як нове створення (вставка відкотиться разом із помилкою).
+        await _schedulable_lesson(session, teacher, body.lesson_id)
+        size = await _check_day_size(session, klass, body.date, body.lesson_id, settings)
+    elif not created:
         size = await lessons_service.pack_size(
             session, await day_lesson_ids(session, klass, body.date)
         )
