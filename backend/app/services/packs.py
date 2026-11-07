@@ -349,8 +349,9 @@ async def _try_build(
             size_bytes=len(raw),
             built_at=now,
             content_gzip=gzip.compress(raw, mtime=0),
-            # Якість 9: майже як 11, але в десятки разів швидше.
-            content_br=brotli.compress(raw, quality=9),
+            # Якість 11 (максимум): пакет збирається один раз у Celery, ~30 мс на демо-пакет;
+            # на демо-даних −15% до gzip проти −9% на якості 9.
+            content_br=brotli.compress(raw, quality=11),
         )
         .on_conflict_do_nothing(constraint="uq_knowledge_pack_version")
         .returning(KnowledgePack.id)
