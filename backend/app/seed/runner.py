@@ -35,7 +35,7 @@ from app.models.school import (
 from app.models.sync import SyncEvent
 from app.seed import content as c
 from app.services import packs as packs_service
-from app.services.auth import name_key
+from app.services.auth import name_key, revoke_all_sessions
 from app.services.lessons import publish_problems
 
 # Простір імен демо-даних: однакові ключі → однакові id при кожному запуску.
@@ -155,9 +155,10 @@ async def _adult_users(
         uid for uid, current in existing.items() if not await verify_secret_async(password, current)
     ]
     for user in (await session.scalars(select(User).where(User.id.in_(stale)))).all():
-        # Нова епоха облікових даних: видані токени зі старим паролем перестають діяти.
+        # Нова епоха облікових даних: видані токени й push-підписки зі старим паролем
+        # перестають діяти.
         user.password_hash = hashed
-        user.token_version += 1
+        await revoke_all_sessions(session, user)
     return generated, True
 
 

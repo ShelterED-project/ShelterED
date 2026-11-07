@@ -297,7 +297,7 @@ async def student_join(
 )
 async def pin_reset(klass: StaffClass, student_id: uuid.UUID, session: Session) -> Response:
     """Скидає PIN учня (вчитель цього класу або адмін школи): наступний вхід задасть новий.
-    Усі сесії учня (access- і refresh-токени) перестають діяти."""
+    Усі сесії учня (access- і refresh-токени) і його push-підписки перестають діяти."""
     await service.reset_student_pin(session, klass, student_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 

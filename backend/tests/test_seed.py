@@ -10,6 +10,7 @@ from app.core.security import verify_secret
 from app.models.alerts import AlertEvent
 from app.models.lessons import Card, Lesson, Module, Question, Subject, Test
 from app.models.packs import KnowledgePack
+from app.models.push import PushSubscription
 from app.models.rollcall import RollCallSession, RollCallStatus
 from app.models.school import (
     ClassMembership,
@@ -73,12 +74,23 @@ async def test_seed_twice_changes_nothing(db_session) -> None:
     assert verify_secret(first.generated_password, admin.password_hash)
 
     # SEED_PASSWORD замінює пароль дорослих і відкликає їхні токени.
+    db_session.add(
+        PushSubscription(
+            user_id=admin.id,
+            endpoint="https://fcm.googleapis.com/fcm/send/seed-admin",
+            p256dh="x",
+            auth="y",
+        )
+    )
+    await db_session.flush()
     third = await seed(db_session, settings, password="demo-password-42")
     assert third.passwords_set and third.generated_password is None
     assert await counts(db_session) == after_first
     await db_session.refresh(admin)
     assert verify_secret("demo-password-42", admin.password_hash)
     assert admin.token_version == 1
+    subs = select(func.count()).select_from(PushSubscription)
+    assert await db_session.scalar(subs.where(PushSubscription.user_id == admin.id)) == 0
 
 
 async def test_seeded_content_shape_and_publish_checks(db_session) -> None:

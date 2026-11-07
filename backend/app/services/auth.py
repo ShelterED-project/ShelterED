@@ -4,7 +4,7 @@ import unicodedata
 import uuid
 from collections.abc import Awaitable, Callable
 
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import load_only
@@ -22,6 +22,7 @@ from app.core.security import (
     verify_secret_async,
 )
 from app.models.auth import AuthCode, ParentLinkCode, RefreshToken
+from app.models.push import PushSubscription
 from app.models.school import ClassMembership, ParentChild, SchoolClass, User
 from app.schemas.auth import TokenResponse
 
@@ -91,6 +92,15 @@ async def _revoke_tokens(session: AsyncSession, *criteria) -> None:
         .where(RefreshToken.revoked_at.is_(None), *criteria)
         .values(revoked_at=_now())
     )
+
+
+async def revoke_all_sessions(session: AsyncSession, user: User) -> None:
+    """Нова епоха облікових даних (скидання PIN чи пароля): живі access-токени, усі
+    refresh-токени й push-підписки користувача перестають діяти. Загублений телефон не
+    отримує більше сповіщень класу; новий вхід підпишеться заново. Без commit."""
+    user.token_version += 1
+    await _revoke_tokens(session, RefreshToken.user_id == user.id)
+    await session.execute(delete(PushSubscription).where(PushSubscription.user_id == user.id))
 
 
 async def refresh_tokens(
@@ -390,10 +400,9 @@ async def reset_student_pin(
     if student is None:
         raise AppError("NOT_FOUND", "Student not found in this class", status_code=404)
     student.pin_hash = None
-    # Нова епоха: живі access-токени й refresh-токени, видані раніше (зокрема паралельними
-    # входами), перестають діяти. PIN могли скинути через компрометацію.
-    student.token_version += 1
-    await _revoke_tokens(session, RefreshToken.user_id == student.id)
+    # Нова епоха: живі access-токени, refresh-токени, видані раніше (зокрема паралельними
+    # входами), і push-підписки перестають діяти. PIN могли скинути через компрометацію.
+    await revoke_all_sessions(session, student)
     await session.commit()
 
 

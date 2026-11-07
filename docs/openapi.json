@@ -10088,7 +10088,7 @@
     },
     "/classes/{class_id}/students/{student_id}/pin-reset": {
       "post": {
-        "description": "Скидає PIN учня (вчитель цього класу або адмін школи): наступний вхід задасть новий.\nУсі сесії учня (access- і refresh-токени) перестають діяти.",
+        "description": "Скидає PIN учня (вчитель цього класу або адмін школи): наступний вхід задасть новий.\nУсі сесії учня (access- і refresh-токени) і його push-підписки перестають діяти.",
         "operationId": "pin_reset_classes__class_id__students__student_id__pin_reset_post",
         "parameters": [
           {
