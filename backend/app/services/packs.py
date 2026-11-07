@@ -30,7 +30,7 @@ from app.core.errors import AppError
 from app.core.storage import MediaStorage
 from app.models.lessons import Card, Lesson, MediaAsset, Module, Question, Test
 from app.models.packs import KnowledgePack, KnowledgePackLesson, KnowledgePackMedia
-from app.models.school import LessonAssignment, ScheduleSlot, SchoolClass
+from app.models.school import SchoolClass
 from app.schemas.lessons import CardOut, ModuleOut, Option
 from app.schemas.packs import (
     MediaManifestItem,
@@ -457,16 +457,16 @@ async def rebuild_class(
 async def classes_with_lesson(
     session: AsyncSession, lesson_id: uuid.UUID, start: dt.date, end: dt.date
 ) -> list[uuid.UUID]:
+    scheduled = school_service.scheduled_lessons()
     rows = await session.scalars(
-        select(ScheduleSlot.class_id)
-        .join(LessonAssignment, LessonAssignment.slot_id == ScheduleSlot.id)
+        select(scheduled.c.class_id)
         .where(
-            LessonAssignment.lesson_id == lesson_id,
-            LessonAssignment.date >= start,
-            LessonAssignment.date <= end,
+            scheduled.c.lesson_id == lesson_id,
+            scheduled.c.date >= start,
+            scheduled.c.date <= end,
         )
         .distinct()
-        .order_by(ScheduleSlot.class_id)
+        .order_by(scheduled.c.class_id)
     )
     return list(rows)
 

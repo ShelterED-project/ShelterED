@@ -28,8 +28,6 @@ from app.models.alerts import AlertEvent
 from app.models.lessons import Lesson, Module, Question, Subject, Test
 from app.models.school import (
     ClassMembership,
-    LessonAssignment,
-    ScheduleSlot,
     School,
     SchoolClass,
     User,
@@ -64,7 +62,7 @@ from app.schemas.stats import (
     StudyTime,
     TestStatusCounts,
 )
-from app.services.school import school_tz
+from app.services.school import scheduled_lessons, school_tz
 
 STUDY_DAYS = 7
 
@@ -78,14 +76,14 @@ async def _lock(session: AsyncSession, key: str) -> None:
 
 
 def _assigned_lessons(class_ids, today: dt.date):
-    """Опубліковані уроки розкладу класів із датою ≤ today."""
+    """Опубліковані уроки розкладу класів (зі слотів і додаткові) із датою ≤ today."""
+    scheduled = scheduled_lessons()
     return (
-        select(LessonAssignment.lesson_id)
-        .join(ScheduleSlot, ScheduleSlot.id == LessonAssignment.slot_id)
-        .join(Lesson, Lesson.id == LessonAssignment.lesson_id)
+        select(scheduled.c.lesson_id)
+        .join(Lesson, Lesson.id == scheduled.c.lesson_id)
         .where(
-            ScheduleSlot.class_id.in_(class_ids),
-            LessonAssignment.date <= today,
+            scheduled.c.class_id.in_(class_ids),
+            scheduled.c.date <= today,
             Lesson.status == "published",
         )
     )
@@ -237,18 +235,18 @@ async def recompute_class(
     today = now.astimezone(tz).date()
 
     students = list(await session.scalars(_class_students(class_id)))
+    scheduled = scheduled_lessons()
     first_dates = dict(
         (
             await session.execute(
-                select(LessonAssignment.lesson_id, func.min(LessonAssignment.date))
-                .join(ScheduleSlot, ScheduleSlot.id == LessonAssignment.slot_id)
-                .join(Lesson, Lesson.id == LessonAssignment.lesson_id)
+                select(scheduled.c.lesson_id, func.min(scheduled.c.date))
+                .join(Lesson, Lesson.id == scheduled.c.lesson_id)
                 .where(
-                    ScheduleSlot.class_id == class_id,
-                    LessonAssignment.date <= today,
+                    scheduled.c.class_id == class_id,
+                    scheduled.c.date <= today,
                     Lesson.status == "published",
                 )
-                .group_by(LessonAssignment.lesson_id)
+                .group_by(scheduled.c.lesson_id)
             )
         ).all()
     )

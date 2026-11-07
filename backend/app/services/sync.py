@@ -43,7 +43,7 @@ from app.core.errors import AppError
 from app.models.lessons import Module, Question, Test
 from app.models.packs import KnowledgePack, KnowledgePackLesson
 from app.models.rollcall import RollCallSession, RollCallStatus
-from app.models.school import ClassMembership, LessonAssignment, ScheduleSlot, User
+from app.models.school import ClassMembership, User
 from app.models.sync import Attempt, ModuleProgress, SyncEvent
 from app.schemas.sync import (
     PAYLOAD_MODELS,
@@ -165,10 +165,9 @@ async def _student_has_lesson(
         .join(KnowledgePack, KnowledgePack.id == KnowledgePackLesson.pack_id)
         .where(KnowledgePack.class_id.in_(classes), KnowledgePackLesson.lesson_id == lesson_id)
     )
-    assigned = (
-        select(LessonAssignment.lesson_id)
-        .join(ScheduleSlot, ScheduleSlot.id == LessonAssignment.slot_id)
-        .where(ScheduleSlot.class_id.in_(classes), LessonAssignment.lesson_id == lesson_id)
+    scheduled = school_service.scheduled_lessons()
+    assigned = select(scheduled.c.lesson_id).where(
+        scheduled.c.class_id.in_(classes), scheduled.c.lesson_id == lesson_id
     )
     return bool(await session.scalar(select(or_(exists(in_pack), exists(assigned)))))
 

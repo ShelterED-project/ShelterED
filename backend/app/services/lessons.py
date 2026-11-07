@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import Settings
 from app.core.errors import AppError
 from app.models.lessons import Card, Lesson, MediaAsset, Module, Question, Subject, Test
-from app.models.school import LessonAssignment, ScheduleSlot, SchoolClass, User
+from app.models.school import SchoolClass, User
 from app.models.sync import ModuleProgress
 from app.schemas.lessons import (
     CardCreate,
@@ -547,16 +547,17 @@ async def publish_problems(
 
     # Урок уже стоїть у розкладі на майбутні дні (публікували раніше): пакет дня не має
     # вирости понад ліміт.
-    today = _now().astimezone(ZoneInfo(DEFAULT_TZ)).date()
-    days = await session.execute(
-        select(ScheduleSlot.class_id, LessonAssignment.date)
-        .join(ScheduleSlot, ScheduleSlot.id == LessonAssignment.slot_id)
-        .where(LessonAssignment.lesson_id == lesson.id, LessonAssignment.date >= today)
-        .distinct()
-        .order_by(LessonAssignment.date, ScheduleSlot.class_id)
-    )
     # Відкладений імпорт: school імпортує цей модуль.
     from app.services import school as school_service
+
+    today = _now().astimezone(ZoneInfo(DEFAULT_TZ)).date()
+    scheduled = school_service.scheduled_lessons()
+    days = await session.execute(
+        select(scheduled.c.class_id, scheduled.c.date)
+        .where(scheduled.c.lesson_id == lesson.id, scheduled.c.date >= today)
+        .distinct()
+        .order_by(scheduled.c.date, scheduled.c.class_id)
+    )
 
     for class_id, day in days:
         klass = await session.get(SchoolClass, class_id)
