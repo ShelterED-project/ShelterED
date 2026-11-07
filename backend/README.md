@@ -120,6 +120,17 @@ celery -A app.workers.celery_app beat -l info
 - `stats.refresh_all` — кожні `STATS_REFRESH_INTERVAL_S` (1 год) перераховує агрегати кабінетів (B14) усіх учнів і класів і навчання під час тривог шкіл (за `STATS_ALERT_LOOKBACK_DAYS`): новий день у розкладі, зміни уроків, пропущені задачі. Після кожного пакета синхронізації з прийнятими подіями API одразу ставить `stats.recompute_student` (рядки учня), а та — відкладений на `STATS_CLASS_DEBOUNCE_S` `stats.recompute_class` (один в очікуванні на клас).
 - `retention.purge` — щодня о 02:00 UTC: строки зберігання (`RETENTION_*`, `docs/data-inventory.md`) — payload `sync_event` старших за 180 днів стирається, відхилені події видаляються; прострочені refresh-токени й коди авторизації (через 7 днів), коди прив'язки батьків (через 30 днів), журнал переглядів «Як ти зараз?» (365 днів).
 
+## Docker-образ
+
+`Dockerfile` збирає один образ (Python 3.13, користувач без root, лише runtime-залежності з `pyproject.toml`, `ENVIRONMENT=prod` за замовчуванням, тож `/docs` вимкнено) для всіх процесів — команду задає compose:
+
+- API: команда за замовчуванням (`uvicorn ... --proxy-headers`), порт 8000, перевірка `GET /health` (живий) і `GET /health/ready` (БД і Redis);
+- міграції перед стартом API: `alembic upgrade head` (потрібен `DATABASE_URL_DIRECT`);
+- воркер: `celery -A app.workers.celery_app worker -Q default,push,sync -l info`;
+- beat (рівно один): `celery -A app.workers.celery_app beat -l info -s /tmp/celerybeat-schedule`.
+
+Обов'язкові змінні: `DATABASE_URL`, `DATABASE_URL_DIRECT` (для міграцій), `JWT_SECRET`, `REDIS_URL`, `REDIS_RESULT_URL`, `RATE_LIMIT_REDIS_URL` (усі три Redis-URL за замовчуванням дивляться на `localhost:6380`, у контейнері їх треба задати), для push — `VAPID_*`. `FORWARDED_ALLOW_IPS` — IP чи підмережа Nginx. Медіа пишуться в `/app/media` — туди монтується том, який роздає Nginx. `.env` в образ не потрапляє (`.dockerignore`).
+
 ## Web Push (VAPID)
 
 Пуші (тривога, відбій, «Рюкзак оновився», статус дитини в перекличці для батьків) підписуються ключами VAPID. Нова пара ключів:
