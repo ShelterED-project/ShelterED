@@ -231,6 +231,9 @@ async def upload(
     stream = _CheckedStream(chunks, mime, limit)
 
     existing = await session.get(MediaAsset, media_id)
+    # Тіло (до 30 МБ) читаємо поза транзакцією: повільне завантаження не має тримати з'єднання
+    # в стані «idle in transaction» (його розірве idle_in_transaction_session_timeout).
+    await session.commit()
     if existing is not None:
         async for _ in stream:  # лише рахуємо хеш, нічого не пишемо
             pass

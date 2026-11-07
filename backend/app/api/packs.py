@@ -133,6 +133,9 @@ async def get_pack(
     klass = await auth_service.get_class(session, pack.class_id)
     if klass is None or not await auth_service.can_access_class(session, user, klass):
         raise AppError("FORBIDDEN", "No access to this class", status_code=403)
+    # Лише читали: завершуємо транзакцію й віддаємо з'єднання в пул до відправки тіла (до 50 МБ
+    # повільною мережею), інакше воно простоює в транзакції й Postgres його розриває.
+    await session.commit()
     etag = f'"{pack.content_hash}"'
     headers = {"ETag": etag, **CACHE_HEADERS}
     if if_none_match and _etag_matches(if_none_match, etag):
