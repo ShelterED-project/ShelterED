@@ -1,5 +1,6 @@
 """Тривоги: опитування API (фейковий провайдер), реакція, ручна кнопка, активні, журнал."""
 
+import asyncio
 import datetime as dt
 import uuid
 from zoneinfo import ZoneInfo
@@ -658,3 +659,206 @@ def test_auto_close_is_scheduled() -> None:
     entry = celery_app.conf.beat_schedule["alerts-auto-close"]
     assert entry["task"] == "alerts.auto_close"
     assert "alerts.auto_close" in celery_app.tasks
+
+
+# ---------- урок почався під час активної тривоги (beat `alerts.lesson_starts`) ----------
+
+WINDOW = dt.timedelta(minutes=2)
+DAY = dt.date(2026, 11, 9)
+
+
+def kyiv(day: dt.date, hour: int, minute: int = 0, second: int = 0) -> dt.datetime:
+    return dt.datetime.combine(day, dt.time(hour, minute, second), tzinfo=KYIV)
+
+
+async def lesson_at(
+    db: AsyncSession, factory, teacher, klass, day: dt.date, start: dt.time, end: dt.time
+) -> Lesson:
+    """Урок у слоті класу на дату `day` (місцевий час школи)."""
+    subject = await factory.subject()
+    slot = ScheduleSlot(
+        class_id=klass.id,
+        subject_id=subject.id,
+        weekday=day.isoweekday(),
+        starts_at=start,
+        ends_at=end,
+        valid_from=day - dt.timedelta(days=7),
+    )
+    lesson = Lesson(
+        subject_id=subject.id,
+        author_id=teacher.id,
+        title="Дроби",
+        shelter_part="Укриття",
+        main_part="Основна",
+        status="published",
+        published_at=now(),
+    )
+    db.add_all([slot, lesson])
+    await db.flush()
+    db.add(LessonAssignment(slot_id=slot.id, date=day, lesson_id=lesson.id))
+    await db.flush()
+    return lesson
+
+
+async def school_alert(db: AsyncSession, school, started_at: dt.datetime) -> AlertEvent:
+    alert = AlertEvent(
+        region_code=school.region_code,
+        school_id=school.id,
+        source="api",
+        external_id=uuid.uuid4().hex[:8],
+        is_drill=False,
+        started_at=started_at,
+    )
+    db.add(alert)
+    await db.flush()
+    return alert
+
+
+NOTHING = {"classes": 0, "pushes": 0}
+ONE = {"classes": 1, "pushes": 1}
+
+
+async def test_lesson_start_during_alert_reacts_once(db_session, factory, world, enqueued) -> None:
+    alert = await school_alert(db_session, world.school, kyiv(DAY, 9, 30))
+    lesson = await lesson_at(
+        db_session, factory, world.teacher_a, world.class_a, DAY, dt.time(10), dt.time(10, 45)
+    )
+
+    # До початку уроку нічого.
+    assert await service.react_lesson_starts(db_session, WINDOW, kyiv(DAY, 9, 59, 30)) == NOTHING
+
+    at = kyiv(DAY, 10, 0, 30)
+    assert await service.react_lesson_starts(db_session, WINDOW, at) == ONE
+    rc = await db_session.scalar(select(RollCallSession))
+    assert rc.class_id == world.class_a.id and rc.alert_event_id == alert.id
+    assert rc.closed_at is None and rc.is_drill is False
+    assert pushes(enqueued) == [
+        {
+            "type": "alert",
+            "class_id": str(world.class_a.id),
+            "alert_id": str(alert.id),
+            "lesson_id": str(lesson.id),
+        }
+    ]
+
+    # Повтор (той самий чи наступний запуск beat) не дублює, навіть коли вчитель уже закрив
+    # перекличку.
+    assert await service.react_lesson_starts(db_session, WINDOW, at) == NOTHING
+    rc.closed_at = kyiv(DAY, 10, 1)
+    await db_session.flush()
+    assert await service.react_lesson_starts(db_session, WINDOW, kyiv(DAY, 10, 1, 30)) == NOTHING
+    assert await count(db_session, RollCallSession) == 1
+    assert len(pushes(enqueued)) == 1
+
+
+async def test_lesson_start_without_alert_does_nothing(
+    db_session, factory, world, enqueued
+) -> None:
+    await lesson_at(
+        db_session, factory, world.teacher_a, world.class_a, DAY, dt.time(10), dt.time(10, 45)
+    )
+    ended = await school_alert(db_session, world.school, kyiv(DAY, 9))
+    ended.ended_at = kyiv(DAY, 9, 50)
+    await db_session.flush()
+    assert await service.react_lesson_starts(db_session, WINDOW, kyiv(DAY, 10, 0, 30)) == NOTHING
+    assert await count(db_session, RollCallSession) == 0
+    assert pushes(enqueued) == []
+
+
+async def test_lesson_started_long_ago_is_not_reacted(db_session, factory, world, enqueued) -> None:
+    await school_alert(db_session, world.school, kyiv(DAY, 9, 30))
+    await lesson_at(
+        db_session, factory, world.teacher_a, world.class_a, DAY, dt.time(10), dt.time(10, 45)
+    )
+    assert await service.react_lesson_starts(db_session, WINDOW, kyiv(DAY, 10, 5)) == NOTHING
+
+
+async def test_class_reacted_at_alert_start_gets_nothing_new(
+    db_session, factory, world, enqueued
+) -> None:
+    for start in (9, 10):
+        await lesson_at(
+            db_session,
+            factory,
+            world.teacher_a,
+            world.class_a,
+            DAY,
+            dt.time(start),
+            dt.time(start, 45),
+        )
+    alert = ProviderAlert(external_id="101", region_code="kyiv", started_at=kyiv(DAY, 9, 10))
+    await service.poll(db_session, FakeProvider([alert]), kyiv(DAY, 9, 10, 30))
+    assert len(pushes(enqueued, "alert")) == 1
+
+    assert await service.react_lesson_starts(db_session, WINDOW, kyiv(DAY, 10, 0, 30)) == NOTHING
+    assert await count(db_session, RollCallSession) == 1
+    assert len(pushes(enqueued)) == 1
+
+
+async def test_manual_alert_reacts_only_for_its_class(db_session, factory, world, enqueued) -> None:
+    manual = AlertEvent(
+        region_code=world.school.region_code,
+        school_id=world.school.id,
+        class_id=world.class_a.id,
+        source="manual",
+        is_drill=True,
+        started_at=kyiv(DAY, 9, 30),
+        created_by=world.teacher_a.id,
+    )
+    db_session.add(manual)
+    await db_session.flush()
+    for klass in (world.class_a, world.class_b):
+        await lesson_at(
+            db_session, factory, world.teacher_a, klass, DAY, dt.time(10), dt.time(10, 45)
+        )
+
+    assert await service.react_lesson_starts(db_session, WINDOW, kyiv(DAY, 10, 0, 30)) == ONE
+    rc = await db_session.scalar(select(RollCallSession))
+    assert rc.class_id == world.class_a.id and rc.alert_event_id == manual.id and rc.is_drill
+    assert [p["class_id"] for p in pushes(enqueued, "alert")] == [str(world.class_a.id)]
+
+
+async def test_lesson_start_on_dst_change_day(db_session, factory, world, enqueued) -> None:
+    # 25.10.2026 о 04:00 Київ переходить на зимовий час (UTC+3 → UTC+2): урок о 09:00 за
+    # Києвом починається о 07:00 UTC, а не о 06:00.
+    day = dt.date(2026, 10, 25)
+    await school_alert(db_session, world.school, dt.datetime(2026, 10, 25, 5, tzinfo=dt.UTC))
+    await lesson_at(
+        db_session, factory, world.teacher_a, world.class_a, day, dt.time(9), dt.time(9, 45)
+    )
+
+    summer_offset = dt.datetime(2026, 10, 25, 6, 0, 30, tzinfo=dt.UTC)
+    assert await service.react_lesson_starts(db_session, WINDOW, summer_offset) == NOTHING
+    start = dt.datetime(2026, 10, 25, 7, 0, 30, tzinfo=dt.UTC)
+    assert await service.react_lesson_starts(db_session, WINDOW, start) == ONE
+
+
+async def test_parallel_lesson_start_runs_react_once(committed, enqueued) -> None:
+    f = committed.factory
+    school = await f.school()
+    klass = await f.klass(school)
+    teacher = await f.teacher(school, klass)
+    await school_alert(committed.session, school, kyiv(DAY, 9, 30))
+    await lesson_at(committed.session, f, teacher, klass, DAY, dt.time(10), dt.time(10, 45))
+    await committed.session.commit()
+
+    at = kyiv(DAY, 10, 0, 30)
+
+    async def run() -> dict[str, int]:
+        async with committed.maker() as db:
+            return await service.react_lesson_starts(db, WINDOW, at)
+
+    results = await asyncio.gather(run(), run())
+    assert sorted(r["classes"] for r in results) == [0, 1]
+    async with committed.maker() as db:
+        assert await count(db, RollCallSession) == 1
+    assert len(pushes(enqueued, "alert")) == 1
+
+
+def test_lesson_starts_is_scheduled() -> None:
+    from app.workers.celery_app import celery_app
+
+    entry = celery_app.conf.beat_schedule["alerts-lesson-starts"]
+    assert entry["task"] == "alerts.lesson_starts"
+    assert entry["schedule"] == 60.0
+    assert "alerts.lesson_starts" in celery_app.tasks

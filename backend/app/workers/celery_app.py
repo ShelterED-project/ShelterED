@@ -18,6 +18,9 @@ settings = get_settings()
 # Як часто beat публікує задачі з `task_outbox`.
 OUTBOX_FLUSH_INTERVAL_S = 30
 
+# Як часто beat шукає уроки, що почалися під час активної тривоги (`alerts.lesson_starts`).
+ALERTS_LESSON_START_INTERVAL_S = 60
+
 # Ліміти часу задач за замовчуванням і для довгих задач (усі класи, прибирання пакетами).
 TASK_SOFT_TIME_LIMIT_S = 300
 LONG_TASK_SOFT_TIME_LIMIT_S = 1800
@@ -86,6 +89,11 @@ celery_app.conf.update(
             "task": "alerts.auto_close",
             "schedule": float(settings.alerts_auto_close_interval_s),
             "options": {"queue": "default", "expires": settings.alerts_auto_close_interval_s},
+        },
+        "alerts-lesson-starts": {
+            "task": "alerts.lesson_starts",
+            "schedule": float(ALERTS_LESSON_START_INTERVAL_S),
+            "options": {"queue": "default", "expires": ALERTS_LESSON_START_INTERVAL_S},
         },
         "packs-refresh": {
             "task": "packs.refresh_all",

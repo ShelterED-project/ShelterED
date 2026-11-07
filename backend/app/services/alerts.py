@@ -1,9 +1,10 @@
 """Тривоги (B7): опитування API, журнал, ручна кнопка, реакція, активні тривоги.
 
 Реакція на початок тривоги: класи, у яких зараз урок → сесія переклички (B12, лише рядок) +
-push «тривога, відкрий урок» з id уроку (B8, лише постановка в чергу). Відбій закриває
-сесії переклички цієї тривоги й ставить push «відбій», якщо клас не покриває інша активна
-тривога (тоді сесія переходить до неї й лишається відкритою).
+push «тривога, відкрий урок» з id уроку (B8, лише постановка в чергу). Та сама реакція — для
+класу, у якого урок почався, коли тривога вже йшла (`react_lesson_starts`, beat щохвилини).
+Відбій закриває сесії переклички цієї тривоги й ставить push «відбій», якщо клас не покриває
+інша активна тривога (тоді сесія переходить до неї й лишається відкритою).
 
 Усі кроки ідемпотентні: повтор опитування, паралельні опитування й повтор ручної тривоги
 не створюють дублів (унікальні індекси + ON CONFLICT DO NOTHING, UPDATE ... WHERE ended_at
@@ -18,7 +19,7 @@ from dataclasses import dataclass, field
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import and_, exists, or_, select, text, update
+from sqlalchemy import and_, exists, func, or_, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -174,10 +175,94 @@ async def react_school_alert(
         _, _, item = await school_service.current_lesson(session, klass, at)
         if item is None:
             continue
-        await open_rollcall(session, klass.id, alert, at)
-        pushes.add("alert", klass.id, alert_id=alert.id, lesson_id=item.lesson_id)
+        await react_class(session, klass.id, alert, at, item.lesson_id, pushes)
         reacted += 1
     return reacted
+
+
+async def react_class(
+    session: AsyncSession,
+    class_id: uuid.UUID,
+    alert: AlertEvent,
+    at: dt.datetime,
+    lesson_id: uuid.UUID | None,
+    pushes: Pushes,
+) -> None:
+    """Реакція класу, у якого йде урок під час тривоги: перекличка + push «тривога, відкрий
+    урок» з id уроку (після commit)."""
+    await open_rollcall(session, class_id, alert, at)
+    pushes.add("alert", class_id, alert_id=alert.id, lesson_id=lesson_id)
+
+
+async def react_lesson_starts(
+    session: AsyncSession, window: dt.timedelta, now: dt.datetime | None = None
+) -> dict[str, int]:
+    """Урок почався, коли тривога вже йшла (beat-задача `alerts.lesson_starts`): класи під
+    активною тривогою (з API — уся школа, ручна — лише її клас), у яких поточний урок почався
+    за останні `window`, отримують ту саму реакцію, що й на початку тривоги (`react_class`).
+
+    Клас, у якого вже є перекличка (відкрита чи закрита) однієї з тривог, що його покривають,
+    пропускається: реакція на старті тривоги, попередній урок або попередній запуск задачі.
+    Перевірка й реакція — під advisory lock класу, тож повтор чи паралельний запуск не дає
+    другої переклички чи push. Справжня тривога має пріоритет над навчальною."""
+    now = now or _now()
+    alerts = list(
+        await session.scalars(
+            select(AlertEvent)
+            .where(AlertEvent.ended_at.is_(None))
+            .order_by(AlertEvent.is_drill, AlertEvent.started_at, AlertEvent.id)
+        )
+    )
+    pushes = Pushes()
+    reacted = 0
+    if alerts:
+        school_ids = {a.school_id for a in alerts if a.class_id is None}
+        class_ids = {a.class_id for a in alerts if a.class_id is not None}
+        classes = await session.scalars(
+            select(SchoolClass)
+            .where(or_(SchoolClass.school_id.in_(school_ids), SchoolClass.id.in_(class_ids)))
+            .order_by(SchoolClass.id)
+        )
+        for klass in list(classes):
+            covering = [
+                a
+                for a in alerts
+                if a.class_id == klass.id or (a.class_id is None and a.school_id == klass.school_id)
+            ]
+            _, _, item = await school_service.current_lesson(session, klass, now)
+            if item is None or not (now - window < item.starts_at_utc <= now):
+                continue
+            key = f"alert-lesson-start:{klass.id}"
+            await session.execute(select(func.pg_advisory_xact_lock(func.hashtextextended(key, 0))))
+            done = await session.scalar(
+                select(
+                    exists().where(
+                        RollCallSession.class_id == klass.id,
+                        RollCallSession.alert_event_id.in_([a.id for a in covering]),
+                    )
+                )
+            )
+            if done:
+                continue
+            # Тривога могла закінчитися після першого читання. FOR SHARE: паралельний відбій
+            # дочекається commit і закриє щойно відкриту перекличку.
+            alert = await session.scalar(
+                select(AlertEvent)
+                .where(AlertEvent.id.in_([a.id for a in covering]), AlertEvent.ended_at.is_(None))
+                .order_by(AlertEvent.is_drill, AlertEvent.started_at, AlertEvent.id)
+                .limit(1)
+                .with_for_update(read=True)
+            )
+            if alert is None:
+                continue
+            await react_class(session, klass.id, alert, now, item.lesson_id, pushes)
+            reacted += 1
+    await session.commit()
+    await pushes.send()
+    result = {"classes": reacted, "pushes": len(pushes.items)}
+    if reacted:
+        logger.info("Lessons started during an alert: %s", result)
+    return result
 
 
 async def _end_alerts(
