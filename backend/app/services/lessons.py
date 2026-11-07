@@ -13,13 +13,13 @@ from collections.abc import Iterable
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import Select, Text, cast, exists, func, or_, select
+from sqlalchemy import Select, Text, cast, delete, exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
 from app.core.errors import AppError
 from app.models.lessons import Card, Lesson, MediaAsset, Module, Question, Subject, Test
-from app.models.school import SchoolClass, User
+from app.models.school import ScheduleOverride, SchoolClass, User
 from app.models.sync import ModuleProgress
 from app.schemas.lessons import (
     CardCreate,
@@ -255,6 +255,13 @@ async def delete_lesson(session: AsyncSession, lesson: Lesson) -> None:
     )
     if await _has_progress(session, Module.lesson_id == lesson.id):
         raise in_use
+    # Надгробки видалених додаткових уроків не тримають урок: після видалення уроку повтор
+    # їхнього створення однаково отримає 404 (уроку немає), а не воскресить урок.
+    await session.execute(
+        delete(ScheduleOverride).where(
+            ScheduleOverride.lesson_id == lesson.id, ScheduleOverride.deleted_at.is_not(None)
+        )
+    )
     async with integrity_errors(session, {"fk_": in_use}):
         await session.delete(lesson)
     await session.commit()

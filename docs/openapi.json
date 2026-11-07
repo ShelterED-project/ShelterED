@@ -9011,6 +9011,16 @@
             },
             "description": "LESSON_NOT_PUBLISHED / ID_CONFLICT"
           },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "EXTRA_LESSON_DELETED: урок із цим id уже видалено (повтор не воскрешає його; приберіть подію з черги)"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -9045,6 +9055,7 @@
     },
     "/classes/{class_id}/schedule/extra-lessons/{extra_id}": {
       "delete": {
+        "description": "Ідемпотентно (відсутній урок — теж 204). Запізнілий повтор створення з цим `id`\nпісля видалення отримує 410 EXTRA_LESSON_DELETED і урок не воскрешає.",
         "operationId": "delete_extra_lesson_classes__class_id__schedule_extra_lessons__extra_id__delete",
         "parameters": [
           {

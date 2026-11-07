@@ -173,6 +173,9 @@ class ScheduleOverride(TimestampMixin, Base):
     # Додатковий урок поза розкладом, який ставить вчитель класу (kind = extra, без слота);
     # час тоді необов'язковий.
     lesson_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("lesson.id"))
+    # Видалений додатковий урок вчителя (надгробок): не показується ніде, а повтор створення
+    # з тим самим id отримує 410 замість воскресіння уроку.
+    deleted_at: Mapped[dt.datetime | None]
 
 
 class LessonAssignment(Base):

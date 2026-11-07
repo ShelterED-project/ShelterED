@@ -344,6 +344,11 @@ async def unassign_lesson(
         **REPEAT,
         **ACCESS,
         409: {"model": ErrorResponse, "description": "LESSON_NOT_PUBLISHED / ID_CONFLICT"},
+        410: {
+            "model": ErrorResponse,
+            "description": "EXTRA_LESSON_DELETED: урок із цим id уже видалено (повтор не "
+            "воскрешає його; приберіть подію з черги)",
+        },
         422: {"model": ErrorResponse, "description": "PACK_DAY_LIMIT_EXCEEDED / VALIDATION_ERROR"},
     },
 )
@@ -381,6 +386,8 @@ async def create_extra_lesson(
 async def delete_extra_lesson(
     klass: TeacherClass, extra_id: uuid.UUID, session: Session
 ) -> Response:
+    """Ідемпотентно (відсутній урок — теж 204). Запізнілий повтор створення з цим `id`
+    після видалення отримує 410 EXTRA_LESSON_DELETED і урок не воскрешає."""
     await service.delete_extra_lesson(session, klass, extra_id)
     await enqueue_rebuild_class(klass.id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

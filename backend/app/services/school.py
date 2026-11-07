@@ -4,7 +4,7 @@ import datetime as dt
 import uuid
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from sqlalchemy import delete, select, union_all
+from sqlalchemy import delete, select, union_all, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
@@ -344,6 +344,7 @@ async def list_overrides(
                 ScheduleOverride.class_id == class_id,
                 ScheduleOverride.date >= date_from,
                 ScheduleOverride.date <= date_to,
+                ScheduleOverride.deleted_at.is_(None),
             )
             .order_by(ScheduleOverride.date, ScheduleOverride.starts_at, ScheduleOverride.id)
         )
@@ -588,8 +589,11 @@ async def create_extra_lesson(
 ) -> tuple[ScheduleOverride, bool, int]:
     """Додатковий урок на дату без слота: перевизначення `extra` з `lesson_id` (предмет —
     предмет уроку). Правила ті самі, що й для прив'язки до слота: опублікований урок своєї
-    школи, пакет дня ≤ ліміту. Ідемпотентно за `id`; (override, created, розмір пакета дня)."""
+    школи, пакет дня ≤ ліміту. Ідемпотентно за `id`; (override, created, розмір пакета дня).
+    `id` видаленого уроку — 410 EXTRA_LESSON_DELETED: запізнілий повтор не воскрешає урок."""
     existing = await session.get(ScheduleOverride, body.id)
+    if existing is not None and existing.deleted_at is not None:
+        raise _extra_lesson_deleted()
     if existing is None:
         lesson = await _schedulable_lesson(session, teacher, body.lesson_id)
         subject_id = lesson.subject_id
@@ -614,6 +618,8 @@ async def create_extra_lesson(
         },
         compare=("class_id", "date", "kind", "slot_id", "lesson_id", "starts_at", "ends_at"),
     )
+    if override.deleted_at is not None:  # видалили між читанням і вставкою
+        raise _extra_lesson_deleted()
     if created and existing is not None:
         # Запис зник між читанням і вставкою (паралельне видалення), і повтор створив його
         # знову — перевіряємо як нове створення (вставка відкотиться разом із помилкою).
@@ -627,17 +633,29 @@ async def create_extra_lesson(
     return override, created, size
 
 
+def _extra_lesson_deleted() -> AppError:
+    return AppError(
+        "EXTRA_LESSON_DELETED",
+        "Extra lesson with this id was deleted; create a new one with a new id",
+        status_code=410,
+    )
+
+
 async def delete_extra_lesson(
     session: AsyncSession, klass: SchoolClass, extra_id: uuid.UUID
 ) -> None:
-    """Ідемпотентно: відсутній урок — теж 204. Інші перевизначення (адміністрації) не чіпає."""
+    """Ідемпотентно: відсутній урок — теж 204. Інші перевизначення (адміністрації) не чіпає.
+    М'яке видалення (`deleted_at`): рядок лишається надгробком для запізнілих повторів."""
     await session.execute(
-        delete(ScheduleOverride).where(
+        update(ScheduleOverride)
+        .where(
             ScheduleOverride.id == extra_id,
             ScheduleOverride.class_id == klass.id,
             ScheduleOverride.kind == "extra",
             ScheduleOverride.lesson_id.is_not(None),
+            ScheduleOverride.deleted_at.is_(None),
         )
+        .values(deleted_at=_now())
     )
     await session.commit()
 
@@ -655,5 +673,5 @@ def scheduled_lessons():
             ScheduleOverride.class_id.label("class_id"),
             ScheduleOverride.date.label("date"),
             ScheduleOverride.lesson_id.label("lesson_id"),
-        ).where(ScheduleOverride.lesson_id.is_not(None)),
+        ).where(ScheduleOverride.lesson_id.is_not(None), ScheduleOverride.deleted_at.is_(None)),
     ).subquery("scheduled_lesson")

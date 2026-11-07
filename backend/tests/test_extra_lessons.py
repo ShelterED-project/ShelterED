@@ -226,6 +226,39 @@ async def test_extra_lesson_retry_racing_hard_delete(
     assert created and extra.lesson_id == lesson.id and size > 0
 
 
+async def test_late_retry_does_not_resurrect_deleted_extra_lesson(
+    client: AsyncClient, world, factory, db_session
+) -> None:
+    subject = await factory.subject()
+    lesson = await published_lesson(factory, world.teacher_a, subject)
+    body = extra_body(lesson, MONDAY)
+    headers = auth_header(world.teacher_a)
+    assert (await client.post(url(world), json=body, headers=headers)).status_code == 201
+    assert (await client.delete(f"{url(world)}/{body['id']}", headers=headers)).status_code == 204
+    # Запізнілий повтор створення з офлайн-черги — 410, урок не повертається.
+    for data in (body, {**body, "starts_at": "10:00:00", "ends_at": "10:45:00"}):
+        resp = await client.post(url(world), json=data, headers=headers)
+        assert resp.status_code == 410, resp.text
+        assert resp.json()["error"]["code"] == "EXTRA_LESSON_DELETED"
+    assert (await client.delete(f"{url(world)}/{body['id']}", headers=headers)).status_code == 204
+    params = {"from": str(MONDAY), "days": 1}
+    sched = await client.get(
+        f"/classes/{world.class_a.id}/schedule", params=params, headers=headers
+    )
+    assert sched.json()["days"][0]["items"] == []
+    overrides = await client.get(
+        f"/classes/{world.class_a.id}/schedule/overrides",
+        params={"from": str(MONDAY), "to": str(MONDAY)},
+        headers=headers,
+    )
+    assert overrides.json() == []
+    assert not await sync_service._student_has_lesson(db_session, world.student_a.id, lesson.id)
+    # Надгробок не заважає зняти урок з публікації й видалити його.
+    resp = await client.post(f"/lessons/{lesson.id}/unpublish", headers=headers)
+    assert resp.status_code == 200, resp.text
+    assert (await client.delete(f"/lessons/{lesson.id}", headers=headers)).status_code == 204
+
+
 # ---------- предмет уроку = предмет слота ----------
 
 
