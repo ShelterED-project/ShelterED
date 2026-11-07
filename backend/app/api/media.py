@@ -35,6 +35,10 @@ _BINARY = {"schema": {"type": "string", "format": "binary"}}
     },
     responses={
         200: {"description": "Повтор того самого файла з тим самим id: наявний запис"},
+        400: {
+            "model": ErrorResponse,
+            "description": "INVALID_IMAGE (пошкоджене), IMAGE_TOO_LARGE (забагато пікселів)",
+        },
         **ACCESS,
         409: {"model": ErrorResponse, "description": "ID_CONFLICT: інший файл під цим id"},
         413: {"model": ErrorResponse, "description": "MEDIA_TOO_LARGE"},
@@ -58,7 +62,9 @@ async def upload_media(
 
     Дозволено: відео `video/mp4`, `video/webm` (≤ 30 МБ); зображення `image/jpeg`, `image/png`,
     `image/webp` (≤ 2 МБ); субтитри `text/vtt` у UTF-8 (≤ 200 КБ). Вміст перевіряється за
-    сигнатурою. Відео без субтитрів не пройде публікацію уроку: прив'яжіть VTT через
+    сигнатурою. Зображення зберігаються як WebP (довша сторона ≤ 1280 px, без EXIF/GPS), якщо
+    так менше або в оригіналі є метадані: `mime_type`, `size_bytes`, `sha256` і `url` у відповіді
+    описують збережений файл. Відео без субтитрів не пройде публікацію уроку: прив'яжіть VTT через
     `PATCH /media/{id}`.
     """
     media, created = await service.upload(

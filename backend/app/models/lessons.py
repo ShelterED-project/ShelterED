@@ -77,7 +77,10 @@ class MediaAsset(TimestampMixin, Base):
     storage_key: Mapped[str] = mapped_column(unique=True)
     mime_type: Mapped[str]
     size_bytes: Mapped[int] = mapped_column(BigInteger)
+    # sha256 збереженого файла (що роздається за URL); source_sha256 — файла, який надіслав
+    # клієнт, для ідемпотентності повтору (зображення перекодовуються у WebP, див. services/media).
     sha256: Mapped[str]
+    source_sha256: Mapped[str]
     duration_s: Mapped[int | None]
     # VTT до відео; публікація відео без субтитрів заборонена (перевіряє сервіс).
     subtitles_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("media_asset.id"))

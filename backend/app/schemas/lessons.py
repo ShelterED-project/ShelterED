@@ -349,9 +349,9 @@ class LessonOut(LessonSummary):
 class MediaOut(BaseModel):
     id: uuid.UUID
     kind: Literal["video", "image", "subtitles"]
-    mime_type: str
+    mime_type: str = Field(description="Тип збереженого файла (зображення зазвичай image/webp)")
     size_bytes: int
-    sha256: str
+    sha256: str = Field(description="sha256 збереженого файла (того, що за `url`)")
     duration_s: int | None
     subtitles_id: uuid.UUID | None = Field(description="VTT-субтитри до відео")
     url: str = Field(description="URL файла (роздає Nginx)")

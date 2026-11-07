@@ -37,6 +37,7 @@ async def media(db, world, kind: str, mime: str, size: int, **kw) -> MediaAsset:
         mime_type=mime,
         size_bytes=size,
         sha256="ab" * 32,
+        source_sha256="ab" * 32,
         uploaded_by=world.teacher_a.id,
         **kw,
     )

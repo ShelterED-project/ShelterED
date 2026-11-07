@@ -278,6 +278,7 @@ async def test_publish_size_limit(client: AsyncClient, world, factory) -> None:
         mime_type="image/png",
         size_bytes=51 * 1024 * 1024,
         sha256="0" * 64,
+        source_sha256="0" * 64,
         uploaded_by=world.teacher_a.id,
     )
     factory.session.add(media)

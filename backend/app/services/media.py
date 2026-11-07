@@ -3,14 +3,28 @@
 Файл іде потоком: розмір перевіряється на льоту, у пам'яті лише поточний шматок.
 Тип перевіряється двічі: заголовок Content-Type і сигнатура (magic bytes) на початку файла.
 Ім'я файла від клієнта ніколи не використовується: ключ сховища генерує сервер.
+
+Зображення після прийому перекодовуються у WebP (див. `_to_webp`): довша сторона ≤ 1280 px,
+орієнтація з EXIF застосована, метадані (EXIF, GPS, XMP) прибрані — це фото зі школи.
+
+Два хеші в `MediaAsset`:
+- `sha256` — хеш збереженого файла, тобто того, що роздається за `url` (його бачить клієнт
+  у маніфесті пакета й може звірити завантажене);
+- `source_sha256` — хеш файла, який надіслав клієнт. За ним перевіряється ідемпотентність:
+  повтор того самого файла під тим самим `media_id` → наявний запис, без повторного перекодування.
+Для відео й субтитрів вони однакові.
 """
 
 import codecs
 import hashlib
+import io
+import math
 import secrets
 import uuid
 from collections.abc import AsyncIterable, AsyncIterator
 
+import anyio
+from PIL import Image, ImageOps
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -66,6 +80,58 @@ def _too_large(limit: int) -> AppError:
 
 def _invalid(message: str) -> AppError:
     return AppError("INVALID_MEDIA", message, status_code=422)
+
+
+def _bad_image() -> AppError:
+    return AppError("INVALID_IMAGE", "Image is corrupt or unsupported", status_code=400)
+
+
+def _too_many_pixels(limit: int) -> AppError:
+    return AppError(
+        "IMAGE_TOO_LARGE",
+        "Image has too many pixels",
+        status_code=400,
+        details={"max_pixels": limit},
+    )
+
+
+def _to_webp(data: bytes, max_side: int, quality: int, max_pixels: int) -> bytes | None:
+    """WebP-версія зображення або None, якщо краще лишити оригінал.
+
+    Оригінал лишається, лише коли WebP не менший і в оригіналі немає EXIF/XMP: файл із
+    метаданими (можливо, GPS) не зберігаємо ніколи. Блокуючий код — викликати в потоці.
+    """
+    try:
+        with Image.open(io.BytesIO(data)) as img:
+            width, height = img.size
+            # Розмір з заголовка — до декодування пікселів.
+            if width * height > max_pixels:
+                raise _too_many_pixels(max_pixels)
+            has_metadata = bool(img.getexif()) or any(
+                k in img.info for k in ("xmp", "XML:com.adobe.xmp")
+            )
+            icc_profile = img.info.get("icc_profile")
+            scale = min(1.0, max_side / max(width, height))
+            # JPEG декодується одразу в зменшеному масштабі (1/2, 1/4, 1/8) — менше пам'яті.
+            img.draft("RGB", (math.ceil(width * scale), math.ceil(height * scale)))
+            out = ImageOps.exif_transpose(img)
+            out.thumbnail((max_side, max_side), Image.Resampling.LANCZOS)  # не збільшує
+            out = out.convert("RGBA" if out.has_transparency_data else "RGB")
+            buf = io.BytesIO()
+            # exif/xmp не передаємо — у WebP вони не потрапляють; ICC лишаємо заради кольорів.
+            out.save(buf, "WEBP", quality=quality, icc_profile=icc_profile)
+    except Image.DecompressionBombError as exc:
+        raise _too_many_pixels(max_pixels) from exc
+    except (OSError, ValueError, SyntaxError, EOFError) as exc:  # пошкоджений чи обрізаний файл
+        raise _bad_image() from exc
+    webp = buf.getvalue()
+    if len(webp) >= len(data) and not has_metadata:
+        return None
+    return webp
+
+
+async def _once(data: bytes) -> AsyncIterator[bytes]:
+    yield data
 
 
 def parse_content_type(kind: str, content_type: str | None) -> str:
@@ -164,11 +230,12 @@ async def upload(
             pass
         diff = [
             name
+            # mime_type не порівнюємо: збережений файл міг стати WebP, а однаковий вміст
+            # (source_sha256) з перевіреною сигнатурою й так означає однаковий тип.
             for name, ours, theirs in (
                 ("uploaded_by", user.id, existing.uploaded_by),
                 ("kind", kind, existing.kind),
-                ("mime_type", mime, existing.mime_type),
-                ("sha256", stream.sha.hexdigest(), existing.sha256),
+                ("source_sha256", stream.sha.hexdigest(), existing.source_sha256),
             )
             if ours != theirs
         ]
@@ -176,15 +243,37 @@ async def upload(
             raise id_conflict(diff)
         return existing, False
 
-    key = f"{kind}/{media_id}-{secrets.token_hex(4)}.{MEDIA_TYPES[kind][mime]}"
-    await storage.save(key, stream)
+    key_base = f"{kind}/{media_id}-{secrets.token_hex(4)}"
+    if kind == "image":
+        # Зображення ≤ media_max_image_bytes: спершу приймаємо й перевіряємо цілим, потім
+        # перекодовуємо в потоці, щоб не блокувати event loop.
+        data = b"".join([chunk async for chunk in stream])
+        source_sha = stream.sha.hexdigest()
+        webp = await anyio.to_thread.run_sync(
+            _to_webp,
+            data,
+            settings.media_image_max_side,
+            settings.media_image_webp_quality,
+            settings.media_image_max_pixels,
+        )
+        if webp is not None:
+            data, mime = webp, "image/webp"
+        key = f"{key_base}.{MEDIA_TYPES[kind][mime]}"
+        await storage.save(key, _once(data))
+        size, sha = len(data), hashlib.sha256(data).hexdigest()
+    else:
+        key = f"{key_base}.{MEDIA_TYPES[kind][mime]}"
+        await storage.save(key, stream)
+        size, sha = stream.size, stream.sha.hexdigest()
+        source_sha = sha
     values = {
         "id": media_id,
         "kind": kind,
         "storage_key": key,
         "mime_type": mime,
-        "size_bytes": stream.size,
-        "sha256": stream.sha.hexdigest(),
+        "size_bytes": size,
+        "sha256": sha,
+        "source_sha256": source_sha,
         "uploaded_by": user.id,
     }
     try:
@@ -192,7 +281,7 @@ async def upload(
             session,
             MediaAsset,
             values,
-            compare=["uploaded_by", "kind", "mime_type", "sha256"],
+            compare=["uploaded_by", "kind", "source_sha256"],
         )
         if created:
             await session.commit()

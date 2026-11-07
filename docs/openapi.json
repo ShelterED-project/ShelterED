@@ -2104,10 +2104,12 @@
             "type": "string"
           },
           "mime_type": {
+            "description": "Тип збереженого файла (зображення зазвичай image/webp)",
             "title": "Mime Type",
             "type": "string"
           },
           "sha256": {
+            "description": "sha256 збереженого файла (того, що за `url`)",
             "title": "Sha256",
             "type": "string"
           },
@@ -11589,7 +11591,7 @@
         ]
       },
       "put": {
-        "description": "Вчитель завантажує файл потоком. `id` генерує клієнт; повтор ідемпотентний.\n\nДозволено: відео `video/mp4`, `video/webm` (≤ 30 МБ); зображення `image/jpeg`, `image/png`,\n`image/webp` (≤ 2 МБ); субтитри `text/vtt` у UTF-8 (≤ 200 КБ). Вміст перевіряється за\nсигнатурою. Відео без субтитрів не пройде публікацію уроку: прив'яжіть VTT через\n`PATCH /media/{id}`.",
+        "description": "Вчитель завантажує файл потоком. `id` генерує клієнт; повтор ідемпотентний.\n\nДозволено: відео `video/mp4`, `video/webm` (≤ 30 МБ); зображення `image/jpeg`, `image/png`,\n`image/webp` (≤ 2 МБ); субтитри `text/vtt` у UTF-8 (≤ 200 КБ). Вміст перевіряється за\nсигнатурою. Зображення зберігаються як WebP (довша сторона ≤ 1280 px, без EXIF/GPS), якщо\nтак менше або в оригіналі є метадані: `mime_type`, `size_bytes`, `sha256` і `url` у відповіді\nописують збережений файл. Відео без субтитрів не пройде публікацію уроку: прив'яжіть VTT через\n`PATCH /media/{id}`.",
         "operationId": "upload_media_media__media_id__put",
         "parameters": [
           {
@@ -11704,6 +11706,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "INVALID_IMAGE (пошкоджене), IMAGE_TOO_LARGE (забагато пікселів)"
           },
           "401": {
             "content": {
