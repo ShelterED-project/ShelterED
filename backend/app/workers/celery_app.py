@@ -8,10 +8,15 @@ from celery.schedules import crontab
 from kombu import Queue
 
 from app.core.config import get_settings
+from app.core.db import standalone_session
+from app.models.outbox import TaskOutbox
 
 logger = logging.getLogger(__name__)
 
 settings = get_settings()
+
+# Як часто beat публікує задачі з `task_outbox`.
+OUTBOX_FLUSH_INTERVAL_S = 30
 
 # Ліміти часу задач за замовчуванням і для довгих задач (усі класи, прибирання пакетами).
 TASK_SOFT_TIME_LIMIT_S = 300
@@ -35,6 +40,7 @@ celery_app = Celery(
         "app.workers.sync",
         "app.workers.wellbeing",
         "app.workers.retention",
+        "app.workers.outbox",
     ],
 )
 
@@ -65,6 +71,12 @@ celery_app.conf.update(
     # Періодичні задачі (процес `celery beat`). expires: прострочений запуск (воркер
     # лежав) не виконується пачкою — наступний однаково прийде за розкладом.
     beat_schedule={
+        # Задачі, які не вдалося поставити, поки брокер лежав (`task_outbox`).
+        "outbox-flush": {
+            "task": "outbox.flush",
+            "schedule": float(OUTBOX_FLUSH_INTERVAL_S),
+            "options": {"queue": "default", "expires": OUTBOX_FLUSH_INTERVAL_S},
+        },
         "alerts-poll": {
             "task": "alerts.poll",
             "schedule": float(settings.alerts_poll_interval_s),
@@ -132,11 +144,23 @@ async def enqueue(
     """Ставить задачу в чергу за іменем (без імпорту модуля задачі).
 
     Викликається ПІСЛЯ commit. `send_task` блокує (мережа до Redis, повтори), тож іде в пулі
-    потоків, а не в циклі подій. Недоступний брокер не ламає вже збережену зміну: помилка
-    логується, а наслідки підбирає повтор (ідемпотентні задачі, періодичні перезбірки,
-    `GET /alerts/active` як запасний шлях для push).
+    потоків, а не в циклі подій. Недоступний брокер не ламає вже збережену зміну й не губить
+    задачу: вона записується в `task_outbox`, і beat-задача `outbox.flush` опублікує її, щойно
+    брокер повернеться (задачі ідемпотентні, повтор безпечний). Відкладення (`countdown`)
+    при цьому не зберігається: задача з outbox іде одразу.
     """
+    args = args or []
     try:
-        await anyio.to_thread.run_sync(partial(_send, name, args or [], queue, options))
+        await anyio.to_thread.run_sync(partial(_send, name, args, queue, options))
     except Exception:
-        logger.exception("Failed to enqueue task %s", name)
+        logger.exception("Failed to enqueue task %s, storing it in the outbox", name)
+        try:
+            await _store_in_outbox(name, args, queue)
+        except Exception:
+            logger.exception("Failed to store task %s in the outbox", name)
+
+
+async def _store_in_outbox(name: str, args: list[Any], queue: str) -> None:
+    async with standalone_session() as session:
+        session.add(TaskOutbox(task_name=name, args=args, queue=queue))
+        await session.commit()

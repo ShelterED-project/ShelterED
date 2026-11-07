@@ -19,6 +19,8 @@
 - `parent_link_code`: через `RETENTION_PARENT_LINK_CODE_DAYS` (30) після закінчення строку
   (використаний чи ні).
 - `wellbeing_view_log`: `RETENTION_WELLBEING_VIEW_LOG_DAYS` (365).
+- `task_outbox`: опубліковані задачі — через `OUTBOX_SENT_DAYS` (1) після публікації
+  (неопубліковані лишаються, доки їх не опублікує `outbox.flush`).
 
 Сирі відповіді «Як ти зараз?» (30 днів) прибирає окрема задача `wellbeing.purge`.
 """
@@ -31,11 +33,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
 from app.models.auth import AuthCode, ParentLinkCode, RefreshToken
+from app.models.outbox import TaskOutbox
 from app.models.sync import SyncEvent
 from app.models.wellbeing import WellbeingViewLog
 
 SYNC_EVENT_BATCH = 5000
 SYNC_EVENT_MAX_S = 300.0
+OUTBOX_SENT_DAYS = 1
 
 
 def _days(n: int) -> dt.timedelta:
@@ -121,5 +125,9 @@ async def purge(
         )
     )
     counts["wellbeing_view_log"] = result.rowcount or 0
+    result = await session.execute(
+        delete(TaskOutbox).where(TaskOutbox.sent_at < now - _days(OUTBOX_SENT_DAYS))
+    )
+    counts["task_outbox"] = result.rowcount or 0
     await session.commit()
     return counts

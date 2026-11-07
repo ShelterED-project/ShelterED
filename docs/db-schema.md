@@ -437,6 +437,18 @@ UNIQUE (`lesson_id`, `part`, `position`).
 | used_at | timestamptz NULL | одноразовий |
 | used_by | uuid FK → app_user ON DELETE SET NULL | батьки, які ввели код |
 
+### `task_outbox`
+Задачі Celery, які `enqueue` не зміг поставити (брокер недоступний); публікує beat-задача `outbox.flush` (кожні 30 с).
+| Поле | Тип | Примітка |
+|---|---|---|
+| id | uuid PK | |
+| task_name | text NOT NULL | ім'я задачі (`push.send`, `sync.regrade_test`, ...) |
+| args | jsonb NOT NULL | аргументи задачі (лише id і коди) |
+| queue | text NOT NULL | черга Celery |
+| created_at | timestamptz default now() | частковий індекс `ix_task_outbox_pending` WHERE `sent_at IS NULL` |
+| attempts | integer NOT NULL default 0 | невдалі спроби публікації |
+| sent_at | timestamptz NULL | опубліковано; такі рядки видаляє `retention.purge` через 1 день |
+
 ---
 
 ## Поза B2 (з'явиться у своїх епіках)
