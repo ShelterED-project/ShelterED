@@ -27,6 +27,10 @@ class Settings(BaseSettings):
 
     cors_origins: list[str] = ["http://localhost:5173"]
 
+    # Найбільше тіло запиту (крім потокового завантаження медіа з власними лімітами), байти.
+    # Пакет синхронізації зі 100 подій і урок з довгими текстами — сотні КБ.
+    max_request_body_bytes: int = 1024 * 1024
+
     # HSTS (B15.2): заголовок лише для запитів, що прийшли по HTTPS (схема від uvicorn
     # `--proxy-headers`). Увімкнено в prod завжди, деінде — через HSTS_ENABLED.
     hsts_enabled: bool = False
