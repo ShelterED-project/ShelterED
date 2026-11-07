@@ -536,3 +536,44 @@ async def test_alert_journal(client: AsyncClient, db_session, world) -> None:
     assert {r["id"] for r in other_admin.json()}.isdisjoint(set(ids.values()))
     forbidden = await client.get("/alerts", headers=auth_header(world.teacher_a))
     assert forbidden.status_code == 403
+
+
+async def test_alert_adopts_manual_and_drill_rollcall(
+    client: AsyncClient, db_session, factory, world, enqueued
+) -> None:
+    """Справжня тривога забирає відкриту перекличку без тривоги (ручний старт) чи навчальну:
+    сесія стає не навчальною, а відбій тривоги її закриває."""
+    await lesson_now(factory, world, world.class_a)
+    h = auth_header(world.teacher_a)
+    manual_id = str(uuid.uuid4())
+    started = await client.post(
+        f"/classes/{world.class_a.id}/rollcall", json={"id": manual_id, "is_drill": True}, headers=h
+    )
+    assert started.status_code == 201, started.text
+
+    provider = FakeProvider([api_alert()])
+    await service.poll(db_session, provider)
+    row = await db_session.get(RollCallSession, uuid.UUID(manual_id), populate_existing=True)
+    assert row.is_drill is False and row.alert_event_id is not None
+    assert await count(db_session, RollCallSession) == 1
+
+    provider.alerts = []
+    await service.poll(db_session, provider)
+    await db_session.refresh(row)
+    assert row.closed_at is not None
+    assert [p["class_id"] for p in pushes(enqueued, "all_clear")] == [str(world.class_a.id)]
+
+    # Навчальна ручна тривога не забирає сесію справжньої, а справжня — забирає навчальну.
+    drill = await client.post("/alerts/manual", json=manual_body(world.class_a), headers=h)
+    assert drill.status_code == 201
+    await service.poll(db_session, FakeProvider([api_alert("202")]))
+    open_row = await db_session.scalar(
+        select(RollCallSession)
+        .where(RollCallSession.closed_at.is_(None))
+        .execution_options(populate_existing=True)
+    )
+    assert open_row.is_drill is False and open_row.alert_event_id != uuid.UUID(drill.json()["id"])
+    second = await client.post("/alerts/manual", json=manual_body(world.class_a), headers=h)
+    assert second.status_code == 201
+    await db_session.refresh(open_row)
+    assert open_row.is_drill is False

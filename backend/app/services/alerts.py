@@ -87,7 +87,25 @@ async def open_rollcall(
         .on_conflict_do_nothing(index_elements=["class_id"], index_where=text("closed_at IS NULL"))
         .returning(RollCallSession.id)
     )
-    return await session.scalar(stmt) is not None
+    if await session.scalar(stmt) is not None:
+        return True
+    # Відкрита сесія вже є. Ручна перекличка вчителя (без тривоги) чи сесія навчальної тривоги
+    # переходить до справжньої тривоги: інакше під час тривоги перекличка лишалася б
+    # «навчальною», а відбій її не закрив би (закриваються лише сесії тривоги). Відмітки учнів
+    # зберігаються.
+    adopt = RollCallSession.alert_event_id.is_(None)
+    if not alert.is_drill:
+        adopt = or_(adopt, RollCallSession.is_drill)
+    await session.execute(
+        update(RollCallSession)
+        .where(
+            RollCallSession.class_id == class_id,
+            RollCallSession.closed_at.is_(None),
+            adopt,
+        )
+        .values(alert_event_id=alert.id, is_drill=alert.is_drill)
+    )
+    return False
 
 
 async def _covering_alert(
