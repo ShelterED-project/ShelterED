@@ -228,7 +228,8 @@ async def student_join(
 
     Захист від перебору PIN: невдалі спроби обмежені на пару IP + (код класу + ім'я), на IP і
     високим загальним лімітом на (код класу + ім'я) з усіх IP (`RATE_LIMIT_JOIN_*` за
-    `RATE_LIMIT_WINDOW_S`); понад ліміт — 429 з `Retry-After`.
+    `RATE_LIMIT_WINDOW_S`) і добовим лімітом на (код класу + ім'я) з усіх IP
+    (`RATE_LIMIT_JOIN_ACCOUNT_DAILY`); понад ліміт — 429 з `Retry-After`.
     Блокування акаунта немає: однокласник, що вводить чужий PIN, блокує лише себе (свій IP),
     а справжній учень входить з іншого пристрою/IP; ліміт знімається сам після вікна.
     """
@@ -240,6 +241,12 @@ async def student_join(
         rule("join:acct", f"{ip}\n{account}", settings.rate_limit_join_account, window),
         rule("join:ip", ip, settings.rate_limit_join_ip, window),
         rule("join:acct_all", account, settings.rate_limit_join_account_all_ips, window),
+        rule(
+            "join:acct_day",
+            account,
+            settings.rate_limit_join_account_daily,
+            settings.rate_limit_daily_window_s,
+        ),
     ]
     return await _limited(
         limiter,
