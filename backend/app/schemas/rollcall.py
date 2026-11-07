@@ -83,7 +83,9 @@ _SESSION_EXAMPLE = {
 class RollCallSessionOut(BaseModel):
     id: uuid.UUID
     class_id: uuid.UUID
-    alert_event_id: uuid.UUID | None = Field(description="null — відкрита вчителем вручну")
+    alert_event_id: uuid.UUID | None = Field(
+        description="null — відкрита вчителем вручну поза тривогою"
+    )
     is_drill: bool
     opened_at: dt.datetime
     closed_at: dt.datetime | None

@@ -7,6 +7,7 @@ import uuid
 import pytest
 from conftest import auth_header, pushes
 from httpx import AsyncClient
+from sqlalchemy import select
 
 pytestmark = pytest.mark.anyio
 
@@ -197,6 +198,44 @@ async def test_alert_opens_session_student_marks_teacher_sees(client, world, enq
     assert (await mark(client, world.student_a, sid, "in_shelter"))["status"] == "accepted"
     session = (await client.get(url, headers=auth_header(world.teacher_a))).json()["session"]
     assert session["summary"]["in_shelter"] == 1
+
+
+async def test_manual_start_during_alert_belongs_to_alert_and_closes_with_all_clear(
+    client, world, db_session, enqueued
+) -> None:
+    """Тривога з API почалась на перерві (переклички немає), вчитель відкриває її вручну:
+    сесія належить тривозі, тож відбій її закриває й шле `all_clear`, а не лишає відкритою
+    зі старими відмітками до наступної тривоги."""
+    from app.models.alerts import AlertEvent
+    from app.services import alerts as alerts_service
+    from app.services.alert_provider import ActiveAlerts, AlertProvider, ProviderAlert
+
+    class Provider(AlertProvider):
+        name = "alerts.in.ua"
+        alerts: list[ProviderAlert] = []
+
+        async def active_alerts(self) -> ActiveAlerts:
+            return ActiveAlerts(list(self.alerts), complete=True)
+
+    provider = Provider()
+    provider.alerts = [ProviderAlert("777", "kyiv", now() - dt.timedelta(minutes=5))]
+    await alerts_service.poll(db_session, provider)
+    alert = await db_session.scalar(
+        select(AlertEvent).where(AlertEvent.school_id == world.school.id)
+    )
+    r = await start(client, world.teacher_a, world.class_a)
+    assert r.status_code == 201, r.text
+    assert r.json()["alert_event_id"] == str(alert.id)
+    # Навчальна перекличка під час справжньої тривоги до неї не прив'язується.
+    r_b = await start(client, world.teacher_b, world.class_b, is_drill=True)
+    assert r_b.json()["alert_event_id"] is None
+    await mark(client, world.student_a, r.json()["id"], "in_shelter")
+
+    provider.alerts = []
+    await alerts_service.poll(db_session, provider)
+    url = f"/classes/{world.class_a.id}/rollcall/current"
+    assert (await client.get(url, headers=auth_header(world.teacher_a))).json()["session"] is None
+    assert [p["class_id"] for p in pushes(enqueued, "all_clear")] == [str(world.class_a.id)]
 
 
 # ---------- push батькам при зміні статусу (B12.4) ----------
