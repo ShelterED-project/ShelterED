@@ -35,6 +35,7 @@ from app.services.alert_provider import AlertProvider, AlertProviderError, Alert
 from app.services.idempotency import insert_or_get
 from app.services.schedule import DEFAULT_TZ
 from app.workers.push import enqueue_push
+from app.workers.stats import enqueue_recompute_alert_study
 
 logger = logging.getLogger(__name__)
 
@@ -51,9 +52,11 @@ def _now() -> dt.datetime:
 
 @dataclass
 class Pushes:
-    """Push, які треба поставити в чергу після commit."""
+    """Push і задачі, які треба поставити в чергу після commit: push, а також перерахунок
+    навчання під час тривог шкіл, де був відбій."""
 
     items: list[dict[str, Any]] = field(default_factory=list)
+    ended_schools: set[uuid.UUID] = field(default_factory=set)
 
     def add(self, push_type: str, class_id: uuid.UUID, **ids: Any) -> None:
         self.items.append({"push_type": push_type, "class_id": class_id, **ids})
@@ -61,6 +64,8 @@ class Pushes:
     async def send(self) -> None:
         for item in self.items:
             await enqueue_push(**item)
+        for school_id in sorted(self.ended_schools):
+            await enqueue_recompute_alert_study(school_id)
 
 
 # ---------- реакція на тривогу ----------
@@ -271,14 +276,16 @@ async def _end_alerts(
     """Відбій: ended_at лише там, де його ще немає (повтор нічого не робить)."""
     if not alert_ids:
         return []
-    ended = list(
-        await session.scalars(
+    rows = (
+        await session.execute(
             update(AlertEvent)
             .where(AlertEvent.id.in_(alert_ids), AlertEvent.ended_at.is_(None))
             .values(ended_at=at)
-            .returning(AlertEvent.id)
+            .returning(AlertEvent.id, AlertEvent.school_id)
         )
-    )
+    ).all()
+    ended = [alert_id for alert_id, _ in rows]
+    pushes.ended_schools.update(school_id for _, school_id in rows)
     for class_id, alert_id in await _close_rollcalls(session, ended, at):
         pushes.add("all_clear", class_id, alert_id=alert_id)
     return ended

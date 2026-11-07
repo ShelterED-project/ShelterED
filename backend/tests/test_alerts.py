@@ -172,6 +172,24 @@ async def test_alert_end_closes_rollcall_once(db_session, factory, world, enqueu
     again = await service.poll(db_session, provider)
     assert again["ended"] == 0
     assert len(pushes(enqueued, "all_clear")) == 1
+    # Відбій одразу ставить перерахунок навчання під час тривог шкіл (по одному на школу,
+    # повтор опитування — нічого).
+    study = [e.args for e in enqueued if e.name == "stats.recompute_alert_study"]
+    schools = {r.school_id for r in rows}
+    assert sorted(study) == sorted([[str(s)] for s in schools])
+
+
+async def test_manual_alert_end_enqueues_alert_study_recompute(
+    client: AsyncClient, world, enqueued
+) -> None:
+    body = {"id": str(uuid.uuid4()), "class_id": str(world.class_a.id), "is_drill": True}
+    r = await client.post("/alerts/manual", json=body, headers=auth_header(world.teacher_a))
+    assert r.status_code in (200, 201)
+    assert not [e for e in enqueued if e.name == "stats.recompute_alert_study"]
+    url = f"/alerts/{body['id']}/end"
+    assert (await client.post(url, headers=auth_header(world.teacher_a))).status_code == 200
+    study = [e for e in enqueued if e.name == "stats.recompute_alert_study"]
+    assert [(e.args, e.queue) for e in study] == [([str(world.school.id)], "default")]
 
 
 async def test_incomplete_response_does_not_end_alerts(
