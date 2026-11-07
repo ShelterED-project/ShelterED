@@ -298,6 +298,23 @@ async def test_account_wide_limit_for_adult_logins(app: FastAPI, world) -> None:
         assert r.status_code == 429
 
 
+async def test_parent_link_code_guessing_is_limited(client: AsyncClient, world) -> None:
+    """Перебір кодів прив'язки (доступ до чужої дитини) упирається в ліміт на акаунт батьків."""
+    headers = auth_header(world.parent_a)
+    limit = get_settings().rate_limit_parent_link
+    for _ in range(limit):
+        r = await client.post("/parent/link", json={"code": "ZZZZZZZZ"}, headers=headers)
+        assert r.status_code == 400
+    r = await client.post("/parent/link", json={"code": "ZZZZZZZZ"}, headers=headers)
+    assert r.status_code == 429
+    assert r.json()["error"]["code"] == "RATE_LIMITED"
+    # Інші батьки не заблоковані.
+    r = await client.post(
+        "/parent/link", json={"code": "ZZZZZZZZ"}, headers=auth_header(world.parent_free)
+    )
+    assert r.status_code == 400
+
+
 # ---------- ліміт запитів: ШІ-репетитор і QR-ретрансляція ----------
 
 

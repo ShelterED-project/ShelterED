@@ -12519,7 +12519,7 @@
     },
     "/parent/link": {
       "post": {
-        "description": "Прив'язує батьків до дитини за кодом від вчителя. Повторний виклик ідемпотентний.",
+        "description": "Прив'язує батьків до дитини за кодом від вчителя. Повторний виклик ідемпотентний.\nНевдалі коди обмежені на акаунт батьків і на IP (`RATE_LIMIT_PARENT_LINK*` за\n`RATE_LIMIT_WINDOW_S`); понад ліміт — 429 з `Retry-After`.",
         "operationId": "parent_link_parent_link_post",
         "requestBody": {
           "content": {
@@ -12581,6 +12581,23 @@
               }
             },
             "description": "Unprocessable Content"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RATE_LIMITED: забагато невдалих спроб; повторити після `Retry-After` с",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
           },
           "500": {
             "content": {

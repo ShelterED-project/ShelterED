@@ -135,6 +135,10 @@ class Settings(BaseSettings):
     rate_limit_join_account_all_ips: int = 100
     rate_limit_login_account_all_ips: int = 100
     rate_limit_window_s: int = 900
+    # Прив'язка батьків до дитини (`POST /parent/link`): невдалі коди на акаунт батьків і на IP
+    # за RATE_LIMIT_WINDOW_S (перебір кодів прив'язки чужих дітей).
+    rate_limit_parent_link: int = 10
+    rate_limit_parent_link_ip: int = 100
     # Добовий ліміт невдалих входів учня на акаунт з усіх IP. PIN — 4–6 цифр (від 10 000
     # варіантів): лише 15-хвилинне вікно (100 спроб) дає перебір 4-значного PIN зі зміною IP
     # в середньому за ~12 год, з добовим лімітом — за ~17 днів. Компроміс: настирливий
