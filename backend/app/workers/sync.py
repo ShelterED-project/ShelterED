@@ -6,7 +6,7 @@ import uuid
 
 from app.core.db import standalone_session
 from app.services import sync as sync_service
-from app.workers.celery_app import celery_app, enqueue
+from app.workers.celery_app import TRANSIENT_RETRY, celery_app, enqueue
 from app.workers.stats import enqueue_recompute_student
 
 
@@ -24,7 +24,7 @@ async def _regrade_test(test_id: uuid.UUID) -> int:
     return len(students)
 
 
-@celery_app.task(name="sync.regrade_test")
+@celery_app.task(name="sync.regrade_test", **TRANSIENT_RETRY)
 def regrade_test(test_id: str) -> int:
     """Переоцінює спроби тесту й перераховує зарахування. Повертає кількість учнів."""
     return asyncio.run(_regrade_test(uuid.UUID(test_id)))

@@ -36,7 +36,7 @@ from app.services.push import (
     PushType,
     SendResult,
 )
-from app.workers.celery_app import celery_app, enqueue
+from app.workers.celery_app import TRANSIENT_RETRY, celery_app, enqueue
 from app.workers.redis_client import redis_client
 
 logger = logging.getLogger(__name__)
@@ -83,7 +83,7 @@ async def _fan_out(payload: dict[str, str | None]) -> list[uuid.UUID]:
         return await service.subscriptions_of(session, users)
 
 
-@celery_app.task(name="push.send")
+@celery_app.task(name="push.send", **TRANSIENT_RETRY)
 def send(payload: dict[str, str | None], key: str | None = None) -> int:
     """Ставить `push.deliver` на кожну підписку одержувачів. Повертає кількість підписок."""
     if not get_settings().push_enabled:

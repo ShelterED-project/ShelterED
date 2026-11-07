@@ -42,3 +42,12 @@ async def test_enqueue_publishes_off_the_event_loop_with_short_retries(monkeypat
     thread, _, options = calls[0]
     assert thread != loop_thread
     assert options["retry"] is True and options["retry_policy"]["max_retries"] <= 2
+
+
+def test_tasks_without_catch_up_retry_transient_errors():
+    """push.send (push тривоги) і sync.regrade_test не мають періодичного добирання: виняток
+    (БД чи брокер недоступні) має дати повтор, а не загубити задачу."""
+    for name in ("push.send", "sync.regrade_test"):
+        task = celery_app.tasks[name]
+        assert Exception in task.autoretry_for, name
+        assert task.max_retries and task.max_retries > 0, name
