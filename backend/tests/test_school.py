@@ -95,6 +95,10 @@ async def test_cross_school_admin_denied(client: AsyncClient, world) -> None:
 async def test_list_and_update_class(client: AsyncClient, world) -> None:
     admin = await client.get("/classes", headers=auth_header(world.admin))
     assert {c["name"] for c in admin.json()} == {"7-А", "7-Б"}
+    assert {c["id"]: c["teacher_ids"] for c in admin.json()} == {
+        str(world.class_a.id): [str(world.teacher_a.id)],
+        str(world.class_b.id): [str(world.teacher_b.id)],
+    }
     teacher = await client.get("/classes", headers=auth_header(world.teacher_a))
     assert [c["id"] for c in teacher.json()] == [str(world.class_a.id)]
     assert teacher.json()[0]["teacher_ids"] == [str(world.teacher_a.id)]

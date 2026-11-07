@@ -68,6 +68,28 @@ async def class_out(session: AsyncSession, klass: SchoolClass) -> ClassOut:
     return out
 
 
+async def classes_out(session: AsyncSession, classes: list[SchoolClass]) -> list[ClassOut]:
+    """Як `class_out` для списку: вчителі всіх класів одним запитом."""
+    by_class: dict[uuid.UUID, list[uuid.UUID]] = {k.id: [] for k in classes}
+    if classes:
+        rows = await session.execute(
+            select(ClassMembership.class_id, ClassMembership.user_id)
+            .where(
+                ClassMembership.class_id.in_(list(by_class)),
+                ClassMembership.member_role == "teacher",
+            )
+            .order_by(ClassMembership.joined_at, ClassMembership.user_id)
+        )
+        for class_id, user_id in rows:
+            by_class[class_id].append(user_id)
+    result = []
+    for klass in classes:
+        out = ClassOut.model_validate(klass)
+        out.teacher_ids = by_class[klass.id]
+        result.append(out)
+    return result
+
+
 async def list_classes(session: AsyncSession, user: User) -> list[SchoolClass]:
     """Адмін — усі класи своєї школи, вчитель — ті, де він веде."""
     query = select(SchoolClass).order_by(SchoolClass.academic_year, SchoolClass.name)
