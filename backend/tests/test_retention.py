@@ -165,6 +165,11 @@ async def test_retention_index_is_used_for_old_events(db_session) -> None:
     from sqlalchemy import text
 
     await db_session.execute(text("SET LOCAL enable_seqscan = off"))
+    # На майже порожній таблиці (оцінка — 1 рядок) вартості рівні, і залежно від статистики,
+    # що лишили інші тести, планувальник бере й ix_sync_event_user_id_received_at із фільтром.
+    # Перевіряємо саме те, що частковий індекс підходить під запит: конкурента прибираємо
+    # (DDL у транзакції тесту, відкотиться разом із нею).
+    await db_session.execute(text("DROP INDEX ix_sync_event_user_id_received_at"))
     plan = "\n".join(
         await db_session.scalars(
             text(
