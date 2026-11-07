@@ -87,6 +87,9 @@ class Settings(BaseSettings):
     media_image_max_side: int = 1280
     media_image_webp_quality: int = 80
     media_image_max_pixels: int = 40_000_000
+    # Нижча межа для форматів, які декодуються в повному розмірі (PNG, WebP, прогресивний JPEG):
+    # 24 Мп RGBA — ~96 МБ на запит. Звичайний JPEG декодується зменшеним (draft), йому — 40 Мп.
+    media_image_max_pixels_full_decode: int = 24_000_000
     # Ліміт пакета класу на день; той самий ліміт діє на один урок.
     pack_max_day_bytes: int = 50 * 1024 * 1024
     # Ліміт «Рюкзака» класу на 7 днів (пакети + унікальні медіа). Перевищення лише логується:

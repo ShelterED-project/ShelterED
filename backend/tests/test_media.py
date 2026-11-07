@@ -234,6 +234,30 @@ async def test_bad_images_rejected(client: AsyncClient, world, media_storage) ->
     assert stored_files(media_storage) == []
 
 
+async def test_pixel_cap_depends_on_decode_cost(client: AsyncClient, world, media_storage) -> None:
+    """Звичайний JPEG декодується зменшеним (draft) — до 40 Мп; PNG і прогресивний JPEG
+    декодуються цілими — до 24 Мп."""
+    settings = get_settings()
+    big = Image.new("RGB", (6000, 5000), (120, 80, 40))  # 30 Мп
+    t = world.teacher_a
+    resp = await upload(client, t, "image", "image/jpeg", _encode(big, "JPEG"))
+    assert resp.status_code == 201, resp.text
+    [stored] = stored_files(media_storage)
+    assert Image.open(stored).size == (1280, 1067)
+    full = settings.media_image_max_pixels_full_decode
+    for mime, data in (
+        ("image/png", _encode(Image.new("1", (6000, 5000)), "PNG")),
+        ("image/jpeg", _encode(big, "JPEG", progressive=True)),
+    ):
+        resp = await upload(client, t, "image", mime, data)
+        assert resp.status_code == 422, mime
+        err = resp.json()["error"]
+        assert err["code"] == "IMAGE_TOO_LARGE" and err["details"]["max_pixels"] == full
+    # Під межею PNG приймається.
+    ok = _encode(Image.new("1", (5000, 4800)), "PNG")
+    assert (await upload(client, t, "image", "image/png", ok)).status_code == 201
+
+
 async def test_identical_content_shares_one_file(client: AsyncClient, world, media_storage) -> None:
     """Той самий вміст під іншими id (і від іншого вчителя) — окремі записи, один файл."""
     photo, video = _photo(1600, 1200), MP4 + b"same video"

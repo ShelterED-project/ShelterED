@@ -128,19 +128,26 @@ _TECHNICAL_INFO = frozenset(
 )
 
 
-def _to_webp(data: bytes, max_side: int, quality: int, max_pixels: int) -> bytes | None:
+def _to_webp(
+    data: bytes, max_side: int, quality: int, max_pixels: int, max_pixels_full_decode: int
+) -> bytes | None:
     """WebP-версія зображення або None, якщо краще лишити оригінал.
 
     Оригінал лишається, лише коли WebP не менший і в оригіналі немає метаданих (EXIF, XMP, IPTC,
     коментарів, тексту PNG): файл із
     метаданими (можливо, GPS) не зберігаємо ніколи. Блокуючий код — викликати в потоці.
+
+    `max_pixels` — для звичайного JPEG, який декодується одразу зменшеним (draft);
+    `max_pixels_full_decode` — для решти (PNG, WebP, прогресивний JPEG), що декодуються цілими.
     """
     try:
         with Image.open(io.BytesIO(data)) as img:
             width, height = img.size
             # Розмір з заголовка — до декодування пікселів.
-            if width * height > max_pixels:
-                raise _too_many_pixels(max_pixels)
+            reduced = img.format == "JPEG" and not img.info.get("progressive")
+            limit = max_pixels if reduced else max_pixels_full_decode
+            if width * height > limit:
+                raise _too_many_pixels(limit)
             has_metadata = bool(img.getexif()) or any(k not in _TECHNICAL_INFO for k in img.info)
             icc_profile = img.info.get("icc_profile")
             scale = min(1.0, max_side / max(width, height))
@@ -290,6 +297,7 @@ async def upload(
             settings.media_image_max_side,
             settings.media_image_webp_quality,
             settings.media_image_max_pixels,
+            settings.media_image_max_pixels_full_decode,
         )
         if webp is not None:
             data, mime = webp, "image/webp"
