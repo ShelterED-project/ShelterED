@@ -102,6 +102,8 @@ class Attempt(SyncChangeMixin, Base):
             postgresql_where=text("credit_status = 'credited'"),
         ),
         Index("ix_attempt_sync_changes", "student_id", "change_xid", "change_seq"),
+        # Переоцінка тесту (regrade_test) і перевірка FK під час видалення тесту.
+        Index("ix_attempt_test_id", "test_id"),
     )
 
     id: Mapped[uuid.UUID] = uuid_pk()
@@ -129,6 +131,8 @@ class ModuleProgress(SyncChangeMixin, Base):
         # Перевірка FK під час видалення подій (retention.purge, видалення учня): без індексу —
         # повне сканування таблиці на кожну видалену подію.
         Index("ix_module_progress_last_event_id", "last_event_id"),
+        # «Є прогрес?» перед видаленням модуля чи уроку (PK починається зі student_id).
+        Index("ix_module_progress_module_id", "module_id"),
     )
 
     student_id: Mapped[uuid.UUID] = mapped_column(
