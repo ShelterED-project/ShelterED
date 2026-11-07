@@ -102,6 +102,13 @@ class Batch:
     rollcall_changes: dict[uuid.UUID, tuple[str | None, str, uuid.UUID]] = field(
         default_factory=dict
     )
+    # Події пакета, вже записані в журнал до його обробки (одним запитом, а не по запиту на
+    # подію): id -> (автор, статус, причина). Записане паралельно пізніше ловить ON CONFLICT.
+    stored: dict[uuid.UUID, tuple[uuid.UUID, str, str | None]] = field(default_factory=dict)
+    # Кеш перевірок доступу на час пакета (події одного уроку йдуть пачкою):
+    # ("module" | "test", id) -> урок, урок -> чи доступний учню.
+    lesson_of: dict[tuple[str, uuid.UUID], uuid.UUID | None] = field(default_factory=dict)
+    lesson_access: dict[uuid.UUID, bool] = field(default_factory=dict)
 
 
 def _result(event_id: uuid.UUID, status: str, reason: str | None = None) -> SyncEventResult:
@@ -167,19 +174,29 @@ async def _student_has_lesson(
 
 
 async def _check_lesson_access(
-    session: AsyncSession, student_id: uuid.UUID, lesson_id: uuid.UUID | None
+    session: AsyncSession, batch: Batch, model: type[Module] | type[Test], entity_id: uuid.UUID
 ) -> None:
+    """Модуль чи тест існує, а його урок доступний учню. Результати кешуються на пакет."""
+    key = (model.__tablename__, entity_id)
+    if key not in batch.lesson_of:
+        batch.lesson_of[key] = await session.scalar(
+            select(model.lesson_id).where(model.id == entity_id)
+        )
+    lesson_id = batch.lesson_of[key]
     if lesson_id is None:
         raise Rejected("unknown_entity")
-    if not await _student_has_lesson(session, student_id, lesson_id):
+    if lesson_id not in batch.lesson_access:
+        batch.lesson_access[lesson_id] = await _student_has_lesson(
+            session, batch.user_id, lesson_id
+        )
+    if not batch.lesson_access[lesson_id]:
         raise Rejected("forbidden")
 
 
 async def _check_module_progress(
     session: AsyncSession, batch: Batch, payload: ModuleProgressPayload
 ) -> None:
-    lesson_id = await session.scalar(select(Module.lesson_id).where(Module.id == payload.module_id))
-    await _check_lesson_access(session, batch.user_id, lesson_id)
+    await _check_lesson_access(session, batch, Module, payload.module_id)
 
 
 async def _apply_module_progress(
@@ -229,8 +246,7 @@ async def _apply_module_progress(
 async def _check_test_attempt(
     session: AsyncSession, batch: Batch, payload: TestAttemptPayload
 ) -> None:
-    lesson_id = await session.scalar(select(Test.lesson_id).where(Test.id == payload.test_id))
-    await _check_lesson_access(session, batch.user_id, lesson_id)
+    await _check_lesson_access(session, batch, Test, payload.test_id)
 
 
 async def grade(
@@ -504,10 +520,17 @@ async def _stored_result(
     ).first()
     if row is None:
         return None
-    if row.user_id != batch.user_id:
+    return _stored_row_result(batch, event_id, (row.user_id, row.status, row.reject_reason))
+
+
+def _stored_row_result(
+    batch: Batch, event_id: uuid.UUID, row: tuple[uuid.UUID, str, str | None]
+) -> SyncEventResult:
+    user_id, status, reject_reason = row
+    if user_id != batch.user_id:
         return _result(event_id, "rejected", "forbidden")
-    if row.status == "rejected":
-        return _result(event_id, "rejected", row.reject_reason)
+    if status == "rejected":
+        return _result(event_id, "rejected", reject_reason)
     return _result(event_id, "duplicate")
 
 
@@ -568,9 +591,9 @@ async def _reject_after_data_error(
 async def _process_event(
     session: AsyncSession, batch: Batch, event: SyncEventIn
 ) -> SyncEventResult:
-    stored = await _stored_result(session, batch, event.client_event_id)
-    if stored is not None:
-        return stored
+    row = batch.stored.get(event.client_event_id)
+    if row is not None:
+        return _stored_row_result(batch, event.client_event_id, row)
     model = PAYLOAD_MODELS.get(event.type)
     if model is None:
         # CHECK у БД не дає записати невідомий тип; результат детермінований і без запису.
@@ -681,6 +704,13 @@ async def receive_events(
         else:
             first[event.client_event_id] = i
     order = sorted(first.values(), key=lambda i: (body.events[i].occurred_at, i))
+    # Повтор пакета після обриву — звичайна справа: уже записані події одним запитом.
+    known = await session.execute(
+        select(
+            SyncEvent.client_event_id, SyncEvent.user_id, SyncEvent.status, SyncEvent.reject_reason
+        ).where(SyncEvent.client_event_id.in_(list(first)))
+    )
+    batch.stored = {r.client_event_id: (r.user_id, r.status, r.reject_reason) for r in known}
 
     failed = 0
     for i in order:
