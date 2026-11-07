@@ -2,6 +2,7 @@ import datetime as dt
 import re
 import unicodedata
 import uuid
+from collections.abc import Awaitable, Callable
 
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
@@ -308,7 +309,10 @@ async def student_join(
     last_name: str,
     pin: str,
     settings: Settings,
+    before_create: Callable[[uuid.UUID], Awaitable[None]] | None = None,
 ) -> TokenResponse:
+    """`before_create(class_id)` викликається лише перед створенням нового учня (не для входу
+    наявного): там API рахує ліміт нових учнів і може кинути 429."""
     # Код класу зберігається у нормалізованому вигляді (normalize_link_code).
     code = normalize_link_code(join_code)
     klass = await session.scalar(
@@ -330,6 +334,8 @@ async def student_join(
         # Той самий 401, що й для хибного PIN: не розкриваємо, які імена є в класі.
         await verify_secret_async(pin, None)
         raise _invalid_credentials()
+    if before_create is not None:
+        await before_create(class_id)
 
     # Хеш рахуємо до блокування: argon2 повільний, а блокування тримає всіх, хто входить у клас.
     pin_hash = await hash_secret_async(pin)

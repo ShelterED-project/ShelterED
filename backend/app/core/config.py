@@ -159,6 +159,11 @@ class Settings(BaseSettings):
     # й може скинути PIN; refresh-токен учня на його пристрої продовжує працювати).
     rate_limit_join_account_daily: int = 300
     rate_limit_daily_window_s: int = 86400
+    # Створення нових учнів (`POST /auth/student/join` з новим ім'ям) на пару IP + клас: рахується
+    # кожне створення. Код класу знають усі учні — без ліміту клас можна засипати вигаданими
+    # іменами. Ліміт вищий за розмір класу: увесь клас може вперше входити з одного шкільного NAT.
+    rate_limit_join_new_students: int = 40
+    rate_limit_join_new_students_window_s: int = 900
     # Ліміти на кількість запитів користувача (рахується кожен запит, не лише невдалий):
     # ШІ-репетитор — на учня; QR-ретрансляція подій (`POST /sync/events` від вчителя) — на вчителя.
     rate_limit_tutor: int = 20

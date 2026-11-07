@@ -19,7 +19,7 @@ from app.api.deps import (
     StaffClass,
 )
 from app.core.errors import AppError
-from app.core.rate_limit import RateLimiter, Rule, rate_limited, rule
+from app.core.rate_limit import RateLimiter, Rule, enforce, rate_limited, rule
 from app.core.security import normalize_link_code
 from app.schemas.auth import (
     AdminCreateUserRequest,
@@ -217,7 +217,11 @@ async def me(user: CurrentUser) -> UserOut:
     responses={
         400: {"model": ErrorResponse, "description": "INVALID_JOIN_CODE"},
         401: {"model": ErrorResponse, "description": "INVALID_CREDENTIALS (хибний PIN)"},
-        **R429,
+        429: {
+            **R429[429],
+            "description": "RATE_LIMITED: забагато невдалих спроб або нових учнів з однієї "
+            "адреси в клас; повторити після `Retry-After` с",
+        },
     },
 )
 async def student_join(
@@ -240,6 +244,10 @@ async def student_join(
     (`RATE_LIMIT_JOIN_ACCOUNT_DAILY`); понад ліміт — 429 з `Retry-After`.
     Блокування акаунта немає: однокласник, що вводить чужий PIN, блокує лише себе (свій IP),
     а справжній учень входить з іншого пристрою/IP; ліміт знімається сам після вікна.
+
+    Створення нових учнів обмежене на пару IP + клас (`RATE_LIMIT_JOIN_NEW_STUDENTS` за
+    `RATE_LIMIT_JOIN_NEW_STUDENTS_WINDOW_S`): хто знає код, не засипле клас вигаданими іменами.
+    Ліміт розрахований на весь клас за одним NAT; вхід наявних учнів він не зачіпає.
     """
     window = settings.rate_limit_window_s
     ip = _client_ip(request)
@@ -256,6 +264,17 @@ async def student_join(
             settings.rate_limit_daily_window_s,
         ),
     ]
+
+    async def before_create(class_id: uuid.UUID) -> None:
+        # Рахується кожне створення (не лише невдале), атомарно; 429 — до створення учня.
+        new_rule = rule(
+            "join:new",
+            f"{ip}\n{class_id}",
+            settings.rate_limit_join_new_students,
+            settings.rate_limit_join_new_students_window_s,
+        )
+        await enforce(limiter, [new_rule])
+
     return await _limited(
         limiter,
         rules,
@@ -266,6 +285,7 @@ async def student_join(
             last_name=body.last_name,
             pin=body.pin,
             settings=settings,
+            before_create=before_create,
         ),
     )
 
