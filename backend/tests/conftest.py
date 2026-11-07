@@ -18,6 +18,7 @@ os.environ["REFRESH_REUSE_GRACE_SECONDS"] = "300"
 os.environ["AUTH_CODE_TTL_S"] = "60"
 os.environ["PARENT_LINK_CODE_TTL_DAYS"] = "7"
 os.environ["OAUTH_CLIENT_IDS"] = '["sheltered-pwa"]'
+os.environ["OAUTH_REDIRECT_URIS"] = "[]"
 os.environ["CORS_ORIGINS"] = '["http://localhost:5173"]'
 # Опитування API тривог у тестах вимкнене; провайдер підміняють фейком.
 os.environ["ALERTS_API_TOKEN"] = ""

@@ -172,6 +172,8 @@ async def authorize(
 ) -> str:
     if client_id not in settings.oauth_client_ids:
         raise AppError("INVALID_CLIENT", "Unknown client_id", status_code=400)
+    if redirect_uri is not None and redirect_uri not in settings.oauth_redirect_uris:
+        raise AppError("INVALID_REDIRECT_URI", "redirect_uri is not allowed", status_code=400)
     user = await session.scalar(select(User).where(User.email == email))
     # verify_secret_async з None виконує фіктивну перевірку: час відповіді не видає, чи існує email.
     # Захист від підбору пароля — rate limiting невдалих спроб у роутері (app/core/rate_limit.py),

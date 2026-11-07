@@ -461,6 +461,7 @@
         ],
         "properties": {
           "client_id": {
+            "maxLength": 64,
             "title": "Client Id",
             "type": "string"
           },
@@ -488,6 +489,7 @@
           "redirect_uri": {
             "anyOf": [
               {
+                "maxLength": 2048,
                 "type": "string"
               },
               {
@@ -6640,7 +6642,7 @@
                 }
               }
             },
-            "description": "Невідомий client_id"
+            "description": "INVALID_CLIENT (невідомий client_id) / INVALID_REDIRECT_URI (redirect_uri не з OAUTH_REDIRECT_URIS)"
           },
           "401": {
             "content": {
@@ -6953,6 +6955,7 @@
                   "redirect_uri": {
                     "anyOf": [
                       {
+                        "maxLength": 2048,
                         "type": "string"
                       },
                       {
@@ -7041,6 +7044,7 @@
                   "redirect_uri": {
                     "anyOf": [
                       {
+                        "maxLength": 2048,
                         "type": "string"
                       },
                       {

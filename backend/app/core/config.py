@@ -62,6 +62,10 @@ class Settings(BaseSettings):
     parent_link_code_ttl_days: int = 7
     # Дозволені client_id для OAuth 2.0 PKCE (PWA).
     oauth_client_ids: list[str] = ["sheltered-pwa"]
+    # Дозволені `redirect_uri` (точний збіг). Код повертається в тілі відповіді, а не
+    # редиректом, тож `redirect_uri` необов'язковий; якщо клієнт його надсилає — лише зі списку
+    # (інакше 400 INVALID_REDIRECT_URI ще до перевірки пароля).
+    oauth_redirect_uris: list[str] = []
 
     # Redis у Docker на 6380: 6379 на машині розробника займає нативний Redis.
     # БД 0 — брокер черг Celery, БД 1 — результати задач.

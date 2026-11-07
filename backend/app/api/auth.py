@@ -81,7 +81,11 @@ async def _limited[T](
     "/auth/authorize",
     response_model=AuthorizeResponse,
     responses={
-        400: {"model": ErrorResponse, "description": "Невідомий client_id"},
+        400: {
+            "model": ErrorResponse,
+            "description": "INVALID_CLIENT (невідомий client_id) / INVALID_REDIRECT_URI "
+            "(redirect_uri не з OAUTH_REDIRECT_URIS)",
+        },
         401: {"model": ErrorResponse, "description": "INVALID_CREDENTIALS"},
         **R429,
     },
