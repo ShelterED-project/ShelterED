@@ -30,7 +30,7 @@ import uuid
 from collections.abc import AsyncIterable, AsyncIterator
 
 import anyio
-from PIL import Image, ImageOps
+from PIL import Image, ImageCms, ImageOps
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -128,6 +128,38 @@ _TECHNICAL_INFO = frozenset(
 )
 
 
+def _icc_color_space(icc_profile: bytes | None) -> str | None:
+    """Колірний простір ICC-профілю ("RGB", "CMYK", "GRAY"…) або None, якщо профілю немає
+    чи його не прочитати."""
+    if not icc_profile:
+        return None
+    try:
+        return ImageCms.ImageCmsProfile(io.BytesIO(icc_profile)).profile.xcolor_space.strip()
+    except (ImageCms.PyCMSError, OSError, ValueError, TypeError):
+        return None
+
+
+def _to_rgb(img: Image.Image, icc_profile: bytes | None) -> tuple[Image.Image, bytes | None]:
+    """RGB/RGBA-зображення для WebP і ICC-профіль, який йому відповідає (або None).
+
+    Профіль лишаємо, лише якщо він RGB і джерело вже в RGB-кольорах (RGB, RGBA, палітра):
+    профіль CMYK чи сірого, вбудований у RGB-файл, спотворює кольори. CMYK із CMYK-профілем
+    перетворюємо через профіль у sRGB; без нього — звичайним перетворенням Pillow."""
+    space = _icc_color_space(icc_profile)
+    keep = icc_profile if space == "RGB" and img.mode in ("RGB", "RGBA", "P", "PA") else None
+    if img.mode == "CMYK" and space == "CMYK" and icc_profile:
+        try:
+            img = ImageCms.profileToProfile(
+                img,
+                ImageCms.ImageCmsProfile(io.BytesIO(icc_profile)),
+                ImageCms.createProfile("sRGB"),
+                outputMode="RGB",
+            )
+        except ImageCms.PyCMSError:
+            pass  # зіпсований профіль — звичайне перетворення нижче
+    return img.convert("RGBA" if img.has_transparency_data else "RGB"), keep
+
+
 def _to_webp(
     data: bytes, max_side: int, quality: int, max_pixels: int, max_pixels_full_decode: int
 ) -> bytes | None:
@@ -155,9 +187,10 @@ def _to_webp(
             img.draft("RGB", (math.ceil(width * scale), math.ceil(height * scale)))
             out = ImageOps.exif_transpose(img)
             out.thumbnail((max_side, max_side), Image.Resampling.LANCZOS)  # не збільшує
-            out = out.convert("RGBA" if out.has_transparency_data else "RGB")
+            out, icc_profile = _to_rgb(out, icc_profile)
             buf = io.BytesIO()
-            # exif/xmp не передаємо — у WebP вони не потрапляють; ICC лишаємо заради кольорів.
+            # exif/xmp не передаємо — у WebP вони не потрапляють; RGB-профіль ICC лишаємо заради
+            # кольорів, невідповідний (CMYK, сірий) — ні.
             out.save(buf, "WEBP", quality=quality, icc_profile=icc_profile)
     except Image.DecompressionBombError as exc:
         raise _too_many_pixels(max_pixels) from exc
