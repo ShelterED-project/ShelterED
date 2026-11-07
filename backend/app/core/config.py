@@ -50,8 +50,13 @@ class Settings(BaseSettings):
     database_url_direct: SecretStr | None = None
     # Neon вимагає TLS; для локальної БД у Docker вимикаємо.
     database_ssl: bool = True
-    db_pool_size: int = 5
-    db_max_overflow: int = 5
+    # Пул з'єднань на процес API: pool_size + max_overflow, помножене на кількість воркерів
+    # uvicorn (і задач Celery, що працюють одночасно), має лишатися нижче за ліміт з'єднань Neon.
+    db_pool_size: int = 10
+    db_max_overflow: int = 10
+    # Скільки секунд запит чекає на вільне з'єднання пулу, доки не отримає помилку (замість
+    # того, щоб висіти до таймауту клієнта).
+    db_pool_timeout_s: float = Field(default=10.0, gt=0)
     # Postgres рве з'єднання застосунку, що простоює у відкритій транзакції довше за цей час
     # (забутий commit не тримає блокувань і не будить Neon). 0 — вимкнено. Міграції (Alembic)
     # мають власне з'єднання без цього обмеження. З pooled endpoint Neon (`-pooler`, PgBouncer)

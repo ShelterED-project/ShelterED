@@ -131,6 +131,8 @@ celery -A app.workers.celery_app beat -l info
 
 Обов'язкові змінні: `DATABASE_URL`, `DATABASE_URL_DIRECT` (для міграцій), `JWT_SECRET`, `REDIS_URL`, `REDIS_RESULT_URL`, `RATE_LIMIT_REDIS_URL` (усі три Redis-URL за замовчуванням дивляться на `localhost:6380`, у контейнері їх треба задати), для push — `VAPID_*`. `FORWARDED_ALLOW_IPS` — IP чи підмережа Nginx. Медіа пишуться в `/app/media` — туди монтується том, який роздає Nginx. `.env` в образ не потрапляє (`.dockerignore`).
 
+Пул з'єднань БД — на кожен процес API: `DB_POOL_SIZE` (10) + `DB_MAX_OVERFLOW` (10), помножене на кількість воркерів uvicorn (плюс одночасні задачі Celery, кожна з власним з'єднанням), має лишатися нижче за ліміт з'єднань Neon для обраного розміру compute. Запит чекає на вільне з'єднання не довше `DB_POOL_TIMEOUT_S` (10 с). Пояс школи кешується в процесі на 5 хв (`SCHOOL_TZ_CACHE_TTL_S` у `app/services/school.py`).
+
 ## Медіа
 
 `PUT /media/{id}` пише файл у том (`MEDIA_ROOT`, у контейнері `/app/media`) під ключем `<kind>/<id>-<random>.<ext>`; URL — `MEDIA_URL_PREFIX` + ключ. Зображення зберігаються як WebP (≤ 1280 px, без EXIF/GPS), тож `mime_type` зображення зазвичай `image/webp`. Однаковий вміст зберігається один раз: кілька записів можуть посилатися на один файл.

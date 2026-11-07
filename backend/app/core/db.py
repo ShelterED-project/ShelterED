@@ -64,6 +64,7 @@ def get_engine() -> AsyncEngine:
         connect_args=connect_args(settings),
         pool_size=settings.db_pool_size,
         max_overflow=settings.db_max_overflow,
+        pool_timeout=settings.db_pool_timeout_s,
         # Neon засинає й рве простої з'єднання: перевіряємо з'єднання перед видачею
         # і не тримаємо його довше 5 хв.
         # Параметри SQL (хеші PIN, імена) не потрапляють у тексти помилок і логи.

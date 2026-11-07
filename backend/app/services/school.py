@@ -1,6 +1,7 @@
 """Класи, вчителі класу, код класу, розклад і прив'язка уроків до слотів."""
 
 import datetime as dt
+import time
 import uuid
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -236,13 +237,35 @@ async def unassign_teacher(
 # ---------- розклад: слоти й перевизначення ----------
 
 
+# Пояс школи майже не змінюється (ендпоінта зміни школи немає; seed — окремий процес), а
+# потрібен майже кожному запиту з розкладом: кеш на процес із коротким TTL економить запит.
+SCHOOL_TZ_CACHE_TTL_S = 300
+_SCHOOL_TZ_CACHE_MAX = 4096
+_school_tz_cache: dict[uuid.UUID, tuple[ZoneInfo, float]] = {}
+
+
+def clear_school_tz_cache() -> None:
+    _school_tz_cache.clear()
+
+
 async def school_tz(session: AsyncSession, school_id: uuid.UUID | None) -> ZoneInfo:
-    """Пояс школи; без школи чи з невідомою назвою поясу — Europe/Kyiv."""
-    school = await session.get(School, school_id) if school_id is not None else None
-    try:
-        return ZoneInfo(school.timezone if school else schedule.DEFAULT_TZ)
-    except (ZoneInfoNotFoundError, ValueError):
+    """Пояс школи; без школи чи з невідомою назвою поясу — Europe/Kyiv. Кешується на процес
+    на SCHOOL_TZ_CACHE_TTL_S."""
+    if school_id is None:
         return ZoneInfo(schedule.DEFAULT_TZ)
+    cached = _school_tz_cache.get(school_id)
+    if cached is not None and cached[1] > time.monotonic():
+        return cached[0]
+    name = await session.scalar(select(School.timezone).where(School.id == school_id))
+    try:
+        tz = ZoneInfo(name or schedule.DEFAULT_TZ)
+    except (ZoneInfoNotFoundError, ValueError):
+        tz = ZoneInfo(schedule.DEFAULT_TZ)
+    if name is not None:
+        if len(_school_tz_cache) >= _SCHOOL_TZ_CACHE_MAX:
+            _school_tz_cache.clear()
+        _school_tz_cache[school_id] = (tz, time.monotonic() + SCHOOL_TZ_CACHE_TTL_S)
+    return tz
 
 
 async def list_slots(session: AsyncSession, class_id: uuid.UUID) -> list[ScheduleSlot]:
