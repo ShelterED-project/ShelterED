@@ -2,11 +2,14 @@ from functools import lru_cache
 from importlib.metadata import version
 from typing import Literal
 
-from pydantic import SecretStr
+from pydantic import SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Єдине джерело версії — pyproject.toml (пакет встановлено через pip install -e).
 APP_VERSION = version("sheltered-backend")
+
+# Мінімальна довжина секрету підпису JWT (HS256): 32 символи ≈ 256 біт для випадкового рядка.
+JWT_SECRET_MIN_LENGTH = 32
 
 
 class Settings(BaseSettings):
@@ -149,6 +152,23 @@ class Settings(BaseSettings):
     # Демо-дані (`python -m app.cli seed`): спільний пароль дорослих (≥ 8 символів). Не задано —
     # генерується й друкується один раз при створенні акаунтів.
     seed_password: SecretStr | None = None
+
+    @field_validator("jwt_secret")
+    @classmethod
+    def _jwt_secret_strong(cls, value: SecretStr) -> SecretStr:
+        # `JWT_SECRET=` з `.env.example` дало б порожній ключ HS256: будь-хто підробив би токен.
+        if len(value.get_secret_value()) < JWT_SECRET_MIN_LENGTH:
+            raise ValueError(f"JWT_SECRET must be at least {JWT_SECRET_MIN_LENGTH} characters")
+        return value
+
+    @model_validator(mode="after")
+    def _prod_requires_database(self) -> "Settings":
+        # У prod без БД API не має стартувати «успішно» й падати 500 на кожному запиті.
+        if self.environment == "prod" and not (
+            self.database_url and self.database_url.get_secret_value()
+        ):
+            raise ValueError("DATABASE_URL is required when ENVIRONMENT=prod")
+        return self
 
     @property
     def hsts_active(self) -> bool:
