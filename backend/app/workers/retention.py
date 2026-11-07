@@ -6,7 +6,7 @@ import asyncio
 from app.core.config import get_settings
 from app.core.db import standalone_session
 from app.services import retention as retention_service
-from app.workers.celery_app import celery_app
+from app.workers.celery_app import LONG_TASK_LIMITS, celery_app
 
 
 async def _purge() -> dict[str, int]:
@@ -14,7 +14,7 @@ async def _purge() -> dict[str, int]:
         return await retention_service.purge(session, get_settings())
 
 
-@celery_app.task(name="retention.purge")
+@celery_app.task(name="retention.purge", **LONG_TASK_LIMITS)
 def purge() -> dict[str, int]:
     """Повертає кількість змінених рядків по кожному правилу."""
     return asyncio.run(_purge())

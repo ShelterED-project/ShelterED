@@ -51,3 +51,17 @@ def test_tasks_without_catch_up_retry_transient_errors():
         task = celery_app.tasks[name]
         assert Exception in task.autoretry_for, name
         assert task.max_retries and task.max_retries > 0, name
+
+
+def test_tasks_have_time_limits():
+    """Завислий виклик не тримає воркер вічно; довгі періодичні задачі мають більший ліміт."""
+    celery_app.loader.import_default_modules()
+    conf = celery_app.conf
+    assert 0 < conf.task_soft_time_limit < conf.task_time_limit
+    for name in ("packs.refresh_all", "stats.refresh_all", "retention.purge"):
+        task = celery_app.tasks[name]
+        assert conf.task_soft_time_limit < task.soft_time_limit < task.time_limit, name
+    # Прибирання журналу подій зупиняється само раніше за м'який ліміт.
+    from app.services.retention import SYNC_EVENT_MAX_S
+
+    assert SYNC_EVENT_MAX_S < celery_app.tasks["retention.purge"].soft_time_limit

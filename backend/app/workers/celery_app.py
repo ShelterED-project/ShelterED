@@ -13,6 +13,14 @@ logger = logging.getLogger(__name__)
 
 settings = get_settings()
 
+# Ліміти часу задач за замовчуванням і для довгих задач (усі класи, прибирання пакетами).
+TASK_SOFT_TIME_LIMIT_S = 300
+LONG_TASK_SOFT_TIME_LIMIT_S = 1800
+LONG_TASK_LIMITS: dict[str, Any] = {
+    "soft_time_limit": LONG_TASK_SOFT_TIME_LIMIT_S,
+    "time_limit": LONG_TASK_SOFT_TIME_LIMIT_S + 60,
+}
+
 celery_app = Celery(
     "sheltered",
     broker=settings.redis_url,
@@ -44,6 +52,14 @@ celery_app.conf.update(
     task_acks_late=True,
     task_reject_on_worker_lost=True,
     worker_prefetch_multiplier=1,
+    # Ліміти часу: завислий виклик (БД, push-сервіс, мережа) не тримає воркер вічно. М'який
+    # ліміт кидає SoftTimeLimitExceeded у задачу (транзакція відкочується), жорсткий через 30 с
+    # убиває процес. Задача, що перевищила ліміт, підтверджується (acks_on_failure_or_timeout)
+    # і не повертається в чергу по колу; періодичні задачі добере наступний запуск beat.
+    # Довгі задачі (перезбірки всіх класів, прибирання) мають свої ліміти — `LONG_TASK_LIMITS`.
+    # На Windows із `--pool=solo` ліміти не діють (лише в prefork у Docker).
+    task_soft_time_limit=TASK_SOFT_TIME_LIMIT_S,
+    task_time_limit=TASK_SOFT_TIME_LIMIT_S + 30,
     result_expires=3600,
     broker_connection_retry_on_startup=True,
     # Періодичні задачі (процес `celery beat`). expires: прострочений запуск (воркер

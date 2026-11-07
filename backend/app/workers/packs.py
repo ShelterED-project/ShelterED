@@ -7,7 +7,7 @@ import uuid
 from app.core.config import get_settings
 from app.core.db import standalone_session
 from app.services import packs as packs_service
-from app.workers.celery_app import celery_app, enqueue
+from app.workers.celery_app import LONG_TASK_LIMITS, celery_app, enqueue
 
 
 async def enqueue_rebuild_class(class_id: uuid.UUID) -> None:
@@ -45,7 +45,7 @@ def rebuild_for_lesson(lesson_id: str) -> int:
     return asyncio.run(_rebuild_for_lesson(uuid.UUID(lesson_id)))
 
 
-@celery_app.task(name="packs.refresh_all")
+@celery_app.task(name="packs.refresh_all", **LONG_TASK_LIMITS)
 def refresh_all() -> int:
     """Періодично (beat): новий день у горизонті 7 днів, зміни, що не поставили перезбірку."""
     return asyncio.run(_refresh_all())
