@@ -18,6 +18,7 @@ import uuid
 from typing import Any
 from zoneinfo import ZoneInfo
 
+import brotli
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import distinct_on
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -244,7 +245,10 @@ async def build_content(
 
 
 # Метадані пакета без вмісту: стиснутий JSON читає лише `GET /packs/{id}`.
-_NO_CONTENT = defer(KnowledgePack.content_gzip, raiseload=True)
+_NO_CONTENT = (
+    defer(KnowledgePack.content_gzip, raiseload=True),
+    defer(KnowledgePack.content_br, raiseload=True),
+)
 
 
 async def latest_pack(
@@ -253,7 +257,7 @@ async def latest_pack(
     """Найновіша версія пакета дня (без `content_gzip`)."""
     return await session.scalar(
         select(KnowledgePack)
-        .options(_NO_CONTENT)
+        .options(*_NO_CONTENT)
         .where(KnowledgePack.class_id == class_id, KnowledgePack.pack_date == day)
         .order_by(KnowledgePack.version.desc())
         .limit(1)
@@ -266,7 +270,7 @@ async def _latest_packs(
     """Найновіша версія кожного дня `start`..`end` (без `content_gzip`), за датою."""
     rows = await session.scalars(
         select(KnowledgePack)
-        .options(_NO_CONTENT)
+        .options(*_NO_CONTENT)
         .where(
             KnowledgePack.class_id == class_id,
             KnowledgePack.pack_date >= start,
@@ -345,6 +349,8 @@ async def _try_build(
             size_bytes=len(raw),
             built_at=now,
             content_gzip=gzip.compress(raw, mtime=0),
+            # Якість 9: майже як 11, але в десятки разів швидше.
+            content_br=brotli.compress(raw, quality=9),
         )
         .on_conflict_do_nothing(constraint="uq_knowledge_pack_version")
         .returning(KnowledgePack.id)

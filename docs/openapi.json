@@ -12262,7 +12262,7 @@
     },
     "/packs/{pack_id}": {
       "get": {
-        "description": "Вміст версії пакета з `ETag` (= `content_hash` у лапках), стиснутий gzip (brotli —\nні: окремої залежності не додаємо). Версія незмінна: стара версія лишається доступною за\nсвоїм id. Медіа — за URL з маніфесту. Доступ — як до класу пакета.",
+        "description": "Вміст версії пакета з `ETag` (= `content_hash` у лапках), стиснутий brotli або gzip\n(за `Accept-Encoding`; brotli в пріоритеті, пакети до його появи — лише gzip).\nВерсія незмінна: стара версія лишається доступною за\nсвоїм id. Медіа — за URL з маніфесту. Доступ — як до класу пакета.",
         "operationId": "get_pack_packs__pack_id__get",
         "parameters": [
           {
@@ -12439,7 +12439,7 @@
             "description": "Успішна відповідь",
             "headers": {
               "Content-Encoding": {
-                "description": "`gzip`, якщо клієнт його приймає (`Accept-Encoding`)",
+                "description": "`br` або `gzip` за `Accept-Encoding`, brotli в пріоритеті",
                 "schema": {
                   "type": "string"
                 }

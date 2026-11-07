@@ -27,6 +27,8 @@ dependencies = [
     "httpx==0.28.1",
     # Web Push (B8): шифрування payload і підпис VAPID.
     "pywebpush==2.5.0",
+    # Стиснення пакетів «Рюкзака» brotli (на 15–20% менше за gzip).
+    "brotli==1.1.0",
 ]
 
 [project.optional-dependencies]
