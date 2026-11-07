@@ -8,7 +8,7 @@ import uuid
 import pytest
 from conftest import auth_header
 from httpx import AsyncClient
-from PIL import Image
+from PIL import Image, PngImagePlugin
 
 from app.api.deps import get_storage
 from app.core.config import get_settings
@@ -199,6 +199,23 @@ async def test_png_with_metadata_always_converted(
     assert resp.status_code == 201 and resp.json()["mime_type"] == "image/webp"
     [stored] = stored_files(media_storage)
     assert not Image.open(stored).getexif()
+
+
+async def test_png_and_jpeg_text_metadata_never_kept(
+    client: AsyncClient, world, media_storage
+) -> None:
+    """Текстові чанки PNG (Author, Comment) і коментар JPEG — теж метадані: оригінал не лишається,
+    навіть якщо WebP не менший."""
+    info = PngImagePlugin.PngInfo()
+    info.add_text("Comment", "Kyiv, school 5")
+    info.add_itxt("Author", "Іван Петренко", lang="uk")
+    png = _encode(_noise(), "PNG", pnginfo=info)
+    jpeg = _encode(Image.new("RGB", (8, 8), "red"), "JPEG", comment=b"Kyiv, school 5")
+    for mime, content in (("image/png", png), ("image/jpeg", jpeg)):
+        resp = await upload(client, world.teacher_a, "image", mime, content)
+        assert resp.status_code == 201 and resp.json()["mime_type"] == "image/webp", mime
+    for stored in stored_files(media_storage):
+        assert b"Kyiv" not in stored.read_bytes() and "Author" not in Image.open(stored).info
 
 
 async def test_bad_images_rejected(client: AsyncClient, world, media_storage) -> None:

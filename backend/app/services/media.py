@@ -101,10 +101,38 @@ def _too_many_pixels(limit: int) -> AppError:
     )
 
 
+# Технічні поля `Image.info`, що не несуть даних про людей і місце. Усе інше (EXIF, XMP, IPTC,
+# коментарі JPEG, текстові чанки PNG на кшталт Author/Comment) вважаємо метаданими.
+_TECHNICAL_INFO = frozenset(
+    {
+        "icc_profile",
+        "dpi",
+        "aspect",
+        "jfif",
+        "jfif_version",
+        "jfif_unit",
+        "jfif_density",
+        "adobe",
+        "adobe_transform",
+        "progressive",
+        "progression",
+        "transparency",
+        "gamma",
+        "srgb",
+        "chromaticity",
+        "interlace",
+        "loop",
+        "duration",
+        "background",
+    }
+)
+
+
 def _to_webp(data: bytes, max_side: int, quality: int, max_pixels: int) -> bytes | None:
     """WebP-версія зображення або None, якщо краще лишити оригінал.
 
-    Оригінал лишається, лише коли WebP не менший і в оригіналі немає EXIF/XMP: файл із
+    Оригінал лишається, лише коли WebP не менший і в оригіналі немає метаданих (EXIF, XMP, IPTC,
+    коментарів, тексту PNG): файл із
     метаданими (можливо, GPS) не зберігаємо ніколи. Блокуючий код — викликати в потоці.
     """
     try:
@@ -113,9 +141,7 @@ def _to_webp(data: bytes, max_side: int, quality: int, max_pixels: int) -> bytes
             # Розмір з заголовка — до декодування пікселів.
             if width * height > max_pixels:
                 raise _too_many_pixels(max_pixels)
-            has_metadata = bool(img.getexif()) or any(
-                k in img.info for k in ("xmp", "XML:com.adobe.xmp")
-            )
+            has_metadata = bool(img.getexif()) or any(k not in _TECHNICAL_INFO for k in img.info)
             icc_profile = img.info.get("icc_profile")
             scale = min(1.0, max_side / max(width, height))
             # JPEG декодується одразу в зменшеному масштабі (1/2, 1/4, 1/8) — менше пам'яті.
