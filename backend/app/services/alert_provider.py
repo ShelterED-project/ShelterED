@@ -6,6 +6,7 @@ alerts.in.ua іншим API: провайдер віддає лише актив
 """
 
 import datetime as dt
+import json
 import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -119,23 +120,38 @@ class AlertsInUaProvider(AlertProvider):
         self._token = settings.alerts_api_token
         self._url = settings.alerts_api_url
         self._timeout = settings.alerts_http_timeout_s
+        self._max_bytes = settings.alerts_max_response_bytes
         self._transport = transport
 
     async def active_alerts(self) -> ActiveAlerts:
         headers = {"Authorization": f"Bearer {self._token.get_secret_value()}"}
         try:
-            async with httpx.AsyncClient(
-                timeout=self._timeout, transport=self._transport
-            ) as client:
-                response = await client.get(self._url, headers=headers)
+            async with (
+                httpx.AsyncClient(timeout=self._timeout, transport=self._transport) as client,
+                client.stream("GET", self._url, headers=headers) as response,
+            ):
+                if response.status_code != 200:
+                    raise AlertProviderError(f"http_{response.status_code}")
+                body = await self._read_capped(response)
         except httpx.TimeoutException as exc:
             raise AlertProviderError("timeout") from exc
         except httpx.HTTPError as exc:
             raise AlertProviderError("network_error") from exc
-        if response.status_code != 200:
-            raise AlertProviderError(f"http_{response.status_code}")
         try:
-            data = response.json()
+            data = json.loads(body)
         except ValueError as exc:
             raise AlertProviderError("invalid_response") from exc
         return parse_alerts_in_ua(data)
+
+    async def _read_capped(self, response: httpx.Response) -> bytes:
+        """Тіло (вже розпаковане) не більше ALERTS_MAX_RESPONSE_BYTES: зламане чи підмінене API
+        не з'їсть пам'ять воркера. Більше — помилка провайдера, як невалідна відповідь
+        (тривоги лишаються активними, відбою немає)."""
+        chunks: list[bytes] = []
+        size = 0
+        async for chunk in response.aiter_bytes():
+            size += len(chunk)
+            if size > self._max_bytes:
+                raise AlertProviderError("response_too_large")
+            chunks.append(chunk)
+        return b"".join(chunks)

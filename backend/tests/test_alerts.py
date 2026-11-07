@@ -345,6 +345,32 @@ async def test_alerts_in_ua_provider_http(enabled_settings) -> None:
     assert exc.value.reason == "http_429" and "t0ken" not in str(exc.value)
 
 
+async def test_alerts_in_ua_oversized_response_is_provider_error(
+    db_session, world, enabled_settings
+) -> None:
+    """Відповідь понад ALERTS_MAX_RESPONSE_BYTES не читається до кінця й не означає відбою."""
+    settings = enabled_settings.model_copy(update={"alerts_max_response_bytes": 1024})
+    big = {"alerts": [], "padding": "x" * 2048}
+    provider = AlertsInUaProvider(
+        settings, transport=httpx.MockTransport(lambda r: httpx.Response(200, json=big))
+    )
+    with pytest.raises(AlertProviderError) as exc:
+        await provider.active_alerts()
+    assert exc.value.reason == "response_too_large"
+    # Під лімітом — та сама відповідь розбирається.
+    small = AlertsInUaProvider(
+        settings, transport=httpx.MockTransport(lambda r: httpx.Response(200, json={"alerts": []}))
+    )
+    assert await small.active_alerts() == ActiveAlerts([])
+
+    # Опитування з надто великою відповіддю: активна тривога лишається (не хибний відбій).
+    t0 = now()
+    await service.poll(db_session, FakeProvider([api_alert()]), now=t0)
+    result = await service.poll(db_session, provider, now=t0 + dt.timedelta(seconds=30))
+    assert result == {"error": "response_too_large"}
+    assert await count(db_session, AlertEvent, AlertEvent.ended_at.is_(None)) == 2
+
+
 def test_poll_task_disabled_without_token() -> None:
     assert alerts_worker.poll() == {"skipped": "disabled"}
 

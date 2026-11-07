@@ -106,6 +106,8 @@ class Settings(BaseSettings):
     alerts_api_token: SecretStr | None = None
     alerts_api_url: str = "https://api.alerts.in.ua/v1/alerts/active.json"
     alerts_http_timeout_s: float = 10.0
+    # Найбільша (розпакована) відповідь API тривог, байти; більша — збій джерела, не відбій.
+    alerts_max_response_bytes: int = 2 * 1024 * 1024
     # Інтервал опитування (ліміт alerts.in.ua — 8–10 запитів на хвилину з IP).
     alerts_poll_interval_s: int = 30
     # Без успішного опитування довше за це джерело вважається недоступним (B7.6).
