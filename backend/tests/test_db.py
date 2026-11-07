@@ -108,3 +108,43 @@ async def test_progress_aggregates_backfill_accepts_decimal_progress(committed):
             text("SELECT full_at FROM module_progress WHERE student_id = :s"), {"s": student.id}
         )
     assert full_at == at
+
+
+async def test_app_connections_limit_idle_in_transaction(migrated_db, monkeypatch):
+    """З'єднання застосунку (API-пул і Celery) мають idle_in_transaction_session_timeout:
+    сесія, що простоює у відкритій транзакції, розривається сервером."""
+    import asyncio
+
+    from sqlalchemy.exc import DBAPIError
+    from sqlalchemy.ext.asyncio import create_async_engine
+    from sqlalchemy.pool import NullPool
+
+    from app.core import db
+    from app.core.config import get_settings
+
+    show = text("SHOW idle_in_transaction_session_timeout")
+    async with db.standalone_session() as session:
+        assert await session.scalar(show) == "1min"
+    db.get_engine.cache_clear()
+    try:
+        async with db.get_engine().connect() as conn:
+            assert await conn.scalar(show) == "1min"
+    finally:
+        await db.get_engine().dispose()
+        db.get_engine.cache_clear()
+
+    monkeypatch.setenv("DB_IDLE_IN_TRANSACTION_TIMEOUT_S", "1")
+    get_settings.cache_clear()
+    try:
+        settings = get_settings()
+        engine = create_async_engine(
+            migrated_db, connect_args=db.connect_args(settings), poolclass=NullPool
+        )
+        async with engine.connect() as conn:
+            await conn.execute(text("SELECT 1"))  # транзакція відкрита
+            await asyncio.sleep(1.5)
+            with pytest.raises(DBAPIError):
+                await conn.execute(text("SELECT 1"))
+        await engine.dispose()
+    finally:
+        get_settings.cache_clear()

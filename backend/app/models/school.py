@@ -149,10 +149,16 @@ class ScheduleOverride(TimestampMixin, Base):
         CheckConstraint(
             "starts_at IS NULL OR ends_at IS NULL OR ends_at > starts_at", name="time_order"
         ),
+        # Урок ставиться лише в додатковий урок без слота (у слот — через lesson_assignment).
+        CheckConstraint(
+            "lesson_id IS NULL OR (kind = 'extra' AND slot_id IS NULL)", name="extra_lesson"
+        ),
         # Не більше одного перевизначення слота на дату (extra без слота — не обмежені).
         UniqueConstraint("slot_id", "date", name="uq_schedule_override_slot_date"),
         # Розклад класу на період.
         Index("ix_schedule_override_class_id_date", "class_id", "date"),
+        # У які дні стоїть урок (як ix_lesson_assignment_lesson_id).
+        Index("ix_schedule_override_lesson_id", "lesson_id"),
     )
 
     id: Mapped[uuid.UUID] = uuid_pk()
@@ -164,6 +170,9 @@ class ScheduleOverride(TimestampMixin, Base):
     subject_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("subject.id"))
     starts_at: Mapped[dt.time | None] = mapped_column(Time)
     ends_at: Mapped[dt.time | None] = mapped_column(Time)
+    # Додатковий урок поза розкладом, який ставить вчитель класу (kind = extra, без слота);
+    # час тоді необов'язковий.
+    lesson_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("lesson.id"))
 
 
 class LessonAssignment(Base):

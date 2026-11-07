@@ -12,6 +12,7 @@ from typing import Literal
 from zoneinfo import ZoneInfo
 
 DEFAULT_TZ = "Europe/Kyiv"
+_EPOCH = dt.datetime(1970, 1, 1, tzinfo=dt.UTC)
 
 
 @dataclass(frozen=True)
@@ -34,6 +35,8 @@ class OverrideData:
     subject_id: uuid.UUID | None
     starts_at: dt.time | None
     ends_at: dt.time | None
+    # Урок додаткового уроку вчителя (extra без слота); час тоді може бути порожнім.
+    lesson_id: uuid.UUID | None = None
 
 
 @dataclass(frozen=True)
@@ -42,10 +45,11 @@ class ResolvedItem:
     slot_id: uuid.UUID | None
     override_id: uuid.UUID | None
     subject_id: uuid.UUID
-    starts_at: dt.time
-    ends_at: dt.time
-    starts_at_utc: dt.datetime
-    ends_at_utc: dt.datetime
+    # Порожні лише в додаткового уроку без часу: він є в розкладі й пакеті, але не «зараз».
+    starts_at: dt.time | None
+    ends_at: dt.time | None
+    starts_at_utc: dt.datetime | None
+    ends_at_utc: dt.datetime | None
     lesson_id: uuid.UUID | None
 
 
@@ -107,7 +111,8 @@ def resolve_day(
             )
         )
     for o in extras:
-        assert o.subject_id and o.starts_at and o.ends_at  # гарантує валідація API
+        # Гарантує валідація API: предмет є завжди, час — обидві межі або жодної.
+        assert o.subject_id and (o.starts_at is None) == (o.ends_at is None)
         items.append(
             ResolvedItem(
                 kind="extra",
@@ -116,12 +121,20 @@ def resolve_day(
                 subject_id=o.subject_id,
                 starts_at=o.starts_at,
                 ends_at=o.ends_at,
-                starts_at_utc=to_utc(day, o.starts_at, tz),
-                ends_at_utc=to_utc(day, o.ends_at, tz),
-                lesson_id=None,
+                starts_at_utc=None if o.starts_at is None else to_utc(day, o.starts_at, tz),
+                ends_at_utc=None if o.ends_at is None else to_utc(day, o.ends_at, tz),
+                lesson_id=o.lesson_id,
             )
         )
-    items.sort(key=lambda i: (i.starts_at_utc, i.ends_at_utc))
+    # Уроки без часу — наприкінці дня; стабільне сортування зберігає порядок із БД (за id),
+    # тож вміст пакета детермінований.
+    items.sort(
+        key=lambda i: (
+            i.starts_at_utc is None,
+            i.starts_at_utc or _EPOCH,
+            i.ends_at_utc or _EPOCH,
+        )
+    )
     return items
 
 
@@ -147,6 +160,8 @@ def current_item(
     running = [
         i
         for i in resolve_day(day, slots, overrides, assignments, tz)
-        if i.starts_at_utc <= at_utc < i.ends_at_utc
+        if i.starts_at_utc is not None
+        and i.ends_at_utc is not None
+        and i.starts_at_utc <= at_utc < i.ends_at_utc
     ]
     return running[-1] if running else None

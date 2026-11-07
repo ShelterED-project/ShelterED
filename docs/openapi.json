@@ -1388,6 +1388,137 @@
         "title": "ErrorResponse",
         "type": "object"
       },
+      "ExtraLessonCreate": {
+        "description": "Додатковий урок класу на дату поза тижневим розкладом. `id` генерує клієнт; повтор із\nтими самими даними ідемпотентний. Час (місцевий час школи) необов'язковий: без нього урок\nє в розкладі дня й у пакеті, але не стає «поточним уроком».",
+        "examples": [
+          {
+            "date": "2026-11-09",
+            "ends_at": "15:45:00",
+            "id": "0192f0a0-0000-7000-8000-000000000501",
+            "lesson_id": "0192f0a0-0000-7000-8000-000000000301",
+            "starts_at": "15:00:00"
+          }
+        ],
+        "properties": {
+          "date": {
+            "format": "date",
+            "title": "Date",
+            "type": "string"
+          },
+          "ends_at": {
+            "anyOf": [
+              {
+                "format": "time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ends At"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "lesson_id": {
+            "format": "uuid",
+            "title": "Lesson Id",
+            "type": "string"
+          },
+          "starts_at": {
+            "anyOf": [
+              {
+                "format": "time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Starts At"
+          }
+        },
+        "required": [
+          "id",
+          "date",
+          "lesson_id"
+        ],
+        "title": "ExtraLessonCreate",
+        "type": "object"
+      },
+      "ExtraLessonOut": {
+        "properties": {
+          "class_id": {
+            "format": "uuid",
+            "title": "Class Id",
+            "type": "string"
+          },
+          "date": {
+            "format": "date",
+            "title": "Date",
+            "type": "string"
+          },
+          "ends_at": {
+            "anyOf": [
+              {
+                "format": "time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ends At"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "lesson_id": {
+            "format": "uuid",
+            "title": "Lesson Id",
+            "type": "string"
+          },
+          "pack_day_bytes": {
+            "description": "Розмір пакета класу на цю дату з цим уроком",
+            "title": "Pack Day Bytes",
+            "type": "integer"
+          },
+          "starts_at": {
+            "anyOf": [
+              {
+                "format": "time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Starts At"
+          },
+          "subject_id": {
+            "description": "Предмет уроку",
+            "format": "uuid",
+            "title": "Subject Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "class_id",
+          "date",
+          "lesson_id",
+          "subject_id",
+          "starts_at",
+          "ends_at",
+          "pack_day_bytes"
+        ],
+        "title": "ExtraLessonOut",
+        "type": "object"
+      },
       "GapQuestion": {
         "properties": {
           "answered": {
@@ -2104,10 +2235,12 @@
             "type": "string"
           },
           "mime_type": {
+            "description": "Тип збереженого файла (зображення зазвичай image/webp)",
             "title": "Mime Type",
             "type": "string"
           },
           "sha256": {
+            "description": "sha256 збереженого файла (того, що за `url`)",
             "title": "Sha256",
             "type": "string"
           },
@@ -2525,6 +2658,19 @@
             "title": "Kind",
             "type": "string"
           },
+          "lesson_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Урок додаткового уроку вчителя (extra)",
+            "title": "Lesson Id"
+          },
           "slot_id": {
             "anyOf": [
               {
@@ -2570,7 +2716,8 @@
           "slot_id",
           "subject_id",
           "starts_at",
-          "ends_at"
+          "ends_at",
+          "lesson_id"
         ],
         "title": "OverrideOut",
         "type": "object"
@@ -3870,14 +4017,28 @@
         "description": "Один урок у розкладі конкретного дня (з урахуванням перевизначень).",
         "properties": {
           "ends_at": {
-            "format": "time",
-            "title": "Ends At",
-            "type": "string"
+            "anyOf": [
+              {
+                "format": "time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ends At"
           },
           "ends_at_utc": {
-            "format": "date-time",
-            "title": "Ends At Utc",
-            "type": "string"
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ends At Utc"
           },
           "kind": {
             "enum": [
@@ -3926,15 +4087,29 @@
             "title": "Slot Id"
           },
           "starts_at": {
-            "description": "Місцевий час школи",
-            "format": "time",
-            "title": "Starts At",
-            "type": "string"
+            "anyOf": [
+              {
+                "format": "time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Місцевий час школи; null лише в додаткового уроку без часу (kind=extra)",
+            "title": "Starts At"
           },
           "starts_at_utc": {
-            "format": "date-time",
-            "title": "Starts At Utc",
-            "type": "string"
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Starts At Utc"
           },
           "subject_id": {
             "format": "uuid",
@@ -8756,6 +8931,209 @@
         ]
       }
     },
+    "/classes/{class_id}/schedule/extra-lessons": {
+      "post": {
+        "description": "Додатковий урок класу на дату поза тижневим розкладом (без слота). Ідемпотентно за `id`.\nУ розкладі дня — `kind = extra`, `override_id` = цей `id`; урок іде в пакет дня. З часом\n(місцевий час школи) урок може бути «поточним уроком»; без часу — ні.",
+        "operationId": "create_extra_lesson_classes__class_id__schedule_extra_lessons_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "class_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Class Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExtraLessonCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Повтор із тим самим id і даними: наявний ресурс"
+          },
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExtraLessonOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Не автентифіковано"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Недостатньо прав"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Не знайдено"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "LESSON_NOT_PUBLISHED / ID_CONFLICT"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "PACK_DAY_LIMIT_EXCEEDED / VALIDATION_ERROR"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Extra Lesson",
+        "tags": [
+          "school"
+        ]
+      }
+    },
+    "/classes/{class_id}/schedule/extra-lessons/{extra_id}": {
+      "delete": {
+        "operationId": "delete_extra_lesson_classes__class_id__schedule_extra_lessons__extra_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "extra_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Extra Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "class_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Class Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Не автентифіковано"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Недостатньо прав"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Не знайдено"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete Extra Lesson",
+        "tags": [
+          "school"
+        ]
+      }
+    },
     "/classes/{class_id}/schedule/overrides": {
       "get": {
         "operationId": "list_overrides_classes__class_id__schedule_overrides_get",
@@ -8954,7 +9332,7 @@
                 }
               }
             },
-            "description": "Невалідні дані"
+            "description": "INVALID_SCHEDULE / LESSON_SUBJECT_MISMATCH (предмет уроку ≠ предмет слота на дату)"
           },
           "500": {
             "content": {
@@ -9445,7 +9823,7 @@
                 }
               }
             },
-            "description": "Невалідні дані"
+            "description": "INVALID_SCHEDULE / LESSON_SUBJECT_MISMATCH (предмет уроку ≠ предмет слота на дату): у `details.dates` — дні з сьогодні, де вже стоїть урок іншого предмета"
           },
           "500": {
             "content": {
@@ -9570,7 +9948,7 @@
         ]
       },
       "put": {
-        "description": "Ставить опублікований урок у слот на дату (заміна — тим самим PUT). Ідемпотентно.\nПакет класу на цю дату не може перевищити `PACK_MAX_DAY_BYTES` (50 МБ).",
+        "description": "Ставить опублікований урок у слот на дату (заміна — тим самим PUT). Ідемпотентно.\nПредмет уроку має збігатися з предметом слота на цю дату (з урахуванням заміни).\nПакет класу на цю дату не може перевищити `PACK_MAX_DAY_BYTES` (50 МБ).",
         "operationId": "assign_lesson_classes__class_id__schedule_slots__slot_id__lessons__date__put",
         "parameters": [
           {
@@ -9673,7 +10051,7 @@
                 }
               }
             },
-            "description": "PACK_DAY_LIMIT_EXCEEDED / INVALID_SCHEDULE"
+            "description": "PACK_DAY_LIMIT_EXCEEDED / INVALID_SCHEDULE / LESSON_SUBJECT_MISMATCH (предмет уроку ≠ предмет слота на дату)"
           },
           "500": {
             "content": {
@@ -11589,7 +11967,7 @@
         ]
       },
       "put": {
-        "description": "Вчитель завантажує файл потоком. `id` генерує клієнт; повтор ідемпотентний.\n\nДозволено: відео `video/mp4`, `video/webm` (≤ 30 МБ); зображення `image/jpeg`, `image/png`,\n`image/webp` (≤ 2 МБ); субтитри `text/vtt` у UTF-8 (≤ 200 КБ). Вміст перевіряється за\nсигнатурою. Відео без субтитрів не пройде публікацію уроку: прив'яжіть VTT через\n`PATCH /media/{id}`.",
+        "description": "Вчитель завантажує файл потоком. `id` генерує клієнт; повтор ідемпотентний.\n\nДозволено: відео `video/mp4`, `video/webm` (≤ 30 МБ); зображення `image/jpeg`, `image/png`,\n`image/webp` (≤ 2 МБ); субтитри `text/vtt` у UTF-8 (≤ 200 КБ). Вміст перевіряється за\nсигнатурою. Зображення зберігаються як WebP (довша сторона ≤ 1280 px, без EXIF/GPS), якщо\nтак менше або в оригіналі є метадані: `mime_type`, `size_bytes`, `sha256` і `url` у відповіді\nописують збережений файл. Відео без субтитрів не пройде публікацію уроку: прив'яжіть VTT через\n`PATCH /media/{id}`.",
         "operationId": "upload_media_media__media_id__put",
         "parameters": [
           {
@@ -11773,7 +12151,7 @@
                 }
               }
             },
-            "description": "INVALID_MEDIA (сигнатура, UTF-8, порожній)"
+            "description": "INVALID_MEDIA (сигнатура, UTF-8, порожній), INVALID_IMAGE (пошкоджене зображення), IMAGE_TOO_LARGE (забагато пікселів)"
           },
           "500": {
             "content": {
@@ -12262,7 +12640,7 @@
     },
     "/packs/{pack_id}": {
       "get": {
-        "description": "Вміст версії пакета з `ETag` (= `content_hash` у лапках), стиснутий gzip (brotli —\nні: окремої залежності не додаємо). Версія незмінна: стара версія лишається доступною за\nсвоїм id. Медіа — за URL з маніфесту. Доступ — як до класу пакета.",
+        "description": "Вміст версії пакета з `ETag` (= `content_hash` у лапках), стиснутий brotli або gzip\n(за `Accept-Encoding`; brotli в пріоритеті, пакети до його появи — лише gzip).\nВерсія незмінна: стара версія лишається доступною за\nсвоїм id. Медіа — за URL з маніфесту. Доступ — як до класу пакета.",
         "operationId": "get_pack_packs__pack_id__get",
         "parameters": [
           {
@@ -12439,7 +12817,7 @@
             "description": "Успішна відповідь",
             "headers": {
               "Content-Encoding": {
-                "description": "`gzip`, якщо клієнт його приймає (`Accept-Encoding`)",
+                "description": "`br` або `gzip` за `Accept-Encoding`, brotli в пріоритеті",
                 "schema": {
                   "type": "string"
                 }

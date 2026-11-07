@@ -131,6 +131,24 @@ celery -A app.workers.celery_app beat -l info
 
 Обов'язкові змінні: `DATABASE_URL`, `DATABASE_URL_DIRECT` (для міграцій), `JWT_SECRET`, `REDIS_URL`, `REDIS_RESULT_URL`, `RATE_LIMIT_REDIS_URL` (усі три Redis-URL за замовчуванням дивляться на `localhost:6380`, у контейнері їх треба задати), для push — `VAPID_*`. `FORWARDED_ALLOW_IPS` — IP чи підмережа Nginx. Медіа пишуться в `/app/media` — туди монтується том, який роздає Nginx. `.env` в образ не потрапляє (`.dockerignore`).
 
+## Медіа
+
+`PUT /media/{id}` пише файл у том (`MEDIA_ROOT`, у контейнері `/app/media`) під ключем `<kind>/<id>-<random>.<ext>`; URL — `MEDIA_URL_PREFIX` + ключ. Зображення зберігаються як WebP (≤ 1280 px, без EXIF/GPS), тож `mime_type` зображення зазвичай `image/webp`. Однаковий вміст зберігається один раз: кілька записів можуть посилатися на один файл.
+
+**Для DevOps (Nginx).** URL медіа незмінні: кожен файл має унікальний ключ і ніколи не перезаписується (нова версія — новий ключ). Тому `location /media/` можна кешувати назавжди (`immutable`) і обов'язково лишити Range-запити (докачування після обриву мережі; у Nginx для статики вони ввімкнені за замовчуванням, `max_ranges` не обмежувати). Готовий блок (шлях `alias` — куди в контейнер Nginx змонтовано той самий том):
+
+```nginx
+location /media/ {
+    alias /srv/media/;              # том, який у бекенді змонтовано в /app/media
+    # Без `always`: 404 не має кешуватися на рік. Увага: add_header тут скасовує заголовки,
+    # успадковані з server (HSTS тощо), — їх треба повторити в цьому блоці.
+    add_header Cache-Control "public, max-age=31536000, immutable";
+    add_header X-Content-Type-Options "nosniff" always;
+    etag on;
+    autoindex off;
+}
+```
+
 ## Web Push (VAPID)
 
 Пуші (тривога, відбій, «Рюкзак оновився», статус дитини в перекличці для батьків) підписуються ключами VAPID. Нова пара ключів:

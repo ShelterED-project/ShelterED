@@ -2,7 +2,7 @@ from functools import lru_cache
 from importlib.metadata import version
 from typing import Literal
 
-from pydantic import SecretStr, field_validator, model_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Єдине джерело версії — pyproject.toml (пакет встановлено через pip install -e).
@@ -50,6 +50,10 @@ class Settings(BaseSettings):
     database_ssl: bool = True
     db_pool_size: int = 5
     db_max_overflow: int = 5
+    # Postgres рве з'єднання застосунку, що простоює у відкритій транзакції довше за цей час
+    # (забутий commit не тримає блокувань і не будить Neon). 0 — вимкнено. Міграції (Alembic)
+    # мають власне з'єднання без цього обмеження.
+    db_idle_in_transaction_timeout_s: int = Field(default=60, ge=0)
 
     # Секрет підпису JWT: обов'язковий, значення за замовчуванням немає.
     jwt_secret: SecretStr
@@ -78,6 +82,11 @@ class Settings(BaseSettings):
     media_max_video_bytes: int = 30 * 1024 * 1024
     media_max_image_bytes: int = 2 * 1024 * 1024
     media_max_subtitles_bytes: int = 200 * 1024
+    # Зображення перекодовуються у WebP: довша сторона ≤ max_side, без EXIF/GPS.
+    # Більше пікселів — відмова ще до декодування (захист від «декомпресійних бомб»).
+    media_image_max_side: int = 1280
+    media_image_webp_quality: int = 80
+    media_image_max_pixels: int = 40_000_000
     # Ліміт пакета класу на день; той самий ліміт діє на один урок.
     pack_max_day_bytes: int = 50 * 1024 * 1024
     # Ліміт «Рюкзака» класу на 7 днів (пакети + унікальні медіа). Перевищення лише логується:

@@ -4,7 +4,7 @@ import datetime as dt
 import uuid
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, union_all
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
@@ -24,6 +24,7 @@ from app.schemas.school import (
     ClassCreate,
     ClassOut,
     ClassUpdate,
+    ExtraLessonCreate,
     OverrideCreate,
     SlotCreate,
     SlotUpdate,
@@ -43,6 +44,19 @@ def _not_found(what: str) -> AppError:
 
 def _invalid_schedule(message: str) -> AppError:
     return AppError("INVALID_SCHEDULE", message, status_code=422)
+
+
+def _subject_mismatch(lesson_subject_id: uuid.UUID, subject_id: uuid.UUID, **details) -> AppError:
+    return AppError(
+        "LESSON_SUBJECT_MISMATCH",
+        "Lesson subject differs from the subject of the schedule slot",
+        status_code=422,
+        details={
+            "lesson_subject_id": str(lesson_subject_id),
+            "subject_id": str(subject_id),
+            **details,
+        },
+    )
 
 
 _CLASS_NAME_TAKEN = AppError(
@@ -275,10 +289,42 @@ async def update_slot(session: AsyncSession, slot: ScheduleSlot, body: SlotUpdat
     if "subject_id" in data:
         klass = await session.get(SchoolClass, slot.class_id)
         await lessons_service.check_subject(session, data["subject_id"], klass.school_id)
+        if data["subject_id"] != slot.subject_id:
+            await _check_slot_lessons_subject(session, klass, slot, data["subject_id"])
     for field, value in data.items():
         setattr(slot, field, value)
     await session.commit()
     return slot
+
+
+async def _check_slot_lessons_subject(
+    session: AsyncSession, klass: SchoolClass, slot: ScheduleSlot, subject_id: uuid.UUID
+) -> None:
+    """Новий предмет слота не має розійтися з уроками, уже поставленими в нього з сьогодні
+    (минулі дні — історія; дні із заміною предмета перевизначенням мають свій предмет)."""
+    today = schedule.local_date(_now(), await school_tz(session, klass.school_id))
+    replaced = select(ScheduleOverride.id).where(
+        ScheduleOverride.slot_id == LessonAssignment.slot_id,
+        ScheduleOverride.date == LessonAssignment.date,
+        ScheduleOverride.subject_id.is_not(None),
+    )
+    rows = (
+        await session.execute(
+            select(LessonAssignment.date, Lesson.subject_id)
+            .join(Lesson, Lesson.id == LessonAssignment.lesson_id)
+            .where(
+                LessonAssignment.slot_id == slot.id,
+                LessonAssignment.date >= today,
+                Lesson.subject_id != subject_id,
+                ~replaced.exists(),
+            )
+            .order_by(LessonAssignment.date)
+        )
+    ).all()
+    if rows:
+        raise _subject_mismatch(
+            rows[0].subject_id, subject_id, dates=[r.date.isoformat() for r in rows]
+        )
 
 
 async def delete_slot(session: AsyncSession, slot: ScheduleSlot) -> None:
@@ -313,6 +359,15 @@ async def create_override(
             raise _invalid_schedule("Slot does not take place on this date")
     if body.subject_id is not None:
         await lessons_service.check_subject(session, body.subject_id, klass.school_id)
+    if body.kind == "replace" and body.subject_id is not None:
+        # Урок, уже поставлений у слот на цю дату, має бути з предмета заміни.
+        lesson_subject = await session.scalar(
+            select(Lesson.subject_id)
+            .join(LessonAssignment, LessonAssignment.lesson_id == Lesson.id)
+            .where(LessonAssignment.slot_id == body.slot_id, LessonAssignment.date == body.date)
+        )
+        if lesson_subject is not None and lesson_subject != body.subject_id:
+            raise _subject_mismatch(lesson_subject, body.subject_id)
     override, created = await insert_or_get(
         session,
         ScheduleOverride,
@@ -365,6 +420,7 @@ def _override_data(o: ScheduleOverride) -> schedule.OverrideData:
         subject_id=o.subject_id,
         starts_at=o.starts_at,
         ends_at=o.ends_at,
+        lesson_id=o.lesson_id,
     )
 
 
@@ -446,15 +502,31 @@ async def assign_lesson(
     slot = await get_slot(session, klass, slot_id)
     if not schedule.slot_active_on(_slot_data(slot), day):
         raise _invalid_schedule("Slot does not take place on this date")
-    cancelled = await session.scalar(
-        select(ScheduleOverride.id).where(
-            ScheduleOverride.slot_id == slot.id,
-            ScheduleOverride.date == day,
-            ScheduleOverride.kind == "cancel",
+    override = await session.scalar(
+        select(ScheduleOverride).where(
+            ScheduleOverride.slot_id == slot.id, ScheduleOverride.date == day
         )
     )
-    if cancelled is not None:
+    if override is not None and override.kind == "cancel":
         raise AppError("SLOT_CANCELLED", "Slot is cancelled on this date", status_code=409)
+    lesson = await _schedulable_lesson(session, teacher, lesson_id)
+    # Предмет слота на цю дату: заміна перевизначенням має пріоритет.
+    subject_id = (override.subject_id if override is not None else None) or slot.subject_id
+    if lesson.subject_id != subject_id:
+        raise _subject_mismatch(lesson.subject_id, subject_id)
+
+    size = await _check_day_size(session, klass, day, lesson.id, settings, exclude_slot_id=slot.id)
+    row = await session.get(LessonAssignment, (slot.id, day))
+    if row is None:
+        session.add(LessonAssignment(slot_id=slot.id, date=day, lesson_id=lesson.id))
+    else:
+        row.lesson_id = lesson.id
+    await session.commit()
+    return size
+
+
+async def _schedulable_lesson(session: AsyncSession, teacher: User, lesson_id: uuid.UUID) -> Lesson:
+    """Урок, який вчитель може поставити в розклад: опублікований урок його школи."""
     lesson = await session.get(Lesson, lesson_id)
     author = await session.get(User, lesson.author_id) if lesson else None
     if lesson is None or author is None or author.school_id != teacher.school_id:
@@ -463,13 +535,25 @@ async def assign_lesson(
         raise AppError(
             "LESSON_NOT_PUBLISHED", "Only published lessons can be scheduled", status_code=409
         )
+    return lesson
 
+
+async def _check_day_size(
+    session: AsyncSession,
+    klass: SchoolClass,
+    day: dt.date,
+    lesson_id: uuid.UUID,
+    settings: Settings,
+    *,
+    exclude_slot_id: uuid.UUID | None = None,
+) -> int:
+    """Розмір пакета класу на дату з уроком `lesson_id`; понад ліміт — 422."""
     # Серіалізуємо прив'язки класу, щоб дві паралельні не перевищили ліміт дня разом.
     await session.scalar(
         select(SchoolClass.id).where(SchoolClass.id == klass.id).with_for_update(key_share=True)
     )
-    others = await day_lesson_ids(session, klass, day, exclude_slot_id=slot.id)
-    size = await lessons_service.pack_size(session, {*others, lesson.id})
+    others = await day_lesson_ids(session, klass, day, exclude_slot_id=exclude_slot_id)
+    size = await lessons_service.pack_size(session, {*others, lesson_id})
     if size > settings.pack_max_day_bytes:
         raise AppError(
             "PACK_DAY_LIMIT_EXCEEDED",
@@ -477,12 +561,6 @@ async def assign_lesson(
             status_code=422,
             details={"size_bytes": size, "limit_bytes": settings.pack_max_day_bytes},
         )
-    row = await session.get(LessonAssignment, (slot.id, day))
-    if row is None:
-        session.add(LessonAssignment(slot_id=slot.id, date=day, lesson_id=lesson.id))
-    else:
-        row.lesson_id = lesson.id
-    await session.commit()
     return size
 
 
@@ -496,3 +574,81 @@ async def unassign_lesson(
         )
     )
     await session.commit()
+
+
+# ---------- додатковий урок поза розкладом (вчитель класу) ----------
+
+
+async def create_extra_lesson(
+    session: AsyncSession,
+    teacher: User,
+    klass: SchoolClass,
+    body: ExtraLessonCreate,
+    settings: Settings,
+) -> tuple[ScheduleOverride, bool, int]:
+    """Додатковий урок на дату без слота: перевизначення `extra` з `lesson_id` (предмет —
+    предмет уроку). Правила ті самі, що й для прив'язки до слота: опублікований урок своєї
+    школи, пакет дня ≤ ліміту. Ідемпотентно за `id`; (override, created, розмір пакета дня)."""
+    existing = await session.get(ScheduleOverride, body.id)
+    if existing is None:
+        lesson = await _schedulable_lesson(session, teacher, body.lesson_id)
+        subject_id = lesson.subject_id
+        size = await _check_day_size(session, klass, body.date, lesson.id, settings)
+    else:
+        # Повтор (зокрема після обриву мережі): перевірки вже пройдено, лишається порівняти
+        # дані (інші — 409 ID_CONFLICT).
+        subject_id = existing.subject_id
+    override, created = await insert_or_get(
+        session,
+        ScheduleOverride,
+        {
+            "id": body.id,
+            "class_id": klass.id,
+            "date": body.date,
+            "kind": "extra",
+            "slot_id": None,
+            "subject_id": subject_id,
+            "starts_at": body.starts_at,
+            "ends_at": body.ends_at,
+            "lesson_id": body.lesson_id,
+        },
+        compare=("class_id", "date", "kind", "slot_id", "lesson_id", "starts_at", "ends_at"),
+    )
+    if not created:
+        size = await lessons_service.pack_size(
+            session, await day_lesson_ids(session, klass, body.date)
+        )
+    await session.commit()
+    return override, created, size
+
+
+async def delete_extra_lesson(
+    session: AsyncSession, klass: SchoolClass, extra_id: uuid.UUID
+) -> None:
+    """Ідемпотентно: відсутній урок — теж 204. Інші перевизначення (адміністрації) не чіпає."""
+    await session.execute(
+        delete(ScheduleOverride).where(
+            ScheduleOverride.id == extra_id,
+            ScheduleOverride.class_id == klass.id,
+            ScheduleOverride.kind == "extra",
+            ScheduleOverride.lesson_id.is_not(None),
+        )
+    )
+    await session.commit()
+
+
+def scheduled_lessons():
+    """Підзапит (class_id, date, lesson_id) усіх уроків у розкладі класів: прив'язки до слотів
+    і додаткові уроки вчителів. Як і раніше з `lesson_assignment`, без урахування скасувань."""
+    return union_all(
+        select(
+            ScheduleSlot.class_id.label("class_id"),
+            LessonAssignment.date.label("date"),
+            LessonAssignment.lesson_id.label("lesson_id"),
+        ).join(ScheduleSlot, ScheduleSlot.id == LessonAssignment.slot_id),
+        select(
+            ScheduleOverride.class_id.label("class_id"),
+            ScheduleOverride.date.label("date"),
+            ScheduleOverride.lesson_id.label("lesson_id"),
+        ).where(ScheduleOverride.lesson_id.is_not(None)),
+    ).subquery("scheduled_lesson")

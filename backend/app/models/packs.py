@@ -30,6 +30,9 @@ class KnowledgePack(Base):
     built_at: Mapped[dt.datetime]
     # Готова відповідь GET /packs/{id}: канонічний JSON, стиснутий gzip.
     content_gzip: Mapped[bytes] = mapped_column(LargeBinary)
+    # Той самий JSON, стиснутий brotli (~на 15–20% менше за gzip); NULL у пакетах, зібраних
+    # до появи brotli — для них віддаємо gzip.
+    content_br: Mapped[bytes | None] = mapped_column(LargeBinary)
 
 
 class KnowledgePackLesson(Base):

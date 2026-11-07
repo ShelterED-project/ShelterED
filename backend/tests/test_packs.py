@@ -8,6 +8,7 @@ import uuid
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
+import brotli
 import pytest
 from conftest import auth_header, pushes
 from httpx import AsyncClient
@@ -36,6 +37,7 @@ async def media(db, world, kind: str, mime: str, size: int, **kw) -> MediaAsset:
         mime_type=mime,
         size_bytes=size,
         sha256="ab" * 32,
+        source_sha256="ab" * 32,
         uploaded_by=world.teacher_a.id,
         **kw,
     )
@@ -475,7 +477,7 @@ async def test_manifest_access(client: AsyncClient, world, media_storage, role, 
 
 async def test_get_pack_etag_and_gzip(client: AsyncClient, db_session, world, course) -> None:
     pack = next(p for p in await rebuild(db_session, world) if p.pack_date == course.day)
-    headers = auth_header(world.student_a)
+    headers = {**auth_header(world.student_a), "Accept-Encoding": "gzip"}
     resp = await client.get(f"/packs/{pack.id}", headers=headers)
     assert resp.status_code == 200
     # httpx сам розпаковує gzip: тіло — JSON пакета.
@@ -615,31 +617,55 @@ async def test_pack_metadata_queries_skip_content(db_session, world, course) -> 
 
 
 @pytest.mark.parametrize(
-    ("accept", "gzipped"),
+    ("accept", "encoding"),
     [
-        ("gzip", True),
-        ("br, gzip;q=0.5", True),
-        ("GZIP; q=1.0", True),
-        ("gzip;q=0", False),
-        ("gzip;q=0.0, identity", False),
-        ("*", True),
-        ("*;q=0", False),
-        ("identity, *;q=0", False),
-        ("gzip;q=0, *", False),
-        ("x-gzip", True),
-        ("deflate, br", False),
-        ("notgzip", False),
+        ("gzip", "gzip"),
+        ("br, gzip;q=0.5", "br"),
+        ("gzip, deflate, br", "br"),
+        ("br;q=0.5, gzip", "gzip"),
+        ("br;q=0, gzip", "gzip"),
+        ("BR", "br"),
+        ("GZIP; q=1.0", "gzip"),
+        ("gzip;q=0", None),
+        ("gzip;q=0.0, identity", None),
+        ("*", "gzip"),
+        ("*;q=0", None),
+        ("identity, *;q=0", None),
+        ("gzip;q=0, *", None),
+        ("x-gzip", "gzip"),
+        ("deflate, br", "br"),
+        ("notgzip", None),
     ],
 )
 async def test_get_pack_accept_encoding_q_values(
-    client: AsyncClient, db_session, world, course, accept, gzipped
+    client: AsyncClient, db_session, world, course, accept, encoding
 ) -> None:
     pack = (await rebuild(db_session, world))[0]
     headers = {**auth_header(world.student_a), "Accept-Encoding": accept}
     resp = await client.get(f"/packs/{pack.id}", headers=headers)
     assert resp.status_code == 200
-    assert (resp.headers.get("content-encoding") == "gzip") is gzipped
+    assert resp.headers.get("content-encoding") == encoding
+    # httpx розпаковує і brotli, і gzip.
     assert resp.json()["id"] == str(pack.id)
+
+
+async def test_get_pack_brotli_smaller_and_gzip_fallback_for_old_packs(
+    client: AsyncClient, db_session, world, course
+) -> None:
+    pack = (await rebuild(db_session, world))[0]
+    assert pack.content_br is not None
+    assert brotli.decompress(pack.content_br) == gzip.decompress(pack.content_gzip)
+    assert len(pack.content_br) < len(pack.content_gzip)
+
+    # Пакет, зібраний до появи brotli: клієнт просить br — отримує gzip.
+    pack.content_br = None
+    await db_session.commit()
+    headers = {**auth_header(world.student_a), "Accept-Encoding": "br, gzip"}
+    resp = await client.get(f"/packs/{pack.id}", headers=headers)
+    assert resp.headers["content-encoding"] == "gzip"
+    assert resp.json()["id"] == str(pack.id)
+    only_br = await client.get(f"/packs/{pack.id}", headers={**headers, "Accept-Encoding": "br"})
+    assert "content-encoding" not in only_br.headers and only_br.json()["id"] == str(pack.id)
 
 
 async def test_day_lesson_ids_counts_only_effective_assignments(db_session, world, course) -> None:

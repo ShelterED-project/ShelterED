@@ -43,7 +43,7 @@ from app.core.errors import AppError
 from app.models.lessons import Module, Question, Test
 from app.models.packs import KnowledgePack, KnowledgePackLesson
 from app.models.rollcall import RollCallSession, RollCallStatus
-from app.models.school import ClassMembership, LessonAssignment, ScheduleSlot, User
+from app.models.school import ClassMembership, User
 from app.models.sync import Attempt, ModuleProgress, SyncEvent
 from app.schemas.sync import (
     PAYLOAD_MODELS,
@@ -109,6 +109,9 @@ class Batch:
     # ("module" | "test", id) -> урок, урок -> чи доступний учню.
     lesson_of: dict[tuple[str, uuid.UUID], uuid.UUID | None] = field(default_factory=dict)
     lesson_access: dict[uuid.UUID, bool] = field(default_factory=dict)
+    # Клас переклички -> чи учень у ньому; тест -> питання для оцінювання (id, ключ, бали).
+    class_member: dict[uuid.UUID, bool] = field(default_factory=dict)
+    questions: dict[uuid.UUID, list[tuple[uuid.UUID, Any, int]]] = field(default_factory=dict)
 
 
 def _result(event_id: uuid.UUID, status: str, reason: str | None = None) -> SyncEventResult:
@@ -165,10 +168,9 @@ async def _student_has_lesson(
         .join(KnowledgePack, KnowledgePack.id == KnowledgePackLesson.pack_id)
         .where(KnowledgePack.class_id.in_(classes), KnowledgePackLesson.lesson_id == lesson_id)
     )
-    assigned = (
-        select(LessonAssignment.lesson_id)
-        .join(ScheduleSlot, ScheduleSlot.id == LessonAssignment.slot_id)
-        .where(ScheduleSlot.class_id.in_(classes), LessonAssignment.lesson_id == lesson_id)
+    scheduled = school_service.scheduled_lessons()
+    assigned = select(scheduled.c.lesson_id).where(
+        scheduled.c.class_id.in_(classes), scheduled.c.lesson_id == lesson_id
     )
     return bool(await session.scalar(select(or_(exists(in_pack), exists(assigned)))))
 
@@ -249,14 +251,28 @@ async def _check_test_attempt(
     await _check_lesson_access(session, batch, Test, payload.test_id)
 
 
-async def grade(
-    session: AsyncSession, test_id: uuid.UUID, answers: dict[Any, list[str]]
-) -> Decimal | None:
-    """Відсоток балів (0..100, 2 знаки): питання зараховане, якщо множина обраних варіантів
-    дорівнює ключу. Відповіді на питання не з цього тесту ігноруються. Тест без питань — None."""
-    questions = await session.execute(
+async def _questions(session: AsyncSession, test_id: uuid.UUID) -> list[tuple[uuid.UUID, Any, int]]:
+    rows = await session.execute(
         select(Question.id, Question.answer_key, Question.points).where(Question.test_id == test_id)
     )
+    return [tuple(r) for r in rows]  # type: ignore[misc]
+
+
+async def grade(
+    session: AsyncSession,
+    test_id: uuid.UUID,
+    answers: dict[Any, list[str]],
+    cache: dict[uuid.UUID, list[tuple[uuid.UUID, Any, int]]] | None = None,
+) -> Decimal | None:
+    """Відсоток балів (0..100, 2 знаки): питання зараховане, якщо множина обраних варіантів
+    дорівнює ключу. Відповіді на питання не з цього тесту ігноруються. Тест без питань — None.
+    `cache` — питання вже прочитаних тестів (на час пакета)."""
+    if cache is None:
+        questions = await _questions(session, test_id)
+    else:
+        if test_id not in cache:
+            cache[test_id] = await _questions(session, test_id)
+        questions = cache[test_id]
     total = earned = 0
     for qid, key, points in questions:
         total += points
@@ -412,7 +428,7 @@ async def _apply_test_attempt(
             answers={str(k): v for k, v in payload.answers.items()},
             completed_at_client=payload.completed_at,
             received_at=batch.received_at,
-            score=await grade(session, payload.test_id, payload.answers),
+            score=await grade(session, payload.test_id, payload.answers, batch.questions),
             credit_status="not_credited_repeat",
             is_suspicious=suspicious,
         )
@@ -427,14 +443,18 @@ async def _check_rollcall(
     rc = await session.get(RollCallSession, payload.session_id)
     if rc is None:
         raise Rejected("unknown_entity")
-    member = await session.scalar(
-        select(ClassMembership.user_id).where(
-            ClassMembership.class_id == rc.class_id,
-            ClassMembership.user_id == batch.user_id,
-            ClassMembership.member_role == "student",
+    if rc.class_id not in batch.class_member:
+        batch.class_member[rc.class_id] = (
+            await session.scalar(
+                select(ClassMembership.user_id).where(
+                    ClassMembership.class_id == rc.class_id,
+                    ClassMembership.user_id == batch.user_id,
+                    ClassMembership.member_role == "student",
+                )
+            )
+            is not None
         )
-    )
-    if member is None:
+    if not batch.class_member[rc.class_id]:
         raise Rejected("forbidden")
     if rc.closed_at is not None and _after_close(batch, occurred_at, rc.closed_at):
         raise Rejected("session_closed")

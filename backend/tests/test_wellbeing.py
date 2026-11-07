@@ -157,13 +157,15 @@ async def test_day_uses_skew_corrected_time(client, db_session, world) -> None:
     assert await answers_of(db_session, world.student_a) == [(today(), 4)]
 
 
-@pytest.mark.parametrize("shift", [dt.timedelta(days=3), dt.timedelta(days=-31)])
+@pytest.mark.parametrize("days", [3, -31])
 async def test_future_or_expired_answer_is_accepted_but_not_stored(
-    client, db_session, world, shift
+    client, db_session, world, days
 ) -> None:
     """Дата з майбутнього чи старша за строк зберігання (після поправки на зсув): подія
     `accepted` (outbox не блокується), але відповідь не записується."""
-    event = survey({"value": 1}, dt.datetime.now(dt.UTC) + shift)
+    # Полудень за Києвом, а не «зараз ± N×24 год»: через перехід на зимовий час 31 доба тому
+    # близько опівночі — це лише 30 календарних днів (ще в межах строку зберігання).
+    event = survey({"value": 1}, at(today() + dt.timedelta(days=days)))
     assert (await send(client, world.student_a, event))[0]["status"] == "accepted"
     assert await answers_of(db_session, world.student_a) == []
     logged = await db_session.get(SyncEvent, uuid.UUID(event["client_event_id"]))

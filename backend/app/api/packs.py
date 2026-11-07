@@ -65,11 +65,12 @@ def _etag_matches(if_none_match: str, etag: str) -> bool:
     return False
 
 
-def _accepts_gzip(accept_encoding: str | None) -> bool:
-    """Чи приймає клієнт gzip за `Accept-Encoding` (RFC 9110, з q-значеннями): явний `gzip`
-    (`x-gzip`) з q > 0, інакше `*` з q > 0. `gzip;q=0` — відмова."""
+def _choose_encoding(accept_encoding: str | None, has_br: bool) -> str | None:
+    """Стиснення за `Accept-Encoding` (RFC 9110, з q-значеннями): `br`, якщо клієнт його явно
+    приймає (q > 0, не нижче за gzip) і для пакета є brotli-версія; інакше `gzip` — явний
+    `gzip`/`x-gzip` з q > 0 або `*` з q > 0 (`gzip;q=0` — відмова); інакше без стиснення."""
     if not accept_encoding:
-        return False
+        return None
     weights: dict[str, float] = {}
     for part in accept_encoding.split(","):
         coding, *params = (p.strip() for p in part.split(";"))
@@ -85,10 +86,15 @@ def _accepts_gzip(accept_encoding: str | None) -> bool:
                 except ValueError:
                     q = 0.0
         weights[coding] = q
+    gzip_q = 0.0
     for coding in ("gzip", "x-gzip", "*"):
         if coding in weights:
-            return weights[coding] > 0
-    return False
+            gzip_q = weights[coding]
+            break
+    br_q = weights.get("br", 0.0)
+    if has_br and br_q > 0 and br_q >= gzip_q:
+        return "br"
+    return "gzip" if gzip_q > 0 else None
 
 
 @router.get(
@@ -103,7 +109,7 @@ def _accepts_gzip(accept_encoding: str | None) -> bool:
                     "schema": {"type": "string"},
                 },
                 "Content-Encoding": {
-                    "description": "`gzip`, якщо клієнт його приймає (`Accept-Encoding`)",
+                    "description": ("`br` або `gzip` за `Accept-Encoding`, brotli в пріоритеті"),
                     "schema": {"type": "string"},
                 },
             },
@@ -119,22 +125,27 @@ async def get_pack(
     if_none_match: Annotated[str | None, Header()] = None,
     accept_encoding: Annotated[str | None, Header()] = None,
 ) -> Response:
-    """Вміст версії пакета з `ETag` (= `content_hash` у лапках), стиснутий gzip (brotli —
-    ні: окремої залежності не додаємо). Версія незмінна: стара версія лишається доступною за
+    """Вміст версії пакета з `ETag` (= `content_hash` у лапках), стиснутий brotli або gzip
+    (за `Accept-Encoding`; brotli в пріоритеті, пакети до його появи — лише gzip).
+    Версія незмінна: стара версія лишається доступною за
     своїм id. Медіа — за URL з маніфесту. Доступ — як до класу пакета."""
     pack = await service.get_pack(session, pack_id)
     klass = await auth_service.get_class(session, pack.class_id)
     if klass is None or not await auth_service.can_access_class(session, user, klass):
         raise AppError("FORBIDDEN", "No access to this class", status_code=403)
+    # Лише читали: завершуємо транзакцію й віддаємо з'єднання в пул до відправки тіла (до 50 МБ
+    # повільною мережею), інакше воно простоює в транзакції й Postgres його розриває.
+    await session.commit()
     etag = f'"{pack.content_hash}"'
     headers = {"ETag": etag, **CACHE_HEADERS}
     if if_none_match and _etag_matches(if_none_match, etag):
         return Response(status_code=304, headers=headers)
-    if _accepts_gzip(accept_encoding):
+    encoding = _choose_encoding(accept_encoding, pack.content_br is not None)
+    if encoding is not None:
         return Response(
-            content=pack.content_gzip,
+            content=pack.content_br if encoding == "br" else pack.content_gzip,
             media_type="application/json",
-            headers={**headers, "Content-Encoding": "gzip"},
+            headers={**headers, "Content-Encoding": encoding},
         )
     return Response(
         content=gzip.decompress(pack.content_gzip), media_type="application/json", headers=headers

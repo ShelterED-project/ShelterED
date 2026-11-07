@@ -203,8 +203,54 @@ class OverrideOut(BaseModel):
     subject_id: uuid.UUID | None
     starts_at: dt.time | None
     ends_at: dt.time | None
+    lesson_id: uuid.UUID | None = Field(description="Урок додаткового уроку вчителя (extra)")
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class ExtraLessonCreate(BaseModel):
+    """Додатковий урок класу на дату поза тижневим розкладом. `id` генерує клієнт; повтор із
+    тими самими даними ідемпотентний. Час (місцевий час школи) необов'язковий: без нього урок
+    є в розкладі дня й у пакеті, але не стає «поточним уроком»."""
+
+    id: uuid.UUID
+    date: dt.date
+    lesson_id: uuid.UUID
+    starts_at: dt.time | None = None
+    ends_at: dt.time | None = None
+
+    @model_validator(mode="after")
+    def _check(self) -> "ExtraLessonCreate":
+        if (self.starts_at is None) != (self.ends_at is None):
+            raise ValueError("starts_at and ends_at go together")
+        if self.starts_at and self.ends_at:
+            _check_times(self.starts_at, self.ends_at)
+        return self
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {
+                    "id": "0192f0a0-0000-7000-8000-000000000501",
+                    "date": "2026-11-09",
+                    "lesson_id": LESSON_ID,
+                    "starts_at": "15:00:00",
+                    "ends_at": "15:45:00",
+                }
+            ]
+        }
+    )
+
+
+class ExtraLessonOut(BaseModel):
+    id: uuid.UUID
+    class_id: uuid.UUID
+    date: dt.date
+    lesson_id: uuid.UUID
+    subject_id: uuid.UUID = Field(description="Предмет уроку")
+    starts_at: dt.time | None
+    ends_at: dt.time | None
+    pack_day_bytes: int = Field(description="Розмір пакета класу на цю дату з цим уроком")
 
 
 class AssignmentRequest(BaseModel):
@@ -240,10 +286,12 @@ class ScheduleItem(BaseModel):
     slot_id: uuid.UUID | None
     override_id: uuid.UUID | None
     subject_id: uuid.UUID
-    starts_at: dt.time = Field(description="Місцевий час школи")
-    ends_at: dt.time
-    starts_at_utc: dt.datetime
-    ends_at_utc: dt.datetime
+    starts_at: dt.time | None = Field(
+        description="Місцевий час школи; null лише в додаткового уроку без часу (kind=extra)"
+    )
+    ends_at: dt.time | None
+    starts_at_utc: dt.datetime | None
+    ends_at_utc: dt.datetime | None
     lesson_id: uuid.UUID | None = Field(description="Призначений на цю дату урок, якщо є")
 
 

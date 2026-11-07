@@ -18,6 +18,7 @@ import uuid
 from typing import Any
 from zoneinfo import ZoneInfo
 
+import brotli
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import distinct_on
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -29,7 +30,7 @@ from app.core.errors import AppError
 from app.core.storage import MediaStorage
 from app.models.lessons import Card, Lesson, MediaAsset, Module, Question, Test
 from app.models.packs import KnowledgePack, KnowledgePackLesson, KnowledgePackMedia
-from app.models.school import LessonAssignment, ScheduleSlot, SchoolClass
+from app.models.school import SchoolClass
 from app.schemas.lessons import CardOut, ModuleOut, Option
 from app.schemas.packs import (
     MediaManifestItem,
@@ -244,7 +245,10 @@ async def build_content(
 
 
 # Метадані пакета без вмісту: стиснутий JSON читає лише `GET /packs/{id}`.
-_NO_CONTENT = defer(KnowledgePack.content_gzip, raiseload=True)
+_NO_CONTENT = (
+    defer(KnowledgePack.content_gzip, raiseload=True),
+    defer(KnowledgePack.content_br, raiseload=True),
+)
 
 
 async def latest_pack(
@@ -253,7 +257,7 @@ async def latest_pack(
     """Найновіша версія пакета дня (без `content_gzip`)."""
     return await session.scalar(
         select(KnowledgePack)
-        .options(_NO_CONTENT)
+        .options(*_NO_CONTENT)
         .where(KnowledgePack.class_id == class_id, KnowledgePack.pack_date == day)
         .order_by(KnowledgePack.version.desc())
         .limit(1)
@@ -266,7 +270,7 @@ async def _latest_packs(
     """Найновіша версія кожного дня `start`..`end` (без `content_gzip`), за датою."""
     rows = await session.scalars(
         select(KnowledgePack)
-        .options(_NO_CONTENT)
+        .options(*_NO_CONTENT)
         .where(
             KnowledgePack.class_id == class_id,
             KnowledgePack.pack_date >= start,
@@ -345,6 +349,9 @@ async def _try_build(
             size_bytes=len(raw),
             built_at=now,
             content_gzip=gzip.compress(raw, mtime=0),
+            # Якість 11 (максимум): пакет збирається один раз у Celery, ~30 мс на демо-пакет;
+            # на демо-даних −15% до gzip проти −9% на якості 9.
+            content_br=brotli.compress(raw, quality=11),
         )
         .on_conflict_do_nothing(constraint="uq_knowledge_pack_version")
         .returning(KnowledgePack.id)
@@ -450,16 +457,16 @@ async def rebuild_class(
 async def classes_with_lesson(
     session: AsyncSession, lesson_id: uuid.UUID, start: dt.date, end: dt.date
 ) -> list[uuid.UUID]:
+    scheduled = school_service.scheduled_lessons()
     rows = await session.scalars(
-        select(ScheduleSlot.class_id)
-        .join(LessonAssignment, LessonAssignment.slot_id == ScheduleSlot.id)
+        select(scheduled.c.class_id)
         .where(
-            LessonAssignment.lesson_id == lesson_id,
-            LessonAssignment.date >= start,
-            LessonAssignment.date <= end,
+            scheduled.c.lesson_id == lesson_id,
+            scheduled.c.date >= start,
+            scheduled.c.date <= end,
         )
         .distinct()
-        .order_by(ScheduleSlot.class_id)
+        .order_by(scheduled.c.class_id)
     )
     return list(rows)
 

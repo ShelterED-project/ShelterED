@@ -25,6 +25,8 @@ from app.schemas.school import (
     ClassOut,
     ClassUpdate,
     CurrentLessonOut,
+    ExtraLessonCreate,
+    ExtraLessonOut,
     JoinCodeRequest,
     OverrideCreate,
     OverrideOut,
@@ -45,6 +47,7 @@ R403 = {403: {"model": ErrorResponse, "description": "Недостатньо п�
 R404 = {404: {"model": ErrorResponse, "description": "Не знайдено"}}
 R409 = {409: {"model": ErrorResponse, "description": "Конфлікт (ID_CONFLICT та ін.)"}}
 R422 = {422: {"model": ErrorResponse, "description": "Невалідні дані"}}
+SUBJECT_MISMATCH = "LESSON_SUBJECT_MISMATCH (предмет уроку ≠ предмет слота на дату)"
 REPEAT = {200: {"description": "Повтор із тим самим id і даними: наявний ресурс"}}
 ACCESS = {**R401, **R403, **R404}
 
@@ -161,7 +164,14 @@ async def create_slot(
 @router.patch(
     "/classes/{class_id}/schedule/slots/{slot_id}",
     response_model=SlotOut,
-    responses={**ACCESS, **R422},
+    responses={
+        **ACCESS,
+        422: {
+            "model": ErrorResponse,
+            "description": f"INVALID_SCHEDULE / {SUBJECT_MISMATCH}: у `details.dates` — дні з "
+            "сьогодні, де вже стоїть урок іншого предмета",
+        },
+    },
 )
 async def update_slot(
     body: SlotUpdate, klass: AdminClass, slot_id: uuid.UUID, session: Session
@@ -204,7 +214,12 @@ async def list_overrides(
     "/classes/{class_id}/schedule/overrides",
     response_model=OverrideOut,
     status_code=status.HTTP_201_CREATED,
-    responses={**REPEAT, **ACCESS, **R409, **R422},
+    responses={
+        **REPEAT,
+        **ACCESS,
+        **R409,
+        422: {"model": ErrorResponse, "description": f"INVALID_SCHEDULE / {SUBJECT_MISMATCH}"},
+    },
 )
 async def create_override(
     body: OverrideCreate, klass: AdminClass, session: Session, response: Response
@@ -282,7 +297,7 @@ async def current_lesson(
         409: {"model": ErrorResponse, "description": "LESSON_NOT_PUBLISHED / SLOT_CANCELLED"},
         422: {
             "model": ErrorResponse,
-            "description": "PACK_DAY_LIMIT_EXCEEDED / INVALID_SCHEDULE",
+            "description": f"PACK_DAY_LIMIT_EXCEEDED / INVALID_SCHEDULE / {SUBJECT_MISMATCH}",
         },
     },
 )
@@ -296,6 +311,7 @@ async def assign_lesson(
     user: Staff,
 ) -> AssignmentOut:
     """Ставить опублікований урок у слот на дату (заміна — тим самим PUT). Ідемпотентно.
+    Предмет уроку має збігатися з предметом слота на цю дату (з урахуванням заміни).
     Пакет класу на цю дату не може перевищити `PACK_MAX_DAY_BYTES` (50 МБ)."""
     size = await service.assign_lesson(
         session, user, klass, slot_id, date, body.lesson_id, settings
@@ -313,5 +329,58 @@ async def unassign_lesson(
     klass: TeacherClass, slot_id: uuid.UUID, date: dt.date, session: Session
 ) -> Response:
     await service.unassign_lesson(session, klass, slot_id, date)
+    await enqueue_rebuild_class(klass.id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# ---------- додатковий урок поза розкладом (вчитель класу) ----------
+
+
+@router.post(
+    "/classes/{class_id}/schedule/extra-lessons",
+    response_model=ExtraLessonOut,
+    status_code=status.HTTP_201_CREATED,
+    responses={
+        **REPEAT,
+        **ACCESS,
+        409: {"model": ErrorResponse, "description": "LESSON_NOT_PUBLISHED / ID_CONFLICT"},
+        422: {"model": ErrorResponse, "description": "PACK_DAY_LIMIT_EXCEEDED / VALIDATION_ERROR"},
+    },
+)
+async def create_extra_lesson(
+    body: ExtraLessonCreate,
+    klass: TeacherClass,
+    session: Session,
+    settings: SettingsDep,
+    user: Staff,
+    response: Response,
+) -> ExtraLessonOut:
+    """Додатковий урок класу на дату поза тижневим розкладом (без слота). Ідемпотентно за `id`.
+    У розкладі дня — `kind = extra`, `override_id` = цей `id`; урок іде в пакет дня. З часом
+    (місцевий час школи) урок може бути «поточним уроком»; без часу — ні."""
+    extra, created, size = await service.create_extra_lesson(session, user, klass, body, settings)
+    await enqueue_rebuild_class(klass.id)
+    _created(response, created)
+    return ExtraLessonOut(
+        id=extra.id,
+        class_id=extra.class_id,
+        date=extra.date,
+        lesson_id=extra.lesson_id,
+        subject_id=extra.subject_id,
+        starts_at=extra.starts_at,
+        ends_at=extra.ends_at,
+        pack_day_bytes=size,
+    )
+
+
+@router.delete(
+    "/classes/{class_id}/schedule/extra-lessons/{extra_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses=ACCESS,
+)
+async def delete_extra_lesson(
+    klass: TeacherClass, extra_id: uuid.UUID, session: Session
+) -> Response:
+    await service.delete_extra_lesson(session, klass, extra_id)
     await enqueue_rebuild_class(klass.id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
