@@ -1,6 +1,9 @@
-import { addEvent } from '@/shared/db/outbox'
+import { db } from '@/shared/db/db'
 
-/** Відповідь учня на картку уроку: фіксується як подія в outbox, на сервер піде при появі звʼязку. */
+/**
+ * Відповідь учня на картку уроку. На сервер не йде (docs/sync-protocol.md, розділ 10):
+ * туди потрапляють лише module_progress і test_attempt. Зберігаємо локально, щоб не втратити.
+ */
 export function submitAnswer(cardId: string, answer: string) {
-  return addEvent('answer.submitted', { cardId, answer })
+  return db.cardAnswers.put({ cardId, answer, answeredAt: Date.now() })
 }

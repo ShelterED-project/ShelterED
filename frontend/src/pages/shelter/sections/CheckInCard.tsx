@@ -5,12 +5,12 @@ import type { RollCallStatus } from '@/features/roll-call/types'
 import { checkIn } from '../content'
 
 const STATUS_LABELS: Record<RollCallStatus, string> = {
-  shelter: checkIn.shelter,
+  in_shelter: checkIn.shelter,
   safe: checkIn.safe,
 }
 
 export default function CheckInCard() {
-  const { lastStatus, mark } = useRollCall()
+  const { lastStatus, error, mark } = useRollCall()
 
   return (
     <section className="flex flex-col gap-[11.5px] rounded-3xl border border-line bg-surface p-5 xl:p-6">
@@ -25,7 +25,7 @@ export default function CheckInCard() {
       <div className="flex flex-col gap-4 py-1">
         <button
           type="button"
-          onClick={() => mark('shelter')}
+          onClick={() => mark('in_shelter')}
           className="flex h-14 items-center justify-center gap-2 rounded-[10px] bg-accent text-base leading-6 font-bold text-oil shadow-[0_0_24px_5px_rgba(242,178,92,0.35)] focus-visible:ring-2 focus-visible:ring-parchment/60 focus-visible:outline-none"
         >
           <img src={iconLantern} alt="" width={24} height={24} />
@@ -39,6 +39,12 @@ export default function CheckInCard() {
           {checkIn.safe}
         </button>
       </div>
+
+      {error && (
+        <p role="alert" className="text-sm font-semibold text-accent">
+          {error}
+        </p>
+      )}
 
       {lastStatus && (
         <p role="status" className="text-sm font-semibold text-safe">

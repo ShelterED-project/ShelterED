@@ -1,6 +1,7 @@
 import iconQueue from '@/assets/shelter/queue.svg'
 import iconRefresh from '@/assets/shelter/refresh.svg'
 import { pluralUk } from '@/shared/lib/plural'
+import { requestSync } from '@/features/sync/syncOutbox'
 import type { OutboxStats } from '@/shared/db/useOutboxStats'
 import { connection } from '../content'
 
@@ -49,17 +50,17 @@ export default function Connection({ stats }: { stats: OutboxStats }) {
       <dl className="flex flex-col gap-2 border-t border-line-soft pt-4 text-sm leading-5">
         <div className="flex justify-between gap-4">
           <dt className="text-muted">{connection.answers}</dt>
-          <dd className="text-dim">{stats.byType['answer.submitted'] ?? 0}</dd>
+          <dd className="text-dim">{stats.byType['test_attempt'] ?? 0}</dd>
         </div>
         <div className="flex justify-between gap-4">
           <dt className="text-muted">{connection.rollCalls}</dt>
-          <dd className="text-dim">{stats.byType['roll_call.marked'] ?? 0}</dd>
+          <dd className="text-dim">{stats.byType['rollcall_status'] ?? 0}</dd>
         </div>
       </dl>
 
-      {/* TODO: запускати відправку черги, коли зʼявиться синхронізація */}
       <button
         type="button"
+        onClick={() => void requestSync()}
         className="flex h-11 items-center justify-center gap-2 rounded-[10px] border border-line-strong text-sm font-semibold text-parchment hover:bg-surface-2 focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:outline-none"
       >
         <img src={iconRefresh} alt="" width={16} height={16} />
