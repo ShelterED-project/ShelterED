@@ -5,8 +5,11 @@
 
 export const alert = {
   title: 'Повітряна тривога',
-  region: 'Сюди: область',
-  since: 'Сюди: з якого часу триває',
+  drillTitle: 'Тренувальна тривога',
+  since: (time: string) => `триває з ${time}`,
+  endedTitle: 'Відбій тривоги',
+  endedText: 'Можна повернутися на головну.',
+  home: 'На головну',
   sound: 'Звук вимкнено',
 }
 

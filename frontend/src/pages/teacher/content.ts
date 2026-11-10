@@ -18,7 +18,15 @@ export function greetingSubtitle(className: string | undefined): string {
   return `${className ?? greeting.noClass} · ${todayLabel()}`
 }
 
-export const manualAlarm = { full: 'Оголосити тривогу вручну', short: 'Тривога' }
+export const manualAlarm = {
+  full: 'Оголосити тривогу вручну',
+  short: 'Тривога',
+  end: 'Відбій',
+  choose: 'Яку тривогу оголосити для класу?',
+  drill: 'Тренувальна',
+  real: 'Справжня тривога',
+  cancel: 'Скасувати',
+}
 
 export const alertBanner = {
   loading: 'Завантаження…',
@@ -29,6 +37,7 @@ export const alertBanner = {
   activeTitle: 'Перекличка триває',
   drillTitle: 'Тренувальна перекличка триває',
   close: 'Закрити перекличку',
+  endAlarm: 'Відбій тривоги',
   offline: 'Немає звʼязку, показано останні отримані дані.',
 }
 

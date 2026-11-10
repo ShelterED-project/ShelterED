@@ -58,5 +58,7 @@ export function useTeacherRollCall() {
     actionError,
     start,
     close,
+    /** Одразу оновити перекличку (наприклад, після ручної тривоги, що її відкриває) */
+    refresh: () => void rollCall.refetch(),
   }
 }

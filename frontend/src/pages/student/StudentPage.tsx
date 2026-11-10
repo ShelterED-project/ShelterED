@@ -1,4 +1,5 @@
 import { useOutboxCount } from '@/shared/db/useOutboxCount'
+import AlertNotice from './sections/AlertNotice'
 import CalmCard from './sections/CalmCard'
 import CheckIn from './sections/CheckIn'
 import LessonBanner from './sections/LessonBanner'
@@ -19,6 +20,7 @@ export default function StudentPage() {
         <StudentHeader pending={pending} />
         <main className="flex flex-col gap-5 px-5 pt-6 pb-24 md:px-8 md:pb-8 xl:gap-6 xl:px-10 xl:py-8">
           <MobileGreeting />
+          <AlertNotice />
           <LessonBanner />
           <div className="flex flex-col gap-5 xl:flex-row xl:gap-6">
             <RouteSection className="xl:min-w-0 xl:flex-1" />

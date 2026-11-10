@@ -1,11 +1,11 @@
 import iconChevron from '@/assets/parent/chevron-down.svg'
 import iconShield from '@/assets/student/header-shield.svg'
-import iconAlarm from '@/assets/teacher/alarm-bell.svg'
 import LogoutButton from '@/features/auth/LogoutButton'
 import { useCurrentUser } from '@/features/auth/useCurrentUser'
 import Brand from '@/shared/ui/Brand'
 import { useTeacherRollCall } from '@/features/teacher/useTeacherRollCall'
-import { greeting, greetingSubtitle, manualAlarm } from '../content'
+import { greeting, greetingSubtitle } from '../content'
+import ManualAlarm from './ManualAlarm'
 
 export default function TeacherHeader() {
   const user = useCurrentUser()
@@ -42,18 +42,7 @@ export default function TeacherHeader() {
             className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 rotate-90"
           />
         </div>
-        {/* TODO: запускати ручну тривогу, коли зʼявиться модуль тривог */}
-        <button
-          type="button"
-          aria-label={manualAlarm.full}
-          className="flex h-11 items-center justify-center gap-2 rounded-[10px] border border-line-strong px-4 text-sm font-semibold text-parchment focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:outline-none md:w-11 md:rounded-xl md:border-line md:px-0 xl:w-auto xl:rounded-[10px] xl:border-line-strong xl:px-4"
-        >
-          <img src={iconAlarm} alt="" width={18} height={18} className="shrink-0" />
-          <span className="md:sr-only xl:not-sr-only">
-            <span className="xl:hidden">{manualAlarm.short}</span>
-            <span className="hidden xl:inline">{manualAlarm.full}</span>
-          </span>
-        </button>
+        <ManualAlarm />
         <button
           type="button"
           aria-label="Безпека"

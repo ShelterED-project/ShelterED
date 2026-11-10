@@ -1,4 +1,5 @@
 import { createBrowserRouter } from 'react-router'
+import AlertWatcher from '@/features/alerts/AlertWatcher'
 import RequireRole from '@/features/auth/RequireRole'
 import AdminPage from '@/pages/admin/AdminPage'
 import LandingPage from '@/pages/landing/LandingPage'
@@ -22,9 +23,15 @@ export const router = createBrowserRouter([
       {
         element: <RequireRole roles={['student']} />,
         children: [
-          { path: '/student', element: <StudentPage /> },
-          { path: '/student/lessons', element: <LessonsPage /> },
-          { path: '/shelter', element: <ShelterModePage /> },
+          {
+            // Спостерігач тривог: відкриває режим укриття, коли починається тривога.
+            element: <AlertWatcher />,
+            children: [
+              { path: '/student', element: <StudentPage /> },
+              { path: '/student/lessons', element: <LessonsPage /> },
+              { path: '/shelter', element: <ShelterModePage /> },
+            ],
+          },
         ],
       },
       {

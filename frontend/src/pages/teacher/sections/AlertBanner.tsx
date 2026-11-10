@@ -1,4 +1,5 @@
 import iconLantern from '@/assets/admin/alert-lantern.svg'
+import { useTeacherAlarm } from '@/features/teacher/useTeacherAlarm'
 import { useTeacherRollCall } from '@/features/teacher/useTeacherRollCall'
 import { alertBanner } from '../content'
 
@@ -13,6 +14,7 @@ const secondaryButton =
 
 export default function AlertBanner() {
   const { session, teacherClass, isLoading, isOffline, busy, actionError, start, close } = useTeacherRollCall()
+  const alarm = useTeacherAlarm()
 
   const title = session
     ? session.is_drill
@@ -43,9 +45,21 @@ export default function AlertBanner() {
         )}
       </div>
       {session ? (
-        <button type="button" onClick={() => void close()} disabled={busy} className={primaryButton}>
-          {alertBanner.close}
-        </button>
+        <div className="flex flex-col gap-2 md:flex-row">
+          {alarm.manualAlert && (
+            <button type="button" onClick={() => void alarm.end()} disabled={alarm.busy} className={primaryButton}>
+              {alertBanner.endAlarm}
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => void close()}
+            disabled={busy}
+            className={alarm.manualAlert ? secondaryButton : primaryButton}
+          >
+            {alertBanner.close}
+          </button>
+        </div>
       ) : (
         <div className="flex flex-col gap-2 md:flex-row">
           <button

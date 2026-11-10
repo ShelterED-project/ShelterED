@@ -16,6 +16,12 @@ export const greeting = {
 
 export const shelterMode = 'Режим укриття'
 
+export const alertNotice = {
+  title: 'Триває повітряна тривога',
+  drillTitle: 'Триває тренувальна тривога',
+  open: 'Режим укриття',
+}
+
 export const lessonBanner = {
   now: 'Урок зараз',
   next: 'Наступний урок',
