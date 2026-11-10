@@ -9,27 +9,43 @@ export const teacherRole = 'Вчитель'
 
 export const greeting = {
   hello: 'Добрий день',
-  subtitle: `Сюди: школа · клас · ${todayLabel()}`,
-  mobileSubtitle: `Сюди: клас · ${todayLabel()}`,
-  classLabel: 'Сюди: клас · кількість учнів',
+  noClass: 'Клас не призначено',
+  loadingClass: 'Завантаження класу…',
+}
+
+/** Підпис під привітанням: клас і сьогоднішня дата. */
+export function greetingSubtitle(className: string | undefined): string {
+  return `${className ?? greeting.noClass} · ${todayLabel()}`
 }
 
 export const manualAlarm = { full: 'Оголосити тривогу вручну', short: 'Тривога' }
 
 export const alertBanner = {
-  title: 'Сюди: поточна тривога (час початку, що з уроком)',
-  text: 'Сюди: чи отримали учні матеріали і чи працює локальний сервер',
-  action: 'Відкрити перекличку',
+  loading: 'Завантаження…',
+  idleTitle: 'Перекличка не запущена',
+  idleText: 'Запустіть її, коли почнеться тривога, або проведіть тренувальну.',
+  start: 'Запустити перекличку',
+  startDrill: 'Тренувальна',
+  activeTitle: 'Перекличка триває',
+  drillTitle: 'Тренувальна перекличка триває',
+  close: 'Закрити перекличку',
+  offline: 'Немає звʼязку, показано останні отримані дані.',
 }
 
 export type KpiIcon = 'shelter' | 'safe' | 'clock' | 'queue'
 
-export const kpis: { label: string; value: string; hint: string; icon: KpiIcon; accent?: boolean }[] = [
-  { label: 'В укритті', value: '—', hint: 'Сюди: скільки в укритті з усіх і час оновлення', icon: 'shelter', accent: true },
-  { label: 'В безпеці вдома', value: '—', hint: 'Сюди: скільки відмітились вдома', icon: 'safe' },
-  { label: 'Ще не відмітились', value: '—', hint: 'Сюди: скільки учнів без відмітки', icon: 'clock' },
-  { label: 'Записів у черзі', value: '—', hint: 'Сюди: скільки подій чекає синхронізації', icon: 'queue' },
+export const kpis: { id: 'in_shelter' | 'safe' | 'no_response' | 'queue'; label: string; icon: KpiIcon; accent?: boolean }[] = [
+  { id: 'in_shelter', label: 'В укритті', icon: 'shelter', accent: true },
+  { id: 'safe', label: 'В безпеці вдома', icon: 'safe' },
+  { id: 'no_response', label: 'Ще не відмітились', icon: 'clock' },
+  { id: 'queue', label: 'Записів у черзі', icon: 'queue' },
 ]
+
+export const kpiHints = {
+  noRollCall: 'Перекличка не запущена',
+  ofStudents: (total: number) => `з ${total} учнів`,
+  queue: 'Чекають синхронізації',
+}
 
 export type RollCallState = 'shelter' | 'safe' | 'pending'
 
@@ -37,13 +53,13 @@ export const rollCall = {
   title: 'Перекличка',
   remind: 'Нагадати',
   note: '«Ще не відмітився» — не привід для паніки: телефон міг просто сісти.',
-  rows: [{ initials: '—', name: 'Сюди: імʼя учня', state: 'pending', label: 'статус відмітки', time: '—' }] as {
-    initials: string
-    name: string
-    state: RollCallState
-    label: string
-    time: string
-  }[],
+  empty: 'Перекличка не запущена. Запустіть її, щоб побачити учнів класу.',
+  loading: 'Завантаження…',
+  states: {
+    in_shelter: { state: 'shelter', label: 'В укритті' },
+    safe: { state: 'safe', label: 'В безпеці' },
+    no_response: { state: 'pending', label: 'Ще не відмітився' },
+  } as Record<'in_shelter' | 'safe' | 'no_response', { state: RollCallState; label: string }>,
 }
 
 export const schedule = {

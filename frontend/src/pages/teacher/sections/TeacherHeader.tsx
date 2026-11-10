@@ -4,10 +4,12 @@ import iconAlarm from '@/assets/teacher/alarm-bell.svg'
 import LogoutButton from '@/features/auth/LogoutButton'
 import { useCurrentUser } from '@/features/auth/useCurrentUser'
 import Brand from '@/shared/ui/Brand'
-import { greeting, manualAlarm } from '../content'
+import { useTeacherRollCall } from '@/features/teacher/useTeacherRollCall'
+import { greeting, greetingSubtitle, manualAlarm } from '../content'
 
 export default function TeacherHeader() {
   const user = useCurrentUser()
+  const { teacherClass, isLoading } = useTeacherRollCall()
   return (
     <header className="sticky top-0 z-10 flex h-16 items-center justify-between gap-3 border-b border-line-soft bg-oil/95 px-5 backdrop-blur-sm md:px-8 xl:h-20 xl:px-10">
       <div className="md:hidden">
@@ -17,17 +19,20 @@ export default function TeacherHeader() {
         <h1 className="truncate font-heading text-2xl leading-[30px] text-parchment xl:text-[28px] xl:leading-[35px]">
           {greeting.hello}, {user?.fullName}
         </h1>
-        <p className="truncate text-sm text-dim">{greeting.subtitle}</p>
+        <p className="truncate text-sm text-dim">{greetingSubtitle(teacherClass?.name)}</p>
       </div>
       <div className="flex shrink-0 items-center gap-2 md:gap-3">
         <div className="relative hidden md:block">
           <select
             aria-label="Клас"
-            defaultValue="7b"
+            value={teacherClass?.id ?? ''}
+            onChange={() => {}}
             className="h-11 appearance-none rounded-[10px] border border-line bg-surface pr-9 pl-4 text-sm font-semibold text-parchment focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:outline-none"
           >
-            {/* TODO: список класів вчителя, коли зʼявиться API класів */}
-            <option value="7b">{greeting.classLabel}</option>
+            {/* Поки показуємо перший клас вчителя; вибір між кількома класами — окремий крок. */}
+            <option value={teacherClass?.id ?? ''}>
+              {teacherClass?.name ?? (isLoading ? greeting.loadingClass : greeting.noClass)}
+            </option>
           </select>
           <img
             src={iconChevron}
