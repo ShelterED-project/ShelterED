@@ -740,6 +740,15 @@ async def test_alert_journal(client: AsyncClient, db_session, world) -> None:
     assert {r["id"] for r in rows} == set(ids.values())
     starts = [r["started_at"] for r in rows]
     assert starts == sorted(starts, reverse=True)
+    # Чому спрацювала тривога з API — видно в журналі; у ручних ці поля null.
+    by_id = {r["id"]: r for r in rows}
+    api_row = by_id[ids["api"]]
+    assert (api_row["location_type"], api_row["location_uid"], api_row["alert_type"]) == (
+        "oblast",
+        "kyiv",
+        "air_raid",
+    )
+    assert by_id[ids["a"]]["location_type"] is None and by_id[ids["a"]]["alert_type"] is None
 
     today = now().astimezone(KYIV).date()
     future = await client.get(

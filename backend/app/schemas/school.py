@@ -2,7 +2,16 @@ import datetime as dt
 import uuid
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    field_validator,
+    model_validator,
+)
+
+from app.services.alert_provider import REGION_CITY_UIDS
 
 ClassName = Annotated[
     str,
@@ -67,6 +76,69 @@ class ClassOut(BaseModel):
                     "join_code": "K7M2XQ9P",
                     "join_code_expires_at": None,
                     "teacher_ids": ["0192f0a0-0000-7000-8000-0000000000bb"],
+                }
+            ]
+        },
+    )
+
+
+# ---------- школа: точні локації для тривог ----------
+
+# `location_uid` зі словника alerts.in.ua (ціле число як текст).
+AlertLocationUid = Annotated[str, StringConstraints(strip_whitespace=True, pattern=r"^[0-9]{1,9}$")]
+
+ALERT_LOCATIONS_DOC = (
+    "Uid району, громади й міста школи зі словника alerts.in.ua (`location_uid`). API "
+    "словника локацій не має: повний список — таблиця «Повний список локацій» у документації "
+    "https://devs.alerts.in.ua/ (https://docs.google.com/spreadsheets/d/"
+    "1XnTOzcPHd1LZUrarR1Fk43FUyl8Ae6a6M7pcwDRjNdA). Тривога в будь-якій із цих локацій "
+    "вмикає тривогу школи (перекличка, push) так само, як тривога області (`region_code`). "
+    "null — локація не вказана: лише тривоги області."
+)
+
+
+class SchoolAlertLocations(BaseModel):
+    """Точні локації школи для тривог. PUT замінює всі три поля: відсутнє чи null — очистити."""
+
+    alert_raion_uid: AlertLocationUid | None = Field(default=None, description="Район")
+    alert_hromada_uid: AlertLocationUid | None = Field(default=None, description="Громада")
+    alert_city_uid: AlertLocationUid | None = Field(
+        default=None,
+        description="Місто, що є частиною області (м. Київ і м. Севастополь — це `region_code`)",
+    )
+
+    @field_validator("alert_city_uid")
+    @classmethod
+    def _not_region_city(cls, value: str | None) -> str | None:
+        if value in REGION_CITY_UIDS:
+            raise ValueError("city with special status is a region: use school region_code")
+        return value
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {"alert_raion_uid": "56", "alert_hromada_uid": "1032", "alert_city_uid": None}
+            ]
+        }
+    )
+
+
+class SchoolAlertLocationsOut(BaseModel):
+    school_id: uuid.UUID
+    region_code: str = Field(description="Область (uid регіону alerts.in.ua); змінюється не тут")
+    alert_raion_uid: str | None
+    alert_hromada_uid: str | None
+    alert_city_uid: str | None
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {
+                    "school_id": "0192f0a0-0000-7000-8000-0000000000aa",
+                    "region_code": "14",
+                    "alert_raion_uid": "56",
+                    "alert_hromada_uid": "1032",
+                    "alert_city_uid": None,
                 }
             ]
         },
