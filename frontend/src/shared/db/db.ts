@@ -1,8 +1,9 @@
 import Dexie, { type EntityTable } from 'dexie'
 import type { Pack } from './packTypes'
-import type { CardAnswer, MetaRecord, OutboxEvent, StoredSession } from './types'
+import type { CardAnswer, LessonProgressRecord, MetaRecord, OutboxEvent, StoredSession } from './types'
 
 export const db = new Dexie('shelter-ed') as Dexie & {
+  progress: EntityTable<LessonProgressRecord, 'id'>
   packs: EntityTable<Pack, 'id'>
   events: EntityTable<OutboxEvent, 'client_event_id'>
   session: EntityTable<StoredSession, 'id'>
@@ -33,4 +34,9 @@ db.version(3).stores({
 // «Рюкзак»: пакети на день для офлайн-уроків. Ключ id, за pack_date чистимо минулі дні.
 db.version(4).stores({
   packs: 'id, pack_date, class_id',
+})
+
+// Локальний прогрес уроків: завершені модулі й здані тести (джерело для екрана уроку).
+db.version(5).stores({
+  progress: 'id, lesson_id',
 })

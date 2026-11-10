@@ -1,5 +1,6 @@
 import iconCheck from '@/assets/student/check-20.svg'
 import iconBook from '@/assets/student/book.svg'
+import { Link } from 'react-router'
 import { useTodayPack } from '@/features/packs/usePacks'
 import { pluralUk } from '@/shared/lib/plural'
 import { todayLessons } from '../content'
@@ -24,7 +25,6 @@ export default function TodayLessons() {
         <h2 className="font-heading text-xl leading-7 text-parchment xl:text-[22px]">{todayLessons.title}</h2>
         <p className="max-w-[102px] text-right text-xs text-dim md:max-w-none">{lessons ? todayLessons.hintSaved : todayLessons.hintMissing}</p>
       </div>
-      {/* TODO: відкривати урок за натисканням, коли зʼявиться сторінка уроку */}
       {(!lessons || lessons.length === 0) && (
         <p role="status" className="text-sm text-muted">
           {lessons ? todayLessons.empty : todayLessons.noPack}
@@ -32,9 +32,10 @@ export default function TodayLessons() {
       )}
       <ul className="grid gap-3 md:grid-cols-2">
         {(lessons ?? []).map((item) => (
-          <li
-            key={item.key}
-            className={`flex items-center gap-4 rounded-2xl border p-4 ${
+          <li key={item.key}>
+          <Link
+            to={`/shelter?lesson=${item.lesson.id}`}
+            className={`flex items-center gap-4 rounded-2xl border p-4 focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:outline-none ${
               item.status === 'now' ? 'border-accent/50 bg-surface-2' : 'border-line bg-surface-2/50'
             }`}
           >
@@ -53,6 +54,7 @@ export default function TodayLessons() {
               </span>
             </span>
             <LessonMark state={item.status === 'now' ? 'now' : item.status === 'done' ? 'done' : 'offline'} />
+          </Link>
           </li>
         ))}
       </ul>

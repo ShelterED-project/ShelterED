@@ -36,6 +36,21 @@ export interface CardAnswer {
   answeredAt: number
 }
 
+/**
+ * Локальний прогрес учня: завершений модуль або зданий тест. Екран уроку читає його звідси,
+ * бо події з outbox зникають після підтвердження сервером.
+ */
+export interface LessonProgressRecord {
+  /** id модуля або тесту */
+  id: string
+  kind: 'module' | 'test'
+  lesson_id: string
+  /** ISO 8601 UTC, час пристрою */
+  completed_at: string
+  /** Для тесту з ключем: набрані бали й максимум; для оцінюваного тесту без ключа null */
+  score: { points: number; max: number } | null
+}
+
 /** Дрібні значення пристрою: device_id, остання відома сесія переклички. */
 export interface MetaRecord {
   key: string

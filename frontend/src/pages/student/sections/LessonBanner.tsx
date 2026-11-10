@@ -1,10 +1,12 @@
 import iconLantern from '@/assets/student/banner-lantern.svg'
+import { useNavigate } from 'react-router'
 import { pickCurrentLesson, useTodayPack } from '@/features/packs/usePacks'
 import { pluralUk } from '@/shared/lib/plural'
 import { lessonBanner } from '../content'
 
 export default function LessonBanner() {
   const { lessons } = useTodayPack()
+  const navigate = useNavigate()
   const current = pickCurrentLesson(lessons)
 
   const eyebrow = current ? (current.status === 'now' ? lessonBanner.now : lessonBanner.next) : lessons ? lessonBanner.none : lessonBanner.noPack
@@ -34,10 +36,11 @@ export default function LessonBanner() {
         </h2>
         <p className="text-sm leading-5 text-muted">{text}</p>
       </div>
-      {/* TODO: підключити перехід до уроку й вправи для дихання, коли зʼявляться відповідні сторінки */}
+      {/* TODO: вправа для дихання, коли зʼявиться відповідна сторінка */}
       <div className="flex gap-2 md:shrink-0">
         <button
           type="button"
+          onClick={() => current && navigate(`/shelter?lesson=${current.lesson.id}`)}
           disabled={!current}
           className="h-12 flex-1 rounded-[10px] bg-accent px-6 disabled:opacity-50 text-[15px] font-semibold whitespace-nowrap text-oil focus-visible:ring-2 focus-visible:ring-parchment/60 focus-visible:outline-none md:flex-none"
         >
