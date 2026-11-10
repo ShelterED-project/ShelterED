@@ -422,6 +422,47 @@ async def test_parallel_polls_open_one_journal_entry_per_school(committed, enque
         assert await count(db, AlertEvent) == 1
 
 
+class GatedProvider(FakeProvider):
+    """Запит до API «висить», доки тест не відпустить `gate`."""
+
+    def __init__(self, alerts: list[ProviderAlert] | None = None) -> None:
+        super().__init__(alerts)
+        self.called = asyncio.Event()
+        self.gate = asyncio.Event()
+
+    async def active_alerts(self) -> ActiveAlerts:
+        self.called.set()
+        await self.gate.wait()
+        return await super().active_alerts()
+
+
+async def test_older_poll_response_is_not_applied_after_newer(committed, enqueued) -> None:
+    """Запит до API — під замком опитування: другий запуск питає API лише після того, як
+    перший застосував свою відповідь. Інакше давніша відповідь «тривоги немає» застосувалася
+    б після новішої «тривога є» і дала б хибний відбій."""
+    await committed.factory.school()
+    await committed.session.commit()
+    older = GatedProvider([])
+    newer = GatedProvider([api_alert()])
+    newer.gate.set()
+
+    async def run(provider: FakeProvider) -> dict[str, int | str]:
+        async with committed.maker() as db:
+            return await service.poll(db, provider)
+
+    first = asyncio.create_task(run(older))
+    await asyncio.wait_for(older.called.wait(), 5)
+    second = asyncio.create_task(run(newer))
+    await asyncio.sleep(0.3)
+    assert not newer.called.is_set()  # чекає замка, поки перший не завершився
+    older.gate.set()
+    results = await asyncio.gather(first, second)
+    assert [r["started"] for r in results] == [0, 1]
+    async with committed.maker() as db:
+        assert await count(db, AlertEvent, AlertEvent.ended_at.is_(None)) == 1
+    assert pushes(enqueued, "all_clear") == []
+
+
 def test_parse_alerts_in_ua_filters_and_validates() -> None:
     t = dt.datetime(2026, 11, 5, 9, 30, tzinfo=dt.UTC)
     data = {

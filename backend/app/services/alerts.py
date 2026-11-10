@@ -365,6 +365,12 @@ async def poll(
     (з найранішою такою тривогою) + реакція; ще одна тривога поверх — нічого. Відбій школи —
     коли не лишилось жодної (лише якщо відповідь повна: усі записи розібрано). Ідемпотентний:
     повторний запуск з тими самими даними нічого не змінює."""
+    # Опитування по черзі: запит до API, «школа вже під тривогою?» і вставка рядка — під одним
+    # замком. Паралельний запуск не відкриє школі другий рядок з іншою тривогою провайдера, а
+    # відповідь, отримана раніше, не застосується після новішої (хибний відбій).
+    await session.execute(
+        select(func.pg_advisory_xact_lock(func.hashtextextended(_POLL_LOCK_KEY, 0)))
+    )
     now = now or _now()
     try:
         response = await provider.active_alerts()
@@ -377,11 +383,6 @@ async def poll(
     active = response.alerts
     pushes = Pushes()
     started = reopened = 0
-    # Опитування по черзі: «школа вже під тривогою?» і вставка рядка — під одним замком,
-    # паралельний запуск не відкриє школі другий рядок з іншою тривогою провайдера.
-    await session.execute(
-        select(func.pg_advisory_xact_lock(func.hashtextextended(_POLL_LOCK_KEY, 0)))
-    )
     matching = await _matching_alerts(session, active)
     open_rows = (
         await session.execute(
