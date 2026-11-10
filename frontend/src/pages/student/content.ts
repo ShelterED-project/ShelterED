@@ -11,15 +11,18 @@ export const studentRole = 'Учень'
 export const greeting = {
   hello: 'Привіт',
   date: todayLabel({ capitalize: true }),
-  subtitle: `${todayLabel({ capitalize: true })} · Сюди: клас`,
+  subtitle: todayLabel({ capitalize: true }),
 }
 
 export const shelterMode = 'Режим укриття'
 
 export const lessonBanner = {
-  eyebrow: 'Сюди: тривога (час початку) і що з уроком',
-  title: 'Сюди: назва поточного уроку',
-  text: 'Сюди: кількість карток і тестів, тривалість, хто підготував',
+  now: 'Урок зараз',
+  next: 'Наступний урок',
+  none: 'На сьогодні уроків немає',
+  noPack: 'Пакет на сьогодні ще не збережено',
+  noPackText: 'Підключись до мережі один раз, і уроки збережуться на пристрої.',
+  noLessonsText: 'Відпочивай або повтори пройдене.',
   open: 'Відкрити урок',
   breathe: 'Подихати',
 }
@@ -27,17 +30,16 @@ export const lessonBanner = {
 export type RouteNodeKind = 'done' | 'todo' | 'current'
 export type RouteNodeId = 'natural' | 'fractions' | 'decimals' | 'percent'
 
+/** Вузли мапи: позиції заведені для чотирьох точок, тож показуємо до чотирьох предметів. */
+export const ROUTE_NODE_IDS: RouteNodeId[] = ['natural', 'fractions', 'decimals', 'percent']
+
 export const route = {
-  title: 'Сюди: маршрут предмета',
-  range: 'Сюди: від якого класу до якого',
-  // Сюди: теми маршруту з бекенда; id і kind задають позицію й вигляд вузла на мапі.
-  nodes: [
-    { id: 'natural', kind: 'done', label: 'Сюди: тема 1' },
-    { id: 'fractions', kind: 'done', label: 'Сюди: тема 2' },
-    { id: 'decimals', kind: 'todo', label: 'Сюди: тема 3', badge: 'статус' },
-    { id: 'percent', kind: 'current', label: 'Сюди: поточна тема' },
-  ] as { id: RouteNodeId; kind: RouteNodeKind; label: string; badge?: string }[],
-  moleSays: 'Сюди: порада ШІ-репетитора, з чого почати.',
+  title: 'Мій маршрут',
+  range: (done: number, total: number) => `Пройдено ${done} з ${total} уроків`,
+  gap: 'прогалина',
+  moleStart: (subject: string) => `Почни з предмета «${subject}».`,
+  moleDone: 'Усе, що є, пройдено. Молодець!',
+  moleEmpty: 'Пройди перший урок, і я покажу, куди йти далі.',
   go: 'Піти',
   breatheFirst: 'Спершу подихати',
 }
@@ -51,23 +53,30 @@ export const checkIn = {
   saved: 'Відмітку збережено',
 }
 
-export const sync = { package: 'Сюди: розмір пакета на сьогодні і чи збережено' }
+export const sync = {
+  noPack: 'Пакет на сьогодні ще не збережено',
+  saved: (time: string) => `Пакет на сьогодні збережено · оновлено о ${time}`,
+}
 
 export const calm = { title: 'Хвилинка спокою', text: 'Дихання з вогником · 2 хв' }
 
 export type LessonState = 'now' | 'offline' | 'done'
 
-export const todayLessons: {
-  title: string
-  items: { subject: string; name: string; meta: string; state: LessonState }[]
-  hint: string
-} = {
+export const todayLessons = {
   title: 'Уроки на сьогодні',
-  hint: 'Сюди: чи все збережено офлайн',
-  items: [{ subject: 'Сюди: предмет', name: 'назва уроку', meta: 'тривалість · з чого складається', state: 'offline' }],
+  hintSaved: 'усе збережено офлайн',
+  hintMissing: 'пакет ще не збережено',
+  empty: 'На сьогодні уроків немає.',
+  noPack: 'Пакет на сьогодні ще не збережено. Підключись до мережі один раз, і уроки зʼявляться тут.',
 }
 
 export type NavId = 'route' | 'lessons' | 'calm' | 'me' | 'settings'
+
+/** Розділи з готовою сторінкою мають маршрут; решта поки без переходу. */
+export const navRoutes: Partial<Record<NavId, string>> = {
+  route: '/student',
+  lessons: '/student/lessons',
+}
 
 export const sidebarNav: { id: NavId; label: string }[] = [
   { id: 'route', label: 'Маршрут' },

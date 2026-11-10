@@ -3,8 +3,12 @@ import mole from '@/assets/landing/mole.svg'
 import iconPin from '@/assets/student/pin-sm.svg'
 import mapDesktop from '@/assets/student/route-map.svg'
 import mapMobile from '@/assets/student/route-map-mobile.svg'
-import { route } from '../content'
-import type { RouteNodeId } from '../content'
+import { useAppSelector } from '@/app/hooks'
+import { useKnowledgeMapQuery } from '@/features/student/studentApi'
+import type { KnowledgeMapSubject } from '@/features/student/studentApi'
+import { skipToken } from '@reduxjs/toolkit/query/react'
+import { ROUTE_NODE_IDS, route } from '../content'
+import type { RouteNodeId, RouteNodeKind } from '../content'
 
 // Позиції вузлів у відсотках від розмірів мапи (мобільна → від md)
 const positions: Record<RouteNodeId, string> = {
@@ -16,7 +20,26 @@ const positions: Record<RouteNodeId, string> = {
 
 const label = 'text-sm font-semibold whitespace-nowrap text-parchment'
 
-function RouteNode({ node }: { node: (typeof route.nodes)[number] }) {
+interface RouteNodeData {
+  id: RouteNodeId
+  kind: RouteNodeKind
+  label: string
+  badge?: string
+}
+
+/** Перший незавершений предмет поточний, завершені пройдені, решта попереду (з позначкою про прогалину). */
+function buildNodes(subjects: KnowledgeMapSubject[]): RouteNodeData[] {
+  const isDone = (s: KnowledgeMapSubject) => s.lessons_total > 0 && s.lessons_completed >= s.lessons_total
+  const currentIndex = subjects.findIndex((s) => !isDone(s))
+  return subjects.slice(0, ROUTE_NODE_IDS.length).map((s, i) => ({
+    id: ROUTE_NODE_IDS[i],
+    kind: isDone(s) ? 'done' : i === currentIndex ? 'current' : 'todo',
+    label: s.name,
+    badge: s.is_gap ? route.gap : undefined,
+  }))
+}
+
+function RouteNode({ node }: { node: RouteNodeData }) {
   const pos = `absolute ${positions[node.id]}`
 
   if (node.kind === 'done') {
@@ -58,18 +81,27 @@ function RouteNode({ node }: { node: (typeof route.nodes)[number] }) {
 }
 
 export default function RouteSection({ className = '' }: { className?: string }) {
+  const userId = useAppSelector((s) => s.auth.session?.user.id)
+  const { data } = useKnowledgeMapQuery(userId ?? skipToken)
+  const subjects = data?.subjects ?? []
+  const nodes = buildNodes(subjects)
+  const done = subjects.reduce((sum, s) => sum + s.lessons_completed, 0)
+  const total = subjects.reduce((sum, s) => sum + s.lessons_total, 0)
+  const nextSubject = nodes.find((n) => n.kind === 'current')
+  const moleSays = subjects.length === 0 ? route.moleEmpty : nextSubject ? route.moleStart(nextSubject.label) : route.moleDone
+
   return (
     <section className={`flex flex-col gap-3 rounded-[22px] border border-line bg-surface p-5 xl:p-6 ${className}`}>
       <div className="flex items-center justify-between gap-3">
         <h2 className="font-heading text-xl leading-7 text-parchment xl:text-[22px]">{route.title}</h2>
-        <p className="shrink-0 text-xs text-dim">{route.range}</p>
+        <p className="shrink-0 text-xs text-dim">{subjects.length > 0 ? route.range(done, total) : ''}</p>
       </div>
 
       <div className="relative h-[324px] overflow-clip rounded-[18px] border border-line bg-oil/40 md:h-[364px] xl:h-[404px]">
         <img src={mapMobile} alt="" width={306} height={318} className="absolute inset-x-0 top-1 bottom-0 size-full md:hidden" />
         <img src={mapDesktop} alt="" width={644} height={398} className="absolute inset-x-0 top-1 bottom-0 hidden size-full md:block" />
         <ol>
-          {route.nodes.map((node) => (
+          {nodes.map((node) => (
             <RouteNode key={node.id} node={node} />
           ))}
         </ol>
@@ -84,7 +116,7 @@ export default function RouteSection({ className = '' }: { className?: string })
           className="size-20 shrink-0 drop-shadow-[0_0_7px_rgba(242,178,92,0.35)]"
         />
         <p className="flex-1 rounded-[18px] rounded-bl-[4px] border border-line bg-surface-2 px-4 py-3 font-mole text-[22px] leading-[1.15] font-semibold text-parchment">
-          {route.moleSays}
+          {moleSays}
         </p>
       </div>
 

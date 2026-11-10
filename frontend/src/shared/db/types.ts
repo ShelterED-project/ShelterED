@@ -55,5 +55,6 @@ export interface StoredSession {
     display_name: string
     last_name: string | null
     school_id: string | null
+    class_id?: string | null
   }
 }

@@ -1,7 +1,20 @@
 import iconLantern from '@/assets/student/banner-lantern.svg'
+import { pickCurrentLesson, useTodayPack } from '@/features/packs/usePacks'
+import { pluralUk } from '@/shared/lib/plural'
 import { lessonBanner } from '../content'
 
 export default function LessonBanner() {
+  const { lessons } = useTodayPack()
+  const current = pickCurrentLesson(lessons)
+
+  const eyebrow = current ? (current.status === 'now' ? lessonBanner.now : lessonBanner.next) : lessons ? lessonBanner.none : lessonBanner.noPack
+  const title = current?.lesson.title ?? (lessons ? lessonBanner.none : lessonBanner.noPack)
+  const text = current
+    ? `${current.startsAt}–${current.endsAt} · ${current.lesson.modules.length} ${pluralUk(current.lesson.modules.length, ['модуль', 'модулі', 'модулів'])} · ${current.minutes} хв`
+    : lessons
+      ? lessonBanner.noLessonsText
+      : lessonBanner.noPackText
+
   return (
     <section
       aria-labelledby="lesson-title"
@@ -12,20 +25,21 @@ export default function LessonBanner() {
         <img src={iconLantern} alt="" width={28} height={28} className="relative" />
       </div>
       <div className="flex min-w-0 flex-1 flex-col gap-1 pt-[5.5px] md:pt-0">
-        <p className="text-xs font-semibold tracking-[1.5px] text-accent uppercase">{lessonBanner.eyebrow}</p>
+        <p className="text-xs font-semibold tracking-[1.5px] text-accent uppercase">{eyebrow}</p>
         <h2
           id="lesson-title"
           className="pt-[2.5px] font-heading text-2xl leading-[30px] text-parchment xl:pt-[1.5px] xl:text-[26px] xl:leading-[32.5px]"
         >
-          {lessonBanner.title}
+          {title}
         </h2>
-        <p className="text-sm leading-5 text-muted">{lessonBanner.text}</p>
+        <p className="text-sm leading-5 text-muted">{text}</p>
       </div>
       {/* TODO: підключити перехід до уроку й вправи для дихання, коли зʼявляться відповідні сторінки */}
       <div className="flex gap-2 md:shrink-0">
         <button
           type="button"
-          className="h-12 flex-1 rounded-[10px] bg-accent px-6 text-[15px] font-semibold whitespace-nowrap text-oil focus-visible:ring-2 focus-visible:ring-parchment/60 focus-visible:outline-none md:flex-none"
+          disabled={!current}
+          className="h-12 flex-1 rounded-[10px] bg-accent px-6 disabled:opacity-50 text-[15px] font-semibold whitespace-nowrap text-oil focus-visible:ring-2 focus-visible:ring-parchment/60 focus-visible:outline-none md:flex-none"
         >
           {lessonBanner.open}
         </button>

@@ -79,6 +79,7 @@ async def test_pkce_happy_path(client: AsyncClient, world) -> None:
         "display_name": "Олена",
         "last_name": None,
         "school_id": str(world.school.id),
+        "class_id": None,
     }
 
 
@@ -372,6 +373,7 @@ async def test_student_first_join_creates_student(client: AsyncClient, world) ->
     assert me.json()["role"] == "student"
     assert me.json()["last_name"] == "Мельник"
     assert me.json()["school_id"] == str(world.school.id)
+    assert me.json()["class_id"] == str(world.class_a.id)
 
 
 async def test_student_rejoin_with_right_pin(client: AsyncClient, world) -> None:

@@ -1,7 +1,9 @@
+import { Link } from 'react-router'
 import LogoutButton from '@/features/auth/LogoutButton'
 import Brand from './Brand'
 
-export type NavItem = { id: string; label: string; icon: string }
+/** to: маршрут розділу; без нього пункт поки без переходу (розділ ще не зроблено). */
+export type NavItem = { id: string; label: string; icon: string; to?: string }
 export type SidebarUser = { initials: string; name: string; role: string }
 
 type Props = { items: NavItem[]; activeId: string; user: SidebarUser }
@@ -14,20 +16,24 @@ export default function AppSidebar({ items, activeId, user }: Props) {
       </div>
 
       <nav aria-label="Розділи" className="flex flex-col gap-1">
-        {/* TODO: підключити маршрути розділів, коли вони зʼявляться */}
         {items.map((item) => {
           const isActive = item.id === activeId
-          return (
-            <button
-              key={item.id}
-              type="button"
-              aria-current={isActive ? 'page' : undefined}
-              className={`flex h-11 items-center justify-center gap-3 rounded-[10px] px-3 text-[15px] focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:outline-none xl:justify-start ${
-                isActive ? 'bg-surface-2 font-semibold text-accent' : 'text-muted hover:bg-surface'
-              }`}
-            >
+          const className = `flex h-11 items-center justify-center gap-3 rounded-[10px] px-3 text-[15px] focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:outline-none xl:justify-start ${
+            isActive ? 'bg-surface-2 font-semibold text-accent' : 'text-muted hover:bg-surface'
+          }`
+          const content = (
+            <>
               <img src={item.icon} alt="" width={20} height={20} />
               <span className="sr-only xl:not-sr-only">{item.label}</span>
+            </>
+          )
+          return item.to ? (
+            <Link key={item.id} to={item.to} aria-current={isActive ? 'page' : undefined} className={className}>
+              {content}
+            </Link>
+          ) : (
+            <button key={item.id} type="button" aria-current={isActive ? 'page' : undefined} className={className}>
+              {content}
             </button>
           )
         })}

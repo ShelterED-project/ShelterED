@@ -7,6 +7,7 @@ import NotFoundPage from '@/pages/not-found/NotFoundPage'
 import ParentPage from '@/pages/parent/ParentPage'
 import RegisterPage from '@/pages/register/RegisterPage'
 import ShelterModePage from '@/pages/shelter/ShelterModePage'
+import LessonsPage from '@/pages/student/LessonsPage'
 import StudentPage from '@/pages/student/StudentPage'
 import TeacherPage from '@/pages/teacher/TeacherPage'
 import RootLayout from './RootLayout'
@@ -22,6 +23,7 @@ export const router = createBrowserRouter([
         element: <RequireRole roles={['student']} />,
         children: [
           { path: '/student', element: <StudentPage /> },
+          { path: '/student/lessons', element: <LessonsPage /> },
           { path: '/shelter', element: <ShelterModePage /> },
         ],
       },

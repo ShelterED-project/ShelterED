@@ -153,6 +153,29 @@ class UserOut(BaseModel):
     )
 
 
+class MeOut(UserOut):
+    """Поточний користувач. Для учня `class_id` -- його клас (потрібен, щоб запитати «Рюкзак»);
+    для інших ролей `null`."""
+
+    class_id: uuid.UUID | None = None
+
+    model_config = ConfigDict(
+        from_attributes=True,
+        json_schema_extra={
+            "examples": [
+                {
+                    "id": USER_ID,
+                    "role": "student",
+                    "display_name": "Іван",
+                    "last_name": "Петренко",
+                    "school_id": SCHOOL_ID,
+                    "class_id": "0192f0a0-0000-7000-8000-000000000001",
+                }
+            ]
+        },
+    )
+
+
 class AdminCreateUserRequest(BaseModel):
     email: Email
     display_name: Name

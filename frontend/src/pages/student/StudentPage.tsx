@@ -8,7 +8,6 @@ import StudentHeader from './sections/StudentHeader'
 import StudentSidebar from './sections/StudentSidebar'
 import StudentTabs from './sections/StudentTabs'
 import SyncStatus from './sections/SyncStatus'
-import TodayLessons from './sections/TodayLessons'
 
 export default function StudentPage() {
   const pending = useOutboxCount()
@@ -29,7 +28,6 @@ export default function StudentPage() {
               <CalmCard />
             </div>
           </div>
-          <TodayLessons />
         </main>
       </div>
       <StudentTabs />

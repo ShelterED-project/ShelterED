@@ -26,6 +26,7 @@ from app.schemas.auth import (
     AuthorizeRequest,
     AuthorizeResponse,
     LogoutRequest,
+    MeOut,
     ParentLinkCodeResponse,
     ParentLinkRequest,
     ParentLinkResponse,
@@ -206,9 +207,13 @@ async def logout(body: LogoutRequest, session: Session) -> Response:
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@router.get("/auth/me", response_model=UserOut, responses=R401)
-async def me(user: CurrentUser) -> UserOut:
-    return UserOut.model_validate(user)
+@router.get("/auth/me", response_model=MeOut, responses=R401)
+async def me(user: CurrentUser, session: Session) -> MeOut:
+    """Поточний користувач. Для учня додає `class_id`: без нього не запитати «Рюкзак»."""
+    out = MeOut.model_validate(user)
+    if user.role == "student":
+        out.class_id = await school_service.student_class_id(session, user.id)
+    return out
 
 
 @router.post(

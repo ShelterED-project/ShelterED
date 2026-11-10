@@ -1,7 +1,9 @@
 import Dexie, { type EntityTable } from 'dexie'
+import type { Pack } from './packTypes'
 import type { CardAnswer, MetaRecord, OutboxEvent, StoredSession } from './types'
 
 export const db = new Dexie('shelter-ed') as Dexie & {
+  packs: EntityTable<Pack, 'id'>
   events: EntityTable<OutboxEvent, 'client_event_id'>
   session: EntityTable<StoredSession, 'id'>
   cardAnswers: EntityTable<CardAnswer, 'cardId'>
@@ -26,4 +28,9 @@ db.version(3).stores({
   session: 'id',
   cardAnswers: 'cardId',
   meta: 'key',
+})
+
+// «Рюкзак»: пакети на день для офлайн-уроків. Ключ id, за pack_date чистимо минулі дні.
+db.version(4).stores({
+  packs: 'id, pack_date, class_id',
 })
