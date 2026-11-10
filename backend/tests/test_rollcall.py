@@ -218,7 +218,7 @@ async def test_manual_start_during_alert_belongs_to_alert_and_closes_with_all_cl
             return ActiveAlerts(list(self.alerts), complete=True)
 
     provider = Provider()
-    provider.alerts = [ProviderAlert("777", "kyiv", now() - dt.timedelta(minutes=5))]
+    provider.alerts = [ProviderAlert("777", "oblast", "kyiv", now() - dt.timedelta(minutes=5))]
     await alerts_service.poll(db_session, provider)
     alert = await db_session.scalar(
         select(AlertEvent).where(AlertEvent.school_id == world.school.id)

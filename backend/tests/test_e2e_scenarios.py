@@ -280,7 +280,10 @@ async def test_mvp_main_scenario_end_to_end(committed, enqueued) -> None:
     provider = FakeProvider()
     provider.alerts = [
         ProviderAlert(
-            external_id="e2e-1", region_code="kyiv", started_at=now() - dt.timedelta(minutes=1)
+            external_id="e2e-1",
+            location_type="oblast",
+            location_uid="kyiv",
+            started_at=now() - dt.timedelta(minutes=1),
         )
     ]
     async with cm.maker() as db:

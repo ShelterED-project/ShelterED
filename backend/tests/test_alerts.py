@@ -53,9 +53,19 @@ def now() -> dt.datetime:
     return dt.datetime.now(dt.UTC)
 
 
-def api_alert(external_id: str = "101", region: str = "kyiv") -> ProviderAlert:
+def api_alert(
+    external_id: str = "101",
+    region: str = "kyiv",
+    location_type: str = "oblast",
+    alert_type: str = "air_raid",
+    minutes_ago: int = 1,
+) -> ProviderAlert:
     return ProviderAlert(
-        external_id=external_id, region_code=region, started_at=now() - dt.timedelta(minutes=1)
+        external_id=external_id,
+        location_type=location_type,
+        location_uid=region,
+        started_at=now() - dt.timedelta(minutes=minutes_ago),
+        alert_type=alert_type,
     )
 
 
@@ -287,7 +297,174 @@ async def test_alert_reappearing_after_end_is_reopened(
     assert len(pushes(enqueued, "alert")) == 2
 
 
+# ---------- точні локації школи (район / громада / місто) ----------
+
+
+async def test_hromada_alert_reaches_only_school_with_that_hromada(
+    db_session, factory, world, enqueued
+) -> None:
+    world.school.alert_hromada_uid = "1500"
+    lesson = await lesson_now(factory, world, world.class_a)
+    await lesson_now(factory, world, world.class_c)  # урок і в школі без точної локації
+    alert = ProviderAlert(
+        "h1", "hromada", "1500", now(), "artillery_shelling", "Бориспільська громада"
+    )
+    result = await service.poll(db_session, FakeProvider([alert]))
+    assert result["started"] == 1 and result["schools"] == 1
+
+    row = await db_session.scalar(select(AlertEvent))
+    assert row.school_id == world.school.id and row.region_code == "kyiv"
+    assert (row.location_type, row.location_uid, row.location_title, row.alert_type) == (
+        "hromada",
+        "1500",
+        "Бориспільська громада",
+        "artillery_shelling",
+    )
+    sessions = (await db_session.scalars(select(RollCallSession))).all()
+    assert [s.class_id for s in sessions] == [world.class_a.id]
+    assert pushes(enqueued, "alert") == [
+        {
+            "type": "alert",
+            "class_id": str(world.class_a.id),
+            "alert_id": str(row.id),
+            "lesson_id": str(lesson.id),
+        }
+    ]
+
+
+async def test_partial_alerts_ignored_without_precise_location(db_session, world, enqueued) -> None:
+    world.school.alert_raion_uid = "120"
+    world.school.alert_city_uid = "1293"
+    provider = FakeProvider(
+        [
+            api_alert("r1", "121", "raion"),  # інший район тієї ж області
+            api_alert("c1", "1294", "city"),  # інше місто
+            api_alert("h1", "120", "hromada"),  # той самий uid, але інший тип локації
+            api_alert("u1", "120", "unknown"),
+        ]
+    )
+    result = await service.poll(db_session, provider)
+    assert result["started"] == 0 and result["schools"] == 0
+    assert await count(db_session, AlertEvent) == 0
+    assert pushes(enqueued) == []
+
+
+async def test_overlapping_alerts_give_one_journal_entry_and_push(
+    db_session, factory, world, enqueued
+) -> None:
+    world.school.alert_raion_uid = "120"
+    await lesson_now(factory, world, world.class_a)
+    raion = api_alert("r1", "120", "raion", minutes_ago=5)
+    shelling = api_alert("r2", "120", "raion", "artillery_shelling", minutes_ago=3)
+    oblast = api_alert("o1", "kyiv", "oblast", minutes_ago=1)
+    provider = FakeProvider([oblast, shelling, raion])
+    await service.poll(db_session, provider)
+
+    rows = (await db_session.scalars(select(AlertEvent).order_by(AlertEvent.school_id))).all()
+    mine = [r for r in rows if r.school_id == world.school.id]
+    # Найраніша тривога, що стосується школи, — у журналі; решта нічого не додає.
+    assert [(r.external_id, r.location_type) for r in mine] == [("r1", "raion")]
+    # Школа без точної локації — лише через тривогу області.
+    assert [r.external_id for r in rows if r.school_id == world.other_school.id] == ["o1"]
+    assert len(pushes(enqueued, "alert")) == 1
+
+    # Нова тривога поверх наявної (ще один тип у тому ж районі) — теж нічого.
+    provider.alerts.append(api_alert("r3", "120", "raion", "urban_fights"))
+    again = await service.poll(db_session, provider)
+    assert again["started"] == 0 and again["reopened"] == 0
+    assert await count(db_session, AlertEvent) == 2
+    assert len(pushes(enqueued, "alert")) == 1
+
+
+async def test_all_clear_only_after_last_matching_alert_ends(
+    db_session, factory, world, enqueued
+) -> None:
+    world.school.alert_raion_uid = "120"
+    world.other_school.region_code = "lviv"
+    await lesson_now(factory, world, world.class_a)
+    raion = api_alert("r1", "120", "raion", minutes_ago=5)
+    oblast = api_alert("o1", "kyiv", "oblast", minutes_ago=1)
+    provider = FakeProvider([raion, oblast])
+    await service.poll(db_session, provider)
+
+    # Тривога, з якої почалась тривога школи, скінчилась, але область ще під тривогою.
+    provider.alerts = [oblast]
+    assert (await service.poll(db_session, provider))["ended"] == 0
+    # Неповна відповідь без тривог — теж не відбій.
+    provider.alerts, provider.complete = [], False
+    assert (await service.poll(db_session, provider))["ended"] == 0
+    assert await count(db_session, AlertEvent, AlertEvent.ended_at.is_(None)) == 1
+    assert pushes(enqueued, "all_clear") == []
+
+    provider.complete = True
+    assert (await service.poll(db_session, provider))["ended"] == 1
+    assert len(pushes(enqueued, "all_clear")) == 1
+    assert await count(db_session, RollCallSession, RollCallSession.closed_at.is_(None)) == 0
+    assert (await service.poll(db_session, provider))["ended"] == 0
+    assert len(pushes(enqueued, "all_clear")) == 1
+
+
+async def test_parallel_polls_open_one_journal_entry_per_school(committed, enqueued) -> None:
+    school = await committed.factory.school()
+    school.alert_hromada_uid = "1500"
+    await committed.session.commit()
+    provider = FakeProvider(
+        [api_alert("h1", "1500", "hromada", minutes_ago=2), api_alert("o1", "kyiv")]
+    )
+
+    async def run() -> dict[str, int | str]:
+        async with committed.maker() as db:
+            return await service.poll(db, provider)
+
+    results = await asyncio.gather(run(), run(), run())
+    assert sorted(r["started"] for r in results) == [0, 0, 1]
+    async with committed.maker() as db:
+        assert await count(db, AlertEvent) == 1
+
+
+class GatedProvider(FakeProvider):
+    """Запит до API «висить», доки тест не відпустить `gate`."""
+
+    def __init__(self, alerts: list[ProviderAlert] | None = None) -> None:
+        super().__init__(alerts)
+        self.called = asyncio.Event()
+        self.gate = asyncio.Event()
+
+    async def active_alerts(self) -> ActiveAlerts:
+        self.called.set()
+        await self.gate.wait()
+        return await super().active_alerts()
+
+
+async def test_older_poll_response_is_not_applied_after_newer(committed, enqueued) -> None:
+    """Запит до API — під замком опитування: другий запуск питає API лише після того, як
+    перший застосував свою відповідь. Інакше давніша відповідь «тривоги немає» застосувалася
+    б після новішої «тривога є» і дала б хибний відбій."""
+    await committed.factory.school()
+    await committed.session.commit()
+    older = GatedProvider([])
+    newer = GatedProvider([api_alert()])
+    newer.gate.set()
+
+    async def run(provider: FakeProvider) -> dict[str, int | str]:
+        async with committed.maker() as db:
+            return await service.poll(db, provider)
+
+    first = asyncio.create_task(run(older))
+    await asyncio.wait_for(older.called.wait(), 5)
+    second = asyncio.create_task(run(newer))
+    await asyncio.sleep(0.3)
+    assert not newer.called.is_set()  # чекає замка, поки перший не завершився
+    older.gate.set()
+    results = await asyncio.gather(first, second)
+    assert [r["started"] for r in results] == [0, 1]
+    async with committed.maker() as db:
+        assert await count(db, AlertEvent, AlertEvent.ended_at.is_(None)) == 1
+    assert pushes(enqueued, "all_clear") == []
+
+
 def test_parse_alerts_in_ua_filters_and_validates() -> None:
+    t = dt.datetime(2026, 11, 5, 9, 30, tzinfo=dt.UTC)
     data = {
         "alerts": [
             {
@@ -299,30 +476,43 @@ def test_parse_alerts_in_ua_filters_and_validates() -> None:
                 "alert_type": "air_raid",
                 "location_uid": "31",
             },
-            {  # район — не тривога всієї області
+            {  # район лишається: його тривога стосується шкіл, де він указаний
                 "id": 8758,
                 "location_type": "raion",
+                "location_title": "Бучанський район",
+                "alert_type": "artillery_shelling",
                 "started_at": "2026-11-05T09:30:00.000Z",
-                "location_uid": "120",
+                "location_uid": 120,
+            },
+            {  # завершена тривога — не активна
+                "id": 8759,
+                "location_type": "hromada",
+                "location_uid": "1500",
+                "started_at": "2026-11-05T09:00:00Z",
+                "finished_at": "2026-11-05T09:20:00Z",
             },
             {"id": 1, "location_type": "oblast"},  # невалідний запис пропускається
         ]
     }
     assert parse_alerts_in_ua(data) == ActiveAlerts(
-        [ProviderAlert("8757", "31", dt.datetime(2026, 11, 5, 9, 30, tzinfo=dt.UTC))],
+        [
+            ProviderAlert("8757", "oblast", "31", t, "air_raid", "м. Київ"),
+            ProviderAlert("8758", "raion", "120", t, "artillery_shelling", "Бучанський район"),
+        ],
         complete=False,
     )
     with pytest.raises(AlertProviderError):
         parse_alerts_in_ua({"unexpected": True})
 
 
-def test_parse_alerts_in_ua_accepts_region_cities_only() -> None:
+def test_parse_alerts_in_ua_keeps_all_levels() -> None:
     def record(id_: int, location_type: str, uid: str) -> dict:
         return {
             "id": id_,
             "location_type": location_type,
             "location_uid": uid,
             "started_at": "2026-11-05T09:30:00Z",
+            "alert_type": "air_raid",
         }
 
     data = {
@@ -332,15 +522,38 @@ def test_parse_alerts_in_ua_accepts_region_cities_only() -> None:
             record(3, "city", "1293"),  # звичайне місто — частина області
             record(4, "hromada", "1500"),
             record(5, "oblast", "14"),
+            record(6, "raion", "120"),
+            record(7, "unknown", "9999"),
         ]
     }
     result = parse_alerts_in_ua(data)
     assert result.complete is True
-    assert [(a.external_id, a.region_code) for a in result.alerts] == [
-        ("1", "31"),
-        ("2", "30"),
-        ("5", "14"),
+    assert [
+        (a.external_id, a.location_type, a.location_uid, a.is_region) for a in result.alerts
+    ] == [
+        ("1", "city", "31", True),
+        ("2", "city", "30", True),
+        ("3", "city", "1293", False),
+        ("4", "hromada", "1500", False),
+        ("5", "oblast", "14", True),
+        ("6", "raion", "120", False),
+        ("7", "unknown", "9999", False),
     ]
+
+
+def test_parse_alerts_in_ua_unknown_location_type_is_incomplete() -> None:
+    """Перейменований тип локації — невалідний запис: відповідь неповна, хибного відбою немає."""
+    data = {
+        "alerts": [
+            {
+                "id": 1,
+                "location_type": "district",
+                "location_uid": "120",
+                "started_at": "2026-11-05T09:30:00Z",
+            }
+        ]
+    }
+    assert parse_alerts_in_ua(data) == ActiveAlerts([], complete=False)
 
 
 async def test_alerts_in_ua_provider_http(enabled_settings) -> None:
@@ -568,6 +781,15 @@ async def test_alert_journal(client: AsyncClient, db_session, world) -> None:
     assert {r["id"] for r in rows} == set(ids.values())
     starts = [r["started_at"] for r in rows]
     assert starts == sorted(starts, reverse=True)
+    # Чому спрацювала тривога з API — видно в журналі; у ручних ці поля null.
+    by_id = {r["id"]: r for r in rows}
+    api_row = by_id[ids["api"]]
+    assert (api_row["location_type"], api_row["location_uid"], api_row["alert_type"]) == (
+        "oblast",
+        "kyiv",
+        "air_raid",
+    )
+    assert by_id[ids["a"]]["location_type"] is None and by_id[ids["a"]]["alert_type"] is None
 
     today = now().astimezone(KYIV).date()
     future = await client.get(
@@ -830,7 +1052,7 @@ async def test_class_reacted_at_alert_start_gets_nothing_new(
             dt.time(start),
             dt.time(start, 45),
         )
-    alert = ProviderAlert(external_id="101", region_code="kyiv", started_at=kyiv(DAY, 9, 10))
+    alert = ProviderAlert("101", "oblast", "kyiv", started_at=kyiv(DAY, 9, 10))
     await service.poll(db_session, FakeProvider([alert]), kyiv(DAY, 9, 10, 30))
     assert len(pushes(enqueued, "alert")) == 1
 

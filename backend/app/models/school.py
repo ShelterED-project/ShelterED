@@ -17,15 +17,35 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, TimestampMixin, uuid_pk
 
+# Точні локації школи в словнику alerts.in.ua (`location_uid`): район, громада, місто.
+ALERT_LOCATION_COLUMNS = ("alert_raion_uid", "alert_hromada_uid", "alert_city_uid")
+
 
 class School(TimestampMixin, Base):
     __tablename__ = "school"
-    __table_args__ = (Index("ix_school_region_code", "region_code"),)
+    __table_args__ = (
+        Index("ix_school_region_code", "region_code"),
+        # Опитування тривог шукає школи за uid району / громади / міста з активних тривог.
+        *(
+            Index(f"ix_school_{col}", col, postgresql_where=text(f"{col} IS NOT NULL"))
+            for col in ALERT_LOCATION_COLUMNS
+        ),
+        *(
+            CheckConstraint(f"{col} ~ '^[0-9]{{1,9}}$'", name=f"{col}_format")
+            for col in ALERT_LOCATION_COLUMNS
+        ),
+    )
 
     id: Mapped[uuid.UUID] = uuid_pk()
     name: Mapped[str]
     # Регіон для API тривог; формат залежить від обраного API.
     region_code: Mapped[str]
+    # Необов'язкові точні локації (локація школи, не персональні дані): тривога району,
+    # громади чи міста школи вмикає тривогу для школи так само, як тривога області.
+    # NULL — лише тривоги рівня області (region_code).
+    alert_raion_uid: Mapped[str | None]
+    alert_hromada_uid: Mapped[str | None]
+    alert_city_uid: Mapped[str | None]
     timezone: Mapped[str] = mapped_column(server_default="Europe/Kyiv")
 
 

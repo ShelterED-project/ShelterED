@@ -25,6 +25,76 @@ def class_body(name: str = "8-А", **kw) -> dict:
     }
 
 
+# ---------- школа: точні локації для тривог ----------
+
+
+def locations_url(school) -> str:
+    return f"/schools/{school.id}/alert-locations"
+
+
+async def test_admin_sets_and_clears_alert_locations(
+    client: AsyncClient, world, db_session
+) -> None:
+    headers = auth_header(world.admin)
+    r = await client.get(locations_url(world.school), headers=headers)
+    assert r.status_code == 200
+    assert r.json() == {
+        "school_id": str(world.school.id),
+        "region_code": "kyiv",
+        "alert_raion_uid": None,
+        "alert_hromada_uid": None,
+        "alert_city_uid": None,
+    }
+    body = {"alert_raion_uid": " 56 ", "alert_hromada_uid": "1032", "alert_city_uid": "1293"}
+    for _ in range(2):  # повтор нічого не змінює
+        r = await client.put(locations_url(world.school), json=body, headers=headers)
+        assert r.status_code == 200, r.text
+        assert r.json()["alert_raion_uid"] == "56" and r.json()["alert_city_uid"] == "1293"
+    await db_session.refresh(world.school)
+    assert (world.school.alert_raion_uid, world.school.alert_hromada_uid) == ("56", "1032")
+
+    # PUT замінює всі поля: відсутні — очищаються.
+    r = await client.put(
+        locations_url(world.school), json={"alert_hromada_uid": "1032"}, headers=headers
+    )
+    assert r.status_code == 200
+    assert r.json()["alert_raion_uid"] is None and r.json()["alert_city_uid"] is None
+    await db_session.refresh(world.school)
+    assert world.school.alert_raion_uid is None and world.school.alert_hromada_uid == "1032"
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"alert_raion_uid": "abc"},
+        {"alert_hromada_uid": "-1"},
+        {"alert_raion_uid": "1234567890"},
+        {"alert_raion_uid": 56},
+        {"alert_city_uid": "31"},  # м. Київ — це region_code, а не місто школи
+    ],
+)
+async def test_alert_locations_validation(client: AsyncClient, world, body) -> None:
+    r = await client.put(locations_url(world.school), json=body, headers=auth_header(world.admin))
+    assert r.status_code == 422
+
+
+@pytest.mark.parametrize("role", ["other_admin", "teacher_a", "student_a", "parent_a"])
+async def test_alert_locations_forbidden(client: AsyncClient, world, role) -> None:
+    headers = auth_header(getattr(world, role))
+    url = locations_url(world.school)
+    assert (await client.get(url, headers=headers)).status_code == 403
+    r = await client.put(url, json={"alert_raion_uid": "56"}, headers=headers)
+    assert r.status_code == 403
+
+
+async def test_alert_locations_unknown_school(client: AsyncClient, world) -> None:
+    r = await client.get(
+        f"/schools/{uuid.uuid4()}/alert-locations", headers=auth_header(world.admin)
+    )
+    assert r.status_code == 404
+    assert (await client.get(locations_url(world.school))).status_code == 401
+
+
 # ---------- класи ----------
 
 
