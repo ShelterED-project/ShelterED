@@ -1,8 +1,10 @@
 """Провайдери API повітряних тривог (B7.1).
 
 Бекенд сам опитує API тривог (без AI-сервісу). Інтерфейс `AlertProvider` дозволяє замінити
-alerts.in.ua іншим API: провайдер віддає лише активні тривоги рівня області.
-`region_code` школи = id області в провайдера (для alerts.in.ua — `location_uid`, напр. "31").
+alerts.in.ua іншим API: провайдер віддає всі активні тривоги з типом і uid локації (область,
+район, громада, місто). Яка тривога стосується школи, вирішує `app.services.alerts`:
+`region_code` школи = id області в провайдера (для alerts.in.ua — `location_uid`, напр. "31"),
+необов'язкові `alert_raion_uid` / `alert_hromada_uid` / `alert_city_uid` — точні локації.
 """
 
 import datetime as dt
@@ -10,23 +12,43 @@ import json
 import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 import httpx
-from pydantic import AwareDatetime, BaseModel, ConfigDict, ValidationError
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, ValidationError
 
 from app.core.config import Settings
 
 logger = logging.getLogger(__name__)
 
 
+LocationType = Literal["oblast", "raion", "hromada", "city", "unknown"]
+
+# Міста зі спеціальним статусом — окремі регіони alerts.in.ua (`location_type == "city"`):
+# 30 — м. Севастополь, 31 — м. Київ. Інші міста — частини областей.
+REGION_CITY_UIDS = frozenset({"30", "31"})
+
+# Назва локації в журналі — довідкова; обрізаємо, щоб зламане API не роздувало рядки.
+_TITLE_MAX = 200
+
+
 @dataclass(frozen=True)
 class ProviderAlert:
-    """Активна тривога області."""
+    """Активна тривога провайдера в одній локації."""
 
     external_id: str
-    region_code: str
+    location_type: LocationType
+    location_uid: str
     started_at: dt.datetime
+    alert_type: str | None = None
+    location_title: str | None = None
+
+    @property
+    def is_region(self) -> bool:
+        """Тривога всього регіону (області чи міста зі спеціальним статусом)."""
+        return self.location_type == "oblast" or (
+            self.location_type == "city" and self.location_uid in REGION_CITY_UIDS
+        )
 
 
 @dataclass(frozen=True)
@@ -52,37 +74,30 @@ class AlertProvider(ABC):
 
     @abstractmethod
     async def active_alerts(self) -> ActiveAlerts:
-        """Усі активні тривоги рівня області. Помилка → AlertProviderError."""
+        """Усі активні тривоги (будь-якого рівня й типу). Помилка → AlertProviderError."""
 
 
 class _InUaAlert(BaseModel):
     """Поля alerts.in.ua, які ми використовуємо (решта ігнорується)."""
 
     id: int | str
-    location_type: str
+    # Невідомий тип локації — невалідний запис (а не «немає тривоги»): якщо API перейменує
+    # тип, відповідь стане неповною й хибного відбою не буде.
+    location_type: LocationType
     location_uid: int | str
+    location_title: str | None = None
+    alert_type: str | None = Field(default=None, min_length=1, max_length=50)
     started_at: AwareDatetime
     finished_at: AwareDatetime | None = None
 
     model_config = ConfigDict(extra="ignore")
 
 
-# Міста зі спеціальним статусом — окремі регіони alerts.in.ua (`location_type == "city"`):
-# 30 — м. Севастополь, 31 — м. Київ. Інші міста — частини областей.
-REGION_CITY_UIDS = frozenset({"30", "31"})
-
-
-def _is_region(location_type: str, uid: str) -> bool:
-    return location_type == "oblast" or (location_type == "city" and uid in REGION_CITY_UIDS)
-
-
 def parse_alerts_in_ua(data: Any) -> ActiveAlerts:
-    """Розбір `GET /v1/alerts/active.json`. Беремо тривоги рівня регіону (`location_type ==
-    "oblast"` або місто зі спеціальним статусом, `REGION_CITY_UIDS`) будь-якого типу
-    (`air_raid`, `artillery_shelling`, ...): школа прив'язана до регіону. Тривоги районів,
-    громад і звичайних міст не вмикають тривогу для всього регіону. Невалідні записи
-    пропускаються (лічильник у лог) і роблять відповідь неповною (`complete = False`),
-    невалідна відповідь цілком — помилка."""
+    """Розбір `GET /v1/alerts/active.json`: усі активні тривоги будь-якого рівня (область,
+    район, громада, місто) і будь-якого типу (`air_raid`, `artillery_shelling`,
+    `urban_fights`, ...). Невалідні записи пропускаються (лічильник у лог) і роблять
+    відповідь неповною (`complete = False`), невалідна відповідь цілком — помилка."""
     if not isinstance(data, dict) or not isinstance(data.get("alerts"), list):
         raise AlertProviderError("invalid_response")
     result: list[ProviderAlert] = []
@@ -93,14 +108,17 @@ def parse_alerts_in_ua(data: Any) -> ActiveAlerts:
         except ValidationError:
             skipped += 1
             continue
-        uid = str(item.location_uid)
-        if not _is_region(item.location_type, uid) or item.finished_at is not None:
+        if item.finished_at is not None:
             continue
+        title = item.location_title.strip()[:_TITLE_MAX] if item.location_title else None
         result.append(
             ProviderAlert(
                 external_id=str(item.id),
-                region_code=uid,
+                location_type=item.location_type,
+                location_uid=str(item.location_uid),
                 started_at=item.started_at.astimezone(dt.UTC),
+                alert_type=item.alert_type,
+                location_title=title or None,
             )
         )
     if skipped:

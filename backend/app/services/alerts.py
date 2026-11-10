@@ -14,7 +14,6 @@ IS NULL RETURNING). Push ставляться в чергу лише після 
 import datetime as dt
 import logging
 import uuid
-from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -31,7 +30,12 @@ from app.models.school import ClassMembership, ParentChild, School, SchoolClass,
 from app.schemas.alerts import ManualAlertCreate
 from app.services import auth as auth_service
 from app.services import school as school_service
-from app.services.alert_provider import AlertProvider, AlertProviderError, AlertsInUaProvider
+from app.services.alert_provider import (
+    AlertProvider,
+    AlertProviderError,
+    AlertsInUaProvider,
+    ProviderAlert,
+)
 from app.services.idempotency import insert_or_get
 from app.services.schedule import DEFAULT_TZ
 from app.workers.push import enqueue_push
@@ -293,6 +297,55 @@ async def _end_alerts(
 
 # ---------- опитування API тривог ----------
 
+_POLL_LOCK_KEY = "alerts-poll"
+
+# Точні локації школи: тип локації провайдера → колонка школи.
+_PRECISE_COLUMNS = {
+    "raion": School.alert_raion_uid,
+    "hromada": School.alert_hromada_uid,
+    "city": School.alert_city_uid,
+}
+
+
+def _applies(alert: ProviderAlert, region_code: str, precise: set[tuple[str, str]]) -> bool:
+    """Тривога регіону — для шкіл цього регіону; тривога району / громади / міста — лише для
+    шкіл, у яких ця локація вказана (тип і uid збігаються)."""
+    if alert.is_region:
+        return alert.location_uid == region_code
+    return (alert.location_type, alert.location_uid) in precise
+
+
+async def _matching_alerts(
+    session: AsyncSession, active: list[ProviderAlert]
+) -> dict[uuid.UUID, tuple[str, list[ProviderAlert]]]:
+    """Школи, яких стосується хоч одна активна тривога: id → (region_code, тривоги,
+    найраніші першими). Порядок шкіл — за id."""
+    conds = []
+    region_uids = {a.location_uid for a in active if a.is_region}
+    if region_uids:
+        conds.append(School.region_code.in_(region_uids))
+    for location_type, column in _PRECISE_COLUMNS.items():
+        uids = {
+            a.location_uid for a in active if not a.is_region and a.location_type == location_type
+        }
+        if uids:
+            conds.append(column.in_(uids))
+    if not conds:
+        return {}
+    rows = await session.execute(
+        select(School.id, School.region_code, *_PRECISE_COLUMNS.values())
+        .where(or_(*conds))
+        .order_by(School.id)
+    )
+    result: dict[uuid.UUID, tuple[str, list[ProviderAlert]]] = {}
+    for school_id, region_code, *uids in rows:
+        precise = {(t, uid) for t, uid in zip(_PRECISE_COLUMNS, uids, strict=True) if uid}
+        matched = [a for a in active if _applies(a, region_code, precise)]
+        if matched:
+            matched.sort(key=lambda a: (a.started_at, a.external_id))
+            result[school_id] = (region_code, matched)
+    return result
+
 
 async def _record_attempt(
     session: AsyncSession, name: str, at: dt.datetime, error: str | None
@@ -307,9 +360,11 @@ async def _record_attempt(
 async def poll(
     session: AsyncSession, provider: AlertProvider, now: dt.datetime | None = None
 ) -> dict[str, int | str]:
-    """Один цикл опитування. Стан-орієнтований: тривога, якої немає серед активних, —
-    відбій (лише якщо відповідь повна: усі записи розібрано). Ідемпотентний: повторний
-    запуск з тими самими даними нічого не змінює."""
+    """Один цикл опитування. Стан-орієнтований, по школах: школа під тривогою, поки активна
+    хоч одна тривога провайдера, що її стосується (`_applies`). Початок — один рядок журналу
+    (з найранішою такою тривогою) + реакція; ще одна тривога поверх — нічого. Відбій школи —
+    коли не лишилось жодної (лише якщо відповідь повна: усі записи розібрано). Ідемпотентний:
+    повторний запуск з тими самими даними нічого не змінює."""
     now = now or _now()
     try:
         response = await provider.active_alerts()
@@ -322,65 +377,73 @@ async def poll(
     active = response.alerts
     pushes = Pushes()
     started = reopened = 0
-    regions = {a.region_code for a in active}
-    schools: dict[str, list[uuid.UUID]] = defaultdict(list)
-    if regions:
-        for school_id, region in await session.execute(
-            select(School.id, School.region_code)
-            .where(School.region_code.in_(regions))
-            .order_by(School.id)
-        ):
-            schools[region].append(school_id)
-
-    for a in active:
-        for school_id in schools[a.region_code]:
-            new_id = await session.scalar(
-                pg_insert(AlertEvent)
-                .values(
-                    id=uuid.uuid4(),
-                    region_code=a.region_code,
-                    school_id=school_id,
-                    source="api",
-                    external_id=a.external_id,
-                    is_drill=False,
-                    started_at=a.started_at,
-                )
-                .on_conflict_do_nothing(index_elements=_API_KEY, index_where=_API_KEY_WHERE)
-                .returning(AlertEvent.id)
-            )
-            if new_id is None:
-                # Тривога вже в журналі. Якщо її помилково закрили (API на мить її не
-                # повернуло), а вона знову активна — відновлюємо й реагуємо ще раз.
-                new_id = await session.scalar(
-                    update(AlertEvent)
-                    .where(
-                        AlertEvent.source == "api",
-                        AlertEvent.region_code == a.region_code,
-                        AlertEvent.external_id == a.external_id,
-                        AlertEvent.school_id == school_id,
-                        AlertEvent.ended_at.is_not(None),
-                    )
-                    .values(ended_at=None)
-                    .returning(AlertEvent.id)
-                )
-                if new_id is None:
-                    continue
-                reopened += 1
-            else:
-                started += 1
-            alert = await session.get(AlertEvent, new_id, populate_existing=True)
-            assert alert is not None
-            await react_school_alert(session, alert, now, pushes)
-
-    ended: list[uuid.UUID] = []
-    if response.complete:
-        active_keys = {(a.region_code, a.external_id) for a in active}
-        open_rows = await session.execute(
-            select(AlertEvent.id, AlertEvent.region_code, AlertEvent.external_id).where(
+    # Опитування по черзі: «школа вже під тривогою?» і вставка рядка — під одним замком,
+    # паралельний запуск не відкриє школі другий рядок з іншою тривогою провайдера.
+    await session.execute(
+        select(func.pg_advisory_xact_lock(func.hashtextextended(_POLL_LOCK_KEY, 0)))
+    )
+    matching = await _matching_alerts(session, active)
+    open_rows = (
+        await session.execute(
+            select(AlertEvent.id, AlertEvent.school_id).where(
                 AlertEvent.source == "api", AlertEvent.ended_at.is_(None)
             )
         )
-        to_end = [r.id for r in open_rows if (r.region_code, r.external_id) not in active_keys]
+    ).all()
+    open_schools = {school_id for _, school_id in open_rows}
+
+    for school_id, (region_code, alerts) in matching.items():
+        if school_id in open_schools:
+            # Школа вже під тривогою з API: ще одна тривога (район + область, air_raid +
+            # artillery_shelling) — не новий рядок журналу й не новий push.
+            continue
+        trigger = alerts[0]  # найраніша з тривог, що стосуються школи
+        new_id = await session.scalar(
+            pg_insert(AlertEvent)
+            .values(
+                id=uuid.uuid4(),
+                region_code=region_code,
+                school_id=school_id,
+                source="api",
+                external_id=trigger.external_id,
+                is_drill=False,
+                started_at=trigger.started_at,
+                location_type=trigger.location_type,
+                location_uid=trigger.location_uid,
+                location_title=trigger.location_title,
+                alert_type=trigger.alert_type,
+            )
+            .on_conflict_do_nothing(index_elements=_API_KEY, index_where=_API_KEY_WHERE)
+            .returning(AlertEvent.id)
+        )
+        if new_id is None:
+            # Тривога вже в журналі. Якщо її помилково закрили (API на мить її не
+            # повернуло), а вона знову активна — відновлюємо й реагуємо ще раз.
+            new_id = await session.scalar(
+                update(AlertEvent)
+                .where(
+                    AlertEvent.source == "api",
+                    AlertEvent.region_code == region_code,
+                    AlertEvent.external_id == trigger.external_id,
+                    AlertEvent.school_id == school_id,
+                    AlertEvent.ended_at.is_not(None),
+                )
+                .values(ended_at=None)
+                .returning(AlertEvent.id)
+            )
+            if new_id is None:
+                continue
+            reopened += 1
+        else:
+            started += 1
+        alert = await session.get(AlertEvent, new_id, populate_existing=True)
+        assert alert is not None
+        await react_school_alert(session, alert, now, pushes)
+
+    ended: list[uuid.UUID] = []
+    if response.complete:
+        # Відбій школи — лише коли жодна тривога, що її стосується, не лишилась активною.
+        to_end = [alert_id for alert_id, school_id in open_rows if school_id not in matching]
         ended = await _end_alerts(session, to_end, now, pushes)
     else:
         # Невалідний запис міг бути активною тривогою: його відсутність — не відбій.
@@ -391,6 +454,7 @@ async def poll(
     await pushes.send()
     result = {
         "active": len(active),
+        "schools": len(matching),
         "started": started,
         "reopened": reopened,
         "ended": len(ended),
