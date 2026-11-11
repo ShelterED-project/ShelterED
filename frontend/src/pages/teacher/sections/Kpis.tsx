@@ -4,7 +4,8 @@ import iconSafe from '@/assets/teacher/kpi-safe.svg'
 import iconQueue from '@/assets/teacher/kpi-queue.svg'
 import { useTeacherRollCall } from '@/features/teacher/useTeacherRollCall'
 import { useOutboxCount } from '@/shared/db/useOutboxCount'
-import { kpiHints, kpis } from '../content'
+import { Link } from 'react-router'
+import { kpiHints, kpis, navRoutes } from '../content'
 import type { KpiIcon } from '../content'
 
 type KpiId = (typeof kpis)[number]['id']
@@ -16,7 +17,8 @@ const icons: Record<KpiIcon, string> = {
   queue: iconQueue,
 }
 
-export default function Kpis() {
+/** linkToRollCall: на огляді під цифрами посилання на сторінку переклички. */
+export default function Kpis({ linkToRollCall = false }: { linkToRollCall?: boolean }) {
   const { session } = useTeacherRollCall()
   const queued = useOutboxCount()
   const total = session?.students.length ?? 0
@@ -30,10 +32,10 @@ export default function Kpis() {
     return session ? kpiHints.ofStudents(total) : kpiHints.noRollCall
   }
 
-  return (
+  const grid = (
     <ul className="grid grid-cols-2 gap-3 xl:grid-cols-4 xl:gap-4">
       {kpis.map((kpi) => (
-        <li key={kpi.id}className="flex flex-col gap-2 rounded-[18px] border border-line bg-surface p-4 xl:p-5">
+        <li key={kpi.id} className="flex flex-col gap-2 rounded-[18px] border border-line bg-surface p-4 xl:p-5">
           <div className="flex items-center justify-between gap-2">
             <p className="text-sm leading-5 text-dim">{kpi.label}</p>
             <img src={icons[kpi.icon]} alt="" width={18} height={18} className="shrink-0" />
@@ -49,5 +51,18 @@ export default function Kpis() {
         </li>
       ))}
     </ul>
+  )
+
+  if (!linkToRollCall) return grid
+  return (
+    <div className="flex flex-col gap-2">
+      {grid}
+      <Link
+        to={navRoutes.rollcall ?? '/teacher'}
+        className="self-end rounded text-sm font-semibold text-muted hover:text-parchment focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:outline-none"
+      >
+        {kpiHints.open}
+      </Link>
+    </div>
   )
 }

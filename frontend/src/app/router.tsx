@@ -11,6 +11,7 @@ import ShelterModePage from '@/pages/shelter/ShelterModePage'
 import LessonsPage from '@/pages/student/LessonsPage'
 import StudentPage from '@/pages/student/StudentPage'
 import ClassMapPage from '@/pages/teacher/ClassMapPage'
+import RollCallPage from '@/pages/teacher/RollCallPage'
 import SchedulePage from '@/pages/teacher/SchedulePage'
 import TeacherPage from '@/pages/teacher/TeacherPage'
 import RootLayout from './RootLayout'
@@ -40,6 +41,7 @@ export const router = createBrowserRouter([
         element: <RequireRole roles={['teacher']} />,
         children: [
           { path: '/teacher', element: <TeacherPage /> },
+          { path: '/teacher/rollcall', element: <RollCallPage /> },
           { path: '/teacher/schedule', element: <SchedulePage /> },
           { path: '/teacher/map', element: <ClassMapPage /> },
         ],

@@ -57,6 +57,7 @@ export const kpiHints = {
   noRollCall: 'Перекличка не запущена',
   ofStudents: (total: number) => `з ${total} учнів`,
   queue: 'Чекають синхронізації',
+  open: 'Перекличка: усі учні →',
 }
 
 export type RollCallState = 'shelter' | 'safe' | 'pending'
@@ -159,6 +160,7 @@ export type NavId = 'overview' | 'rollcall' | 'lessons' | 'schedule' | 'map' | '
 /** Розділи з готовою сторінкою мають маршрут; решта поки без переходу. */
 export const navRoutes: Partial<Record<NavId | TabId, string>> = {
   overview: '/teacher',
+  rollcall: '/teacher/rollcall',
   schedule: '/teacher/schedule',
   map: '/teacher/map',
 }
