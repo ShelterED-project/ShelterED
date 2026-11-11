@@ -44,6 +44,7 @@ design/        Посилання на Figma, ресурси
 - Збірка: `npm run build`
 - Лінт: `npm run lint`
 - Тест-раннера поки немає: перевірка змін — це `npm run lint` і `npm run build` (`tsc -b` + Vite).
+- PWA й офлайн-режим: Service Worker працює лише у збірці, тож `npm run build && npm run preview` (http://localhost:4173, `/api` проксується на :8000). На телефоні в мережі потрібен HTTPS, інакше браузер не зареєструє SW.
 
 ### Backend (`backend/`)
 Подробиці в `backend/README.md`.

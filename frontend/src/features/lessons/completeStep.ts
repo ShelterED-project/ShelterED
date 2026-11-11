@@ -25,7 +25,7 @@ export function completeModule(userId: string, lessonId: string, moduleId: strin
 
 /** Бали за тренувальний тест: питання зараховане, якщо обрана множина дорівнює ключу. Без ключа null. */
 export function scoreTest(test: PackTest, answers: Record<string, string[]>): { points: number; max: number } | null {
-  if (test.questions.some((q) => q.answer_key === null)) return null
+  if (test.questions.some((q) => q.answer_key == null)) return null
   let points = 0
   let max = 0
   for (const q of test.questions) {

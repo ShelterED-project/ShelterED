@@ -23,10 +23,12 @@ export default function TestTask({ userId, lessonId, test }: { userId: string; l
   if (!question) return <TaskFrame title={test.title} />
 
   const selected = answers[question.id] ?? []
-  const hasKey = question.answer_key !== null
+  // Оцінюваний тест приходить без ключа (поля немає), тренувальний — з ключем.
+  const answerKey = question.answer_key ?? null
+  const hasKey = answerKey !== null
   const isLast = index >= questions.length - 1
   const isMultiple = question.kind === 'multiple'
-  const isCorrect = hasKey && selected.length === question.answer_key!.length && selected.every((id) => question.answer_key!.includes(id))
+  const isCorrect = answerKey !== null && selected.length === answerKey.length && selected.every((id) => answerKey.includes(id))
   const score = isLast && checked ? scoreTest(test, answers) : null
 
   const choose = (optionId: string) => {
@@ -65,7 +67,7 @@ export default function TestTask({ userId, lessonId, test }: { userId: string; l
         {isMultiple && <p className="col-span-full text-xs text-dim">{task.multipleHint}</p>}
         {question.options.map((option) => {
           const isSelected = selected.includes(option.id)
-          const state = !checked || !hasKey ? '' : question.answer_key!.includes(option.id) ? 'border-safe' : isSelected ? 'border-accent' : ''
+          const state = !checked || !hasKey ? '' : answerKey?.includes(option.id) ? 'border-safe' : isSelected ? 'border-accent' : ''
           return (
             <label
               key={option.id}

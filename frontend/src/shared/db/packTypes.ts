@@ -76,8 +76,11 @@ export interface PackQuestion {
   options: PackOption[]
   points: number
   position: number
-  /** Лише для тренувальних вправ; для оцінюваних тестів null */
-  answer_key: string[] | null
+  /**
+   * Лише для тренувальних вправ. В оцінюваних тестах (з вікном) сервер поле не надсилає,
+   * щоб учень не бачив відповідей, тому перевіряти треба `== null` (і null, і відсутність).
+   */
+  answer_key?: string[] | null
 }
 
 export interface PackTest {
