@@ -78,6 +78,9 @@ temp/
 *.swo
 *~
 
+# ===== Claude Code (особисті інструкції) =====
+CLAUDE.local.md
+
 # ===== Операційні системи =====
 .DS_Store
 Thumbs.db

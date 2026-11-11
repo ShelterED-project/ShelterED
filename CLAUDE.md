@@ -26,7 +26,7 @@ design/        Посилання на Figma, ресурси
 
 ## Стек
 
-- **Frontend:** React, TypeScript, Vite, Tailwind CSS, Redux Toolkit / RTK Query, `vite-plugin-pwa` (Workbox), IndexedDB (через `idb` або Dexie).
+- **Frontend:** React, TypeScript, Vite, Tailwind CSS, Redux Toolkit / RTK Query, `vite-plugin-pwa` (Workbox), IndexedDB через Dexie.
 - **Backend:** Python, FastAPI, SQLAlchemy 2.0, Alembic, Pydantic, PostgreSQL, Celery + Redis.
 - **Авторизація:** JWT, OAuth 2.0 PKCE, ролі.
 - **AI:** RAG-пайплайн, хмарна LLM через API, легка локальна модель на ноутбуці вчителя (її вибір ще не затверджено).
@@ -43,9 +43,19 @@ design/        Посилання на Figma, ресурси
 - Розробка: `npm run dev`
 - Збірка: `npm run build`
 - Лінт: `npm run lint`
+- Тест-раннера поки немає: перевірка змін — це `npm run lint` і `npm run build` (`tsc -b` + Vite).
 
 ### Backend (`backend/`)
-- (додати: запуск, міграції `alembic upgrade head`, тести `pytest`, лінт `ruff check .`)
+Подробиці в `backend/README.md`.
+- Встановлення: `pip install -r requirements.txt`
+- Запуск API: `uvicorn app.main:app --reload` (Swagger UI на `/docs`)
+- Redis для розробки (порт 6380): `docker compose -f docker-compose.dev.yml up -d redis`
+- Celery-воркер: `celery -A app.workers.celery_app worker -Q default,push,sync -l info --pool=solo` (`--pool=solo` лише на Windows)
+- Міграції: `alembic upgrade head`
+- Демо-дані: `python -m app.cli seed` (пише в БД з `DATABASE_URL`, перевір, куди вона дивиться)
+- Оновити OpenAPI після зміни API: `python -m app.cli export-openapi` (пише `docs/openapi.json`)
+- Тести: `docker compose -f docker-compose.dev.yml up -d --wait test-db`, потім `pytest` (окрема PostgreSQL на порту 5433, ніколи не Neon)
+- Лінт: `ruff check . && ruff format --check .`
 
 ### Уся система
 - (додати: `docker compose up` з профілями `cloud` та `shelter`)
@@ -62,6 +72,8 @@ design/        Посилання на Figma, ресурси
 6. **Нічого не губимо.** Жодна відповідь учня й жодна відмітка переклички не можуть зникнути при обриві мережі, перезапуску пристрою чи ноутбука.
 7. **Запасний канал:** якщо немає ні інтернету, ні локального сервера, прогрес передається через QR-код.
 
+Формат подій і обміну описує `docs/sync-protocol.md` (версія 1): конверт події (`client_event_id`, `type`, `device_id`, `occurred_at`, `payload`), типи `module_progress`, `test_attempt`, `rollcall_status`, `survey_answer`, пачки до 100 подій у `POST /sync/events`. Змінюючи події, спершу звір їх із протоколом.
+
 ## Frontend: правила
 
 - Мова інтерфейсу: українська за замовчуванням.
@@ -77,7 +89,7 @@ design/        Посилання на Figma, ресурси
 ## Backend: правила
 
 - Усі зміни схеми БД лише через міграції Alembic. Не змінюй таблиці вручну.
-- Контракт API описує OpenAPI-специфікація (`docs/openapi.yaml` або згенерована FastAPI). Змінюючи API, одразу оновлюй специфікацію й повідомляй команду фронтенду.
+- Контракт API описує OpenAPI-специфікація `docs/openapi.json`, згенерована з FastAPI (`python -m app.cli export-openapi`). Змінюючи API, одразу оновлюй специфікацію й повідомляй команду фронтенду; тест у `backend/tests/test_db.py` падає, якщо файл розійшовся з кодом.
 - Ендпоінти запису приймають клієнтські UUID і є ідемпотентними.
 - Права перевіряються на рівні API за роллю та належністю (вчитель бачить лише свої класи, батьки лише свою дитину, учень лише свої дані).
 - Фонові задачі (синхронізація, вебхуки) через Celery + Redis.
@@ -135,4 +147,4 @@ design/        Посилання на Figma, ресурси
 
 - Яка локальна модель запускається на ноутбуці вчителя й чи вистачає заліза (рішення до кінця першого тижня). Якщо ні, ШІ-репетитор працює лише на закешованих поясненнях.
 - Як організувати HTTPS на локальному сервері в укритті.
-- Яке API повітряних тривог використовуємо.
+- API повітряних тривог: вибрано alerts.in.ua (опитування кожні 30 с у Celery beat), але токена `ALERTS_API_TOKEN` ще немає. Без нього працює лише ручна кнопка «Тривога».
