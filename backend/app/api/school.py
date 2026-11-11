@@ -1,4 +1,5 @@
-"""Класи (адміністрація), вчителі класу, код класу, розклад і прив'язка уроків."""
+"""Школа (точні локації для тривог), класи (адміністрація), вчителі класу, код класу, розклад
+і прив'язка уроків."""
 
 import datetime as dt
 import uuid
@@ -16,9 +17,12 @@ from app.api.deps import (
     StaffClass,
     TeacherClass,
 )
+from app.api.stub import example_of
 from app.core.errors import AppError
+from app.models.school import School
 from app.schemas.errors import ErrorResponse
 from app.schemas.school import (
+    ALERT_LOCATIONS_DOC,
     AssignmentOut,
     AssignmentRequest,
     ClassCreate,
@@ -33,6 +37,8 @@ from app.schemas.school import (
     ScheduleDay,
     ScheduleItem,
     ScheduleOut,
+    SchoolAlertLocations,
+    SchoolAlertLocationsOut,
     SlotCreate,
     SlotOut,
     SlotUpdate,
@@ -54,6 +60,49 @@ ACCESS = {**R401, **R403, **R404}
 
 def _created(response: Response, created: bool) -> None:
     response.status_code = status.HTTP_201_CREATED if created else status.HTTP_200_OK
+
+
+# ---------- школа ----------
+
+
+def _locations_out(school: School) -> SchoolAlertLocationsOut:
+    return SchoolAlertLocationsOut(
+        school_id=school.id,
+        region_code=school.region_code,
+        alert_raion_uid=school.alert_raion_uid,
+        alert_hromada_uid=school.alert_hromada_uid,
+        alert_city_uid=school.alert_city_uid,
+    )
+
+
+@router.get(
+    "/schools/{school_id}/alert-locations",
+    response_model=SchoolAlertLocationsOut,
+    responses={200: example_of(SchoolAlertLocationsOut), **ACCESS},
+)
+async def get_alert_locations(
+    school_id: uuid.UUID, admin: Admin, session: Session
+) -> SchoolAlertLocationsOut:
+    """Адміністрація своєї школи: область і точні локації школи для тривог.
+    Інша школа — 403."""
+    school = await service.admin_school(session, admin, school_id)
+    return _locations_out(school)
+
+
+@router.put(
+    "/schools/{school_id}/alert-locations",
+    response_model=SchoolAlertLocationsOut,
+    responses={200: example_of(SchoolAlertLocationsOut), **ACCESS, **R422},
+    description=ALERT_LOCATIONS_DOC
+    + " Замінює всі три поля (відсутнє — очистити); ідемпотентно. Діє з наступного "
+    "опитування API тривог. Лише адміністрація своєї школи, інша школа — 403.",
+)
+async def put_alert_locations(
+    school_id: uuid.UUID, body: SchoolAlertLocations, admin: Admin, session: Session
+) -> SchoolAlertLocationsOut:
+    school = await service.admin_school(session, admin, school_id)
+    school = await service.set_alert_locations(session, school, body)
+    return _locations_out(school)
 
 
 # ---------- класи ----------

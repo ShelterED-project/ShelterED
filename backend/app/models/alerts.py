@@ -48,6 +48,12 @@ class AlertEvent(Base):
     is_drill: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     started_at: Mapped[dt.datetime]
     ended_at: Mapped[dt.datetime | None]  # відбій
+    # Тривога провайдера, що ввімкнула тривогу школи (лише source = 'api'): тип локації
+    # (oblast / raion / hromada / city), її uid і назва, тип тривоги (air_raid, ...).
+    location_type: Mapped[str | None]
+    location_uid: Mapped[str | None]
+    location_title: Mapped[str | None]
+    alert_type: Mapped[str | None]
     created_by: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("app_user.id", ondelete="SET NULL")
     )

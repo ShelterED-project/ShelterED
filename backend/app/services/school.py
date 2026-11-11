@@ -27,6 +27,7 @@ from app.schemas.school import (
     ClassUpdate,
     ExtraLessonCreate,
     OverrideCreate,
+    SchoolAlertLocations,
     SlotCreate,
     SlotUpdate,
 )
@@ -198,6 +199,27 @@ async def regenerate_join_code(
         )
     await session.commit()
     return klass
+
+
+async def admin_school(session: AsyncSession, admin: User, school_id: uuid.UUID) -> School:
+    """Школа, якою керує адмін: лише своя (чужа — 403, неіснуюча — 404)."""
+    school = await session.get(School, school_id)
+    if school is None:
+        raise _not_found("School")
+    if admin.role != "admin" or admin.school_id != school.id:
+        raise AppError("FORBIDDEN", "No access to this school", status_code=403)
+    return school
+
+
+async def set_alert_locations(
+    session: AsyncSession, school: School, body: SchoolAlertLocations
+) -> School:
+    """Замінює точні локації школи; діє з наступного опитування тривог (тривога, що трималась
+    лише на прибраній локації, отримає відбій, коли відповідь API буде повною)."""
+    for field, value in body.model_dump().items():
+        setattr(school, field, value)
+    await session.commit()
+    return school
 
 
 async def list_school_users(

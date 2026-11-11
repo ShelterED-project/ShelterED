@@ -7,9 +7,13 @@
           {
             "alerts": [
               {
+                "alert_type": "air_raid",
                 "id": "0192f0a0-0000-7000-8000-000000000901",
                 "is_drill": false,
-                "region_code": "kyiv",
+                "location_title": "Бориспільський район",
+                "location_type": "raion",
+                "location_uid": "56",
+                "region_code": "14",
                 "school_id": "0192f0a0-0000-7000-8000-0000000000aa",
                 "source": "api",
                 "started_at": "2026-11-05T09:30:00Z"
@@ -106,6 +110,18 @@
       },
       "AlertOut": {
         "properties": {
+          "alert_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "air_raid, artillery_shelling, urban_fights, chemical, nuclear (лише api)",
+            "title": "Alert Type"
+          },
           "class_id": {
             "anyOf": [
               {
@@ -140,6 +156,42 @@
           "is_drill": {
             "title": "Is Drill",
             "type": "boolean"
+          },
+          "location_title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Назва локації від провайдера",
+            "title": "Location Title"
+          },
+          "location_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "oblast / raion / hromada / city (лише source = api)",
+            "title": "Location Type"
+          },
+          "location_uid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "uid локації alerts.in.ua",
+            "title": "Location Uid"
           },
           "region_code": {
             "title": "Region Code",
@@ -4253,6 +4305,122 @@
         "title": "ScheduleOut",
         "type": "object"
       },
+      "SchoolAlertLocations": {
+        "description": "Точні локації школи для тривог. PUT замінює всі три поля: відсутнє чи null — очистити.",
+        "examples": [
+          {
+            "alert_hromada_uid": "1032",
+            "alert_raion_uid": "56"
+          }
+        ],
+        "properties": {
+          "alert_city_uid": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9]{1,9}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Місто, що є частиною області (м. Київ і м. Севастополь — це `region_code`)",
+            "title": "Alert City Uid"
+          },
+          "alert_hromada_uid": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9]{1,9}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Громада",
+            "title": "Alert Hromada Uid"
+          },
+          "alert_raion_uid": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9]{1,9}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Район",
+            "title": "Alert Raion Uid"
+          }
+        },
+        "title": "SchoolAlertLocations",
+        "type": "object"
+      },
+      "SchoolAlertLocationsOut": {
+        "examples": [
+          {
+            "alert_hromada_uid": "1032",
+            "alert_raion_uid": "56",
+            "region_code": "14",
+            "school_id": "0192f0a0-0000-7000-8000-0000000000aa"
+          }
+        ],
+        "properties": {
+          "alert_city_uid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Alert City Uid"
+          },
+          "alert_hromada_uid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Alert Hromada Uid"
+          },
+          "alert_raion_uid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Alert Raion Uid"
+          },
+          "region_code": {
+            "description": "Область (uid регіону alerts.in.ua); змінюється не тут",
+            "title": "Region Code",
+            "type": "string"
+          },
+          "school_id": {
+            "format": "uuid",
+            "title": "School Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "school_id",
+          "region_code",
+          "alert_raion_uid",
+          "alert_hromada_uid",
+          "alert_city_uid"
+        ],
+        "title": "SchoolAlertLocationsOut",
+        "type": "object"
+      },
       "SlotCreate": {
         "description": "Тижневий слот. Час — місцевий час школи (Europe/Kyiv), weekday ISO: 1 = понеділок.",
         "examples": [
@@ -6349,10 +6517,14 @@
               "application/json": {
                 "example": [
                   {
+                    "alert_type": "air_raid",
                     "ended_at": "2026-11-05T10:45:00Z",
                     "id": "0192f0a0-0000-7000-8000-000000000901",
                     "is_drill": false,
-                    "region_code": "kyiv",
+                    "location_title": "Бориспільський район",
+                    "location_type": "raion",
+                    "location_uid": "56",
+                    "region_code": "14",
                     "school_id": "0192f0a0-0000-7000-8000-0000000000aa",
                     "source": "api",
                     "started_at": "2026-11-05T09:30:00Z"
@@ -6432,9 +6604,13 @@
                 "example": {
                   "alerts": [
                     {
+                      "alert_type": "air_raid",
                       "id": "0192f0a0-0000-7000-8000-000000000901",
                       "is_drill": false,
-                      "region_code": "kyiv",
+                      "location_title": "Бориспільський район",
+                      "location_type": "raion",
+                      "location_uid": "56",
+                      "region_code": "14",
                       "school_id": "0192f0a0-0000-7000-8000-0000000000aa",
                       "source": "api",
                       "started_at": "2026-11-05T09:30:00Z"
@@ -6516,7 +6692,7 @@
                   "class_id": "0192f0a0-0000-7000-8000-000000000001",
                   "id": "0192f0a0-0000-7000-8000-000000000902",
                   "is_drill": true,
-                  "region_code": "kyiv",
+                  "region_code": "14",
                   "school_id": "0192f0a0-0000-7000-8000-0000000000aa",
                   "source": "manual",
                   "started_at": "2026-11-05T09:30:00Z"
@@ -6767,7 +6943,7 @@
                   "ended_at": "2026-11-05T09:50:00Z",
                   "id": "0192f0a0-0000-7000-8000-000000000902",
                   "is_drill": true,
-                  "region_code": "kyiv",
+                  "region_code": "14",
                   "school_id": "0192f0a0-0000-7000-8000-0000000000aa",
                   "source": "manual",
                   "started_at": "2026-11-05T09:30:00Z"
@@ -13490,6 +13666,204 @@
         "summary": "Update Question",
         "tags": [
           "lessons"
+        ]
+      }
+    },
+    "/schools/{school_id}/alert-locations": {
+      "get": {
+        "description": "Адміністрація своєї школи: область і точні локації школи для тривог.\nІнша школа — 403.",
+        "operationId": "get_alert_locations_schools__school_id__alert_locations_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "school_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "School Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "alert_hromada_uid": "1032",
+                  "alert_raion_uid": "56",
+                  "region_code": "14",
+                  "school_id": "0192f0a0-0000-7000-8000-0000000000aa"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/SchoolAlertLocationsOut"
+                }
+              }
+            },
+            "description": "Успішна відповідь"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Не автентифіковано"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Недостатньо прав"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Не знайдено"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Alert Locations",
+        "tags": [
+          "school"
+        ]
+      },
+      "put": {
+        "description": "Uid району, громади й міста школи зі словника alerts.in.ua (`location_uid`). API словника локацій не має: повний список — таблиця «Повний список локацій» у документації https://devs.alerts.in.ua/ (https://docs.google.com/spreadsheets/d/1XnTOzcPHd1LZUrarR1Fk43FUyl8Ae6a6M7pcwDRjNdA). Тривога в будь-якій із цих локацій вмикає тривогу школи (перекличка, push) так само, як тривога області (`region_code`). null — локація не вказана: лише тривоги області. Замінює всі три поля (відсутнє — очистити); ідемпотентно. Діє з наступного опитування API тривог. Лише адміністрація своєї школи, інша школа — 403.",
+        "operationId": "put_alert_locations_schools__school_id__alert_locations_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "school_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "School Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SchoolAlertLocations"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "alert_hromada_uid": "1032",
+                  "alert_raion_uid": "56",
+                  "region_code": "14",
+                  "school_id": "0192f0a0-0000-7000-8000-0000000000aa"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/SchoolAlertLocationsOut"
+                }
+              }
+            },
+            "description": "Успішна відповідь"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Не автентифіковано"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Недостатньо прав"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Не знайдено"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Невалідні дані"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Put Alert Locations",
+        "tags": [
+          "school"
         ]
       }
     },

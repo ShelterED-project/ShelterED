@@ -32,19 +32,34 @@ class AlertOut(BaseModel):
     is_drill: bool
     started_at: dt.datetime
     ended_at: dt.datetime | None = Field(description="Відбій; null — тривога триває")
+    # Чому спрацювала тривога з API: тривога провайдера, з якої почалась тривога школи
+    # (найраніша з тих, що її стосуються). Ручна тривога й старі записи — null.
+    location_type: str | None = Field(
+        default=None, description="oblast / raion / hromada / city (лише source = api)"
+    )
+    location_uid: str | None = Field(default=None, description="uid локації alerts.in.ua")
+    location_title: str | None = Field(default=None, description="Назва локації від провайдера")
+    alert_type: str | None = Field(
+        default=None,
+        description="air_raid, artillery_shelling, urban_fights, chemical, nuclear (лише api)",
+    )
 
     model_config = ConfigDict(from_attributes=True)
 
 
 _ALERT_EXAMPLE = {
     "id": ALERT_ID,
-    "region_code": "kyiv",
+    "region_code": "14",
     "school_id": SCHOOL_ID,
     "class_id": None,
     "source": "api",
     "is_drill": False,
     "started_at": "2026-11-05T09:30:00Z",
     "ended_at": None,
+    "location_type": "raion",
+    "location_uid": "56",
+    "location_title": "Бориспільський район",
+    "alert_type": "air_raid",
 }
 _MANUAL_EXAMPLE = {
     **_ALERT_EXAMPLE,
@@ -52,6 +67,10 @@ _MANUAL_EXAMPLE = {
     "class_id": CLASS_ID,
     "source": "manual",
     "is_drill": True,
+    "location_type": None,
+    "location_uid": None,
+    "location_title": None,
+    "alert_type": None,
 }
 
 
