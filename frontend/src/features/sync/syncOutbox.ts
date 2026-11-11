@@ -1,5 +1,6 @@
 import { store } from '@/app/store'
 import { getPendingEvents, markAttempted, OUTBOX_ADDED, removeEvents } from '@/shared/db/outbox'
+import { markContact } from './contact'
 import type { OutboxEvent, WireEvent } from '@/shared/db/types'
 import { syncApi } from './syncApi'
 
@@ -45,10 +46,13 @@ async function drain() {
 
     // Мережа, 5xx, 401, 501: події лишаються в черзі, повторимо з паузою.
     if ('error' in response) {
+      await markContact('events', false)
       await markAttempted(ids)
       scheduleRetry()
       return
     }
+
+    await markContact('events', true)
 
     // accepted, duplicate і rejected сервер підтвердив (повторювати rejected безглуздо).
     // Без результатів по жодній події не крутимось у циклі.

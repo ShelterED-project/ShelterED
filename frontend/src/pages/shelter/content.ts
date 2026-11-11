@@ -62,17 +62,23 @@ export const checkIn = {
 
 export const connection = {
   title: 'Зв’язок',
-  status: 'Офлайн',
+  status: { online: 'Онлайн', offline: 'Офлайн', unreachable: 'Сервер недоступний' },
+  queueEmpty: 'Черга порожня',
   queueHint: 'відправимо, щойно зʼявиться зв’язок',
-  details: [
-    { term: 'Інтернет', value: 'Сюди: стан', strong: true },
-    { term: 'Wi-Fi класу', value: 'Сюди: стан', strong: false },
-    { term: 'Остання синхронізація', value: 'Сюди: час', strong: true },
-    { term: 'Пакет на день', value: 'Сюди: стан і розмір', strong: true },
-  ],
+  queueSentHint: 'усе відправлено на сервер',
+  internet: { term: 'Інтернет', yes: 'Є', no: 'Немає' },
+  server: { term: 'Сервер', ok: 'Відповідає', unreachable: 'Не відповідає', unknown: 'Ще не перевірено' },
+  lastSync: { term: 'Остання синхронізація', never: 'Ще не було' },
+  packs: {
+    term: 'Уроки на пристрої',
+    none: 'Не збережено',
+    days: (n: number, until: string, word: string) => `${n} ${word}, до ${until}`,
+  },
+  app: { term: 'Застосунок без мережі', ready: 'Готовий', notReady: 'Ще не збережено' },
   answers: 'Прогрес і тести',
   rollCalls: 'Перекличка',
   retry: 'Спробувати зараз',
+  retrying: 'Синхронізуємо…',
 }
 
 export const calm = {

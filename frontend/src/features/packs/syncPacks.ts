@@ -2,6 +2,7 @@ import { store } from '@/app/store'
 import { authApi } from '@/features/auth/authApi'
 import { saveSession } from '@/features/auth/session'
 import { db } from '@/shared/db/db'
+import { markContact } from '@/features/sync/contact'
 import { packsApi } from './packsApi'
 
 let running: Promise<void> | null = null
@@ -26,7 +27,11 @@ async function sync() {
     packsApi.endpoints.packManifest.initiate(classId, { forceRefetch: true, subscribe: false }),
   )
   // Без мережі лишаємо те, що вже збережено: урок має відкриватися з локальних даних.
-  if (!('data' in manifest) || !manifest.data) return
+  if (!('data' in manifest) || !manifest.data) {
+    await markContact('packs', false)
+    return
+  }
+  await markContact('packs', true)
 
   // Пакети іншого класу (інший учень на цьому пристрої) і минулі дні більше не потрібні.
   await db.packs.where('class_id').notEqual(classId).delete()
