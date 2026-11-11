@@ -31,7 +31,8 @@ export default function LessonEditorPage() {
   const del = useAction()
   const status = useAction()
   const navigate = useNavigate()
-  const data = lesson.data
+  // currentData — лише урок з цієї адреси: при переході до іншого уроку не показуємо попередній.
+  const data = lesson.currentData
   const readOnly = data?.status === 'published'
 
   const deleteLesson = async () => {
@@ -53,9 +54,20 @@ export default function LessonEditorPage() {
           </Link>
 
           {!data ? (
-            <p role="status" className="text-sm text-muted">
-              {lesson.isLoading ? editor.loading : editor.notFound}
-            </p>
+            lesson.isFetching ? (
+              <div
+                role="status"
+                aria-live="polite"
+                className="flex items-center gap-3 rounded-[22px] border border-line bg-surface p-6 text-[15px] text-muted"
+              >
+                <Spinner large className="text-accent" />
+                {editor.loading}
+              </div>
+            ) : (
+              <p role="alert" className="text-sm text-muted">
+                {editor.notFound}
+              </p>
+            )
           ) : (
             <>
               <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
@@ -113,7 +125,7 @@ export default function LessonEditorPage() {
 
               <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:gap-6">
                 <div className="flex flex-col gap-5 xl:w-[440px] xl:shrink-0 xl:gap-6">
-                  <LessonDetails lesson={data} readOnly={readOnly} />
+                  <LessonDetails key={data.id} lesson={data} readOnly={readOnly} />
                   <AssignSection lesson={data} />
                 </div>
                 <div className="flex flex-col gap-5 xl:min-w-0 xl:flex-1 xl:gap-6">
