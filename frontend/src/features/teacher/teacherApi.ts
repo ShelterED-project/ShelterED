@@ -125,6 +125,47 @@ export interface ClassGaps {
   topics: GapTopic[]
 }
 
+// Розклад класу. Час — місцевий час школи й UTC (для «зараз» порівнюємо UTC).
+
+export interface ScheduleItem {
+  kind: 'regular' | 'replaced' | 'extra'
+  slot_id: string | null
+  override_id: string | null
+  subject_id: string
+  /** HH:MM:SS, місцевий час школи; null лише в додаткового уроку без часу */
+  starts_at: string | null
+  ends_at: string | null
+  starts_at_utc: string | null
+  ends_at_utc: string | null
+  /** Призначений на цю дату урок, якщо є */
+  lesson_id: string | null
+}
+
+export interface ClassSchedule {
+  class_id: string
+  timezone: string
+  days: { date: string; items: ScheduleItem[] }[]
+}
+
+export interface Subject {
+  id: string
+  /** null — загальний довідник */
+  school_id: string | null
+  name: string
+}
+
+export interface LessonSummary {
+  id: string
+  subject_id: string
+  author_id: string
+  title: string
+  status: 'draft' | 'published'
+  version: number
+  published_at: string | null
+  grade: number | null
+  updated_at: string
+}
+
 export const teacherApi = baseApi.injectEndpoints({
   endpoints: (build) => ({
     classes: build.query<ClassOut[], void>({
@@ -156,6 +197,17 @@ export const teacherApi = baseApi.injectEndpoints({
     classGaps: build.query<ClassGaps, string>({
       query: (classId) => `/classes/${classId}/gaps`,
     }),
+    /** Розклад з сьогоднішнього дня (дата школи визначається на сервері), days 1..14 */
+    classSchedule: build.query<ClassSchedule, { classId: string; days: number }>({
+      query: ({ classId, days }) => `/classes/${classId}/schedule?days=${days}`,
+    }),
+    subjects: build.query<Subject[], void>({
+      query: () => '/subjects',
+    }),
+    /** Уроки вчителя: свої чернетки й опубліковані */
+    lessons: build.query<LessonSummary[], void>({
+      query: () => '/lessons',
+    }),
   }),
 })
 
@@ -167,4 +219,7 @@ export const {
   useClassProgressQuery,
   useClassTestsQuery,
   useClassGapsQuery,
+  useClassScheduleQuery,
+  useSubjectsQuery,
+  useLessonsQuery,
 } = teacherApi

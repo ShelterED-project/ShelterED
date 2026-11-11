@@ -1,5 +1,6 @@
 import { Link } from 'react-router'
 import type { NavItem } from './AppSidebar'
+import NavIcon from './NavIcon'
 
 type Props = { items: NavItem[]; activeId: string }
 
@@ -16,7 +17,7 @@ export default function AppTabs({ items, activeId }: Props) {
         }`
         const content = (
           <>
-            <img src={tab.icon} alt="" width={22} height={22} />
+            <NavIcon src={tab.icon} size={22} />
             {tab.label}
           </>
         )

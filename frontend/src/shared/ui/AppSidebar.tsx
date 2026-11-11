@@ -1,6 +1,7 @@
 import { Link } from 'react-router'
 import LogoutButton from '@/features/auth/LogoutButton'
 import Brand from './Brand'
+import NavIcon from './NavIcon'
 
 /** to: маршрут розділу; без нього пункт поки без переходу (розділ ще не зроблено). */
 export type NavItem = { id: string; label: string; icon: string; to?: string }
@@ -23,7 +24,7 @@ export default function AppSidebar({ items, activeId, user }: Props) {
           }`
           const content = (
             <>
-              <img src={item.icon} alt="" width={20} height={20} />
+              <NavIcon src={item.icon} size={20} />
               <span className="sr-only xl:not-sr-only">{item.label}</span>
             </>
           )

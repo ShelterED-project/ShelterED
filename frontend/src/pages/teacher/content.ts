@@ -76,7 +76,21 @@ export const rollCall = {
 
 export const schedule = {
   title: 'Розклад на сьогодні',
-  rows: [{ time: '—', subject: 'Сюди: предмет', status: 'статус уроку', current: false }],
+  loading: 'Завантаження…',
+  empty: 'Сьогодні уроків немає.',
+  offline: 'Немає звʼязку, розклад не завантажено.',
+  notAssigned: 'Урок не призначено',
+  status: { done: 'Минув', now: 'Зараз', next: 'Далі' },
+  week: 'На тиждень',
+}
+
+export const schedulePage = {
+  title: 'Розклад',
+  subtitle: 'Уроки класу на 7 днів від сьогодні',
+  today: 'Сьогодні',
+  noLessons: 'Уроків немає',
+  /** Скільки днів показуємо: як пакети «Рюкзака» (7 днів наперед) */
+  days: 7,
 }
 
 export const gaps = {
@@ -145,6 +159,7 @@ export type NavId = 'overview' | 'rollcall' | 'lessons' | 'schedule' | 'map' | '
 /** Розділи з готовою сторінкою мають маршрут; решта поки без переходу. */
 export const navRoutes: Partial<Record<NavId | TabId, string>> = {
   overview: '/teacher',
+  schedule: '/teacher/schedule',
   map: '/teacher/map',
 }
 
