@@ -8,14 +8,27 @@ export default function LessonBanner() {
   const { lessons } = useTodayPack()
   const navigate = useNavigate()
   const current = pickCurrentLesson(lessons)
+  // Уроки сьогодні є, але за розкладом усі минули (наприклад, увечері).
+  const allDone = !current && lessons !== null && lessons.length > 0
 
-  const eyebrow = current ? (current.status === 'now' ? lessonBanner.now : lessonBanner.next) : lessons ? lessonBanner.none : lessonBanner.noPack
-  const title = current?.lesson.title ?? (lessons ? lessonBanner.none : lessonBanner.noPack)
+  const eyebrow = current
+    ? current.status === 'now'
+      ? lessonBanner.now
+      : lessonBanner.next
+    : allDone
+      ? lessonBanner.allDone
+      : lessons
+        ? lessonBanner.none
+        : lessonBanner.noPack
+  const title =
+    current?.lesson.title ?? (allDone ? lessonBanner.allDoneTitle : lessons ? lessonBanner.none : lessonBanner.noPack)
   const text = current
     ? `${current.startsAt}–${current.endsAt} · ${current.lesson.modules.length} ${pluralUk(current.lesson.modules.length, ['модуль', 'модулі', 'модулів'])} · ${current.minutes} хв`
-    : lessons
-      ? lessonBanner.noLessonsText
-      : lessonBanner.noPackText
+    : allDone
+      ? lessonBanner.allDoneText(lessons.length, pluralUk(lessons.length, ['урок', 'уроки', 'уроків']))
+      : lessons
+        ? lessonBanner.noLessonsText
+        : lessonBanner.noPackText
 
   return (
     <section
@@ -40,11 +53,13 @@ export default function LessonBanner() {
       <div className="flex gap-2 md:shrink-0">
         <button
           type="button"
-          onClick={() => current && navigate(`/shelter?lesson=${current.lesson.id}`)}
-          disabled={!current}
+          onClick={() =>
+            current ? navigate(`/shelter?lesson=${current.lesson.id}`) : allDone && navigate('/student/lessons')
+          }
+          disabled={!current && !allDone}
           className="h-12 flex-1 rounded-[10px] bg-accent px-6 disabled:opacity-50 text-[15px] font-semibold whitespace-nowrap text-oil focus-visible:ring-2 focus-visible:ring-parchment/60 focus-visible:outline-none md:flex-none"
         >
-          {lessonBanner.open}
+          {current || !allDone ? lessonBanner.open : lessonBanner.toLessons}
         </button>
         <button
           type="button"

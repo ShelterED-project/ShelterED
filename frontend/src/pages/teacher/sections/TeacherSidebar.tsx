@@ -7,7 +7,7 @@ import iconSettings from '@/assets/teacher/nav-settings.svg'
 import iconSync from '@/assets/teacher/nav-sync.svg'
 import { useCurrentUser } from '@/features/auth/useCurrentUser'
 import AppSidebar from '@/shared/ui/AppSidebar'
-import { sidebarNav, teacherRole } from '../content'
+import { navRoutes, sidebarNav, teacherRole } from '../content'
 import type { NavId } from '../content'
 
 const icons: Record<NavId, string> = {
@@ -20,14 +20,14 @@ const icons: Record<NavId, string> = {
   settings: iconSettings,
 }
 
-const items = sidebarNav.map((item) => ({ ...item, icon: icons[item.id] }))
+const items = sidebarNav.map((item) => ({ ...item, icon: icons[item.id], to: navRoutes[item.id] }))
 
-export default function TeacherSidebar() {
+export default function TeacherSidebar({ activeId = 'overview' }: { activeId?: NavId }) {
   const user = useCurrentUser()
   return (
     <AppSidebar
       items={items}
-      activeId="overview"
+      activeId={activeId}
       user={{ initials: user?.initials ?? '', name: user?.fullName ?? '', role: teacherRole }}
     />
   )

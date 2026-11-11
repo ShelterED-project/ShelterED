@@ -26,6 +26,8 @@ export const manualAlarm = {
   drill: 'Тренувальна',
   real: 'Справжня тривога',
   cancel: 'Скасувати',
+  starting: 'Оголошуємо…',
+  ending: 'Даємо відбій…',
 }
 
 export const alertBanner = {
@@ -38,6 +40,7 @@ export const alertBanner = {
   drillTitle: 'Тренувальна перекличка триває',
   close: 'Закрити перекличку',
   endAlarm: 'Відбій тривоги',
+  endingAlarm: 'Даємо відбій…',
   offline: 'Немає звʼязку, показано останні отримані дані.',
 }
 
@@ -79,9 +82,55 @@ export const schedule = {
 export const gaps = {
   title: 'Прогалини класу',
   map: 'Мапа класу',
-  note: 'Цифра — скільки учнів мають незвідану тему.',
-  // share — частка заповнення смужки, у відсотках. Сюди: теми з прогалинами.
-  rows: [{ count: 0, topic: 'Сюди: тема', share: 0 }],
+  note: 'Цифра — скільки учнів не склали тест теми, смужка — середня оцінка класу.',
+  loading: 'Завантаження…',
+  empty: 'Результатів ще немає: учні ще не проходили тести.',
+  noGaps: 'Прогалин немає: клас склав тести всіх тем.',
+  offline: 'Немає звʼязку, показано останні отримані дані.',
+  /** Скільки тем показуємо на огляді; решта на сторінці «Мапа класу». */
+  limit: 4,
+}
+
+export const classMap = {
+  title: 'Мапа класу',
+  updated: (time: string) => `Оновлено о ${time}`,
+  notComputed: 'Сервер ще не порахував результати класу.',
+  loading: 'Завантаження…',
+  offline: 'Немає звʼязку, показано останні отримані дані.',
+  progress: {
+    title: 'Прогрес по уроках',
+    empty: 'Уроків у розкладі до сьогодні ще немає.',
+    completed: (done: number, total: number) => `Завершили ${done} з ${total}`,
+    avgProgress: (pct: number) => `Середній прогрес ${pct}%`,
+    tests: (passed: number, scored: number) => `Тест склали ${passed} з ${scored}`,
+    noTests: 'Тест ще ніхто не здав',
+    avgScore: (score: number) => `Середня оцінка ${Math.round(score)}%`,
+  },
+  tests: {
+    title: 'Тести',
+    empty: 'Тестів у класу ще немає.',
+    passScore: (pct: number) => `Склав — від ${pct}%`,
+    window: (hours: number) => `Вікно ${hours} год`,
+    noWindow: 'Без вікна',
+    deadline: (time: string) => `до ${time}`,
+    suspicious: 'Перевірити час пристрою',
+    attempts: (n: number) => `Спроб: ${n}`,
+  },
+  gaps: {
+    title: 'Прогалини по темах',
+    empty: 'Результатів тестів ще немає.',
+    gap: 'Прогалина',
+    ok: 'Засвоєно',
+    noScore: 'Оцінок ще немає',
+    question: (pct: number, correct: number, answered: number) => `${pct}% правильно (${correct} з ${answered})`,
+  },
+}
+
+export const testStatus: Record<'passed' | 'not_passed' | 'closing_soon' | 'pending', string> = {
+  passed: 'Склав',
+  not_passed: 'Не склав',
+  closing_soon: 'Вікно закривається',
+  pending: 'Ще не здав',
 }
 
 export const localServer = {
@@ -92,6 +141,12 @@ export const localServer = {
 }
 
 export type NavId = 'overview' | 'rollcall' | 'lessons' | 'schedule' | 'map' | 'sync' | 'settings'
+
+/** Розділи з готовою сторінкою мають маршрут; решта поки без переходу. */
+export const navRoutes: Partial<Record<NavId | TabId, string>> = {
+  overview: '/teacher',
+  map: '/teacher/map',
+}
 
 export const sidebarNav: { id: NavId; label: string }[] = [
   { id: 'overview', label: 'Огляд' },

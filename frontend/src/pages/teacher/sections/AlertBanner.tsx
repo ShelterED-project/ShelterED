@@ -1,6 +1,7 @@
 import iconLantern from '@/assets/admin/alert-lantern.svg'
 import { useTeacherAlarm } from '@/features/teacher/useTeacherAlarm'
 import { useTeacherRollCall } from '@/features/teacher/useTeacherRollCall'
+import Spinner from '@/shared/ui/Spinner'
 import { alertBanner } from '../content'
 
 function timeLabel(iso: string): string {
@@ -38,17 +39,24 @@ export default function AlertBanner() {
         <h2 className="text-[17px] leading-[25.5px] font-semibold text-parchment">{title}</h2>
         <p role="status" className="text-sm leading-5 text-muted">{text}</p>
         {isOffline && <p className="text-sm leading-5 text-dim">{alertBanner.offline}</p>}
-        {actionError && (
+        {(actionError ?? alarm.error) && (
           <p role="alert" className="text-sm leading-5 font-semibold text-accent">
-            {actionError}
+            {actionError ?? alarm.error}
           </p>
         )}
       </div>
       {session ? (
         <div className="flex flex-col gap-2 md:flex-row">
           {alarm.manualAlert && (
-            <button type="button" onClick={() => void alarm.end()} disabled={alarm.busy} className={primaryButton}>
-              {alertBanner.endAlarm}
+            <button
+              type="button"
+              onClick={() => void alarm.end()}
+              disabled={alarm.busy}
+              aria-busy={alarm.busy}
+              className={`${primaryButton} inline-flex items-center justify-center gap-2`}
+            >
+              {alarm.pending === 'end' && <Spinner />}
+              {alarm.pending === 'end' ? alertBanner.endingAlarm : alertBanner.endAlarm}
             </button>
           )}
           <button
