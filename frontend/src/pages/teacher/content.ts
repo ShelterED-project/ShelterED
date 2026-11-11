@@ -161,6 +161,7 @@ export type NavId = 'overview' | 'rollcall' | 'lessons' | 'schedule' | 'map' | '
 export const navRoutes: Partial<Record<NavId | TabId, string>> = {
   overview: '/teacher',
   rollcall: '/teacher/rollcall',
+  lessons: '/teacher/lessons',
   schedule: '/teacher/schedule',
   map: '/teacher/map',
 }

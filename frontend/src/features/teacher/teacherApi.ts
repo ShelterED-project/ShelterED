@@ -200,6 +200,7 @@ export const teacherApi = baseApi.injectEndpoints({
     /** Розклад з сьогоднішнього дня (дата школи визначається на сервері), days 1..14 */
     classSchedule: build.query<ClassSchedule, { classId: string; days: number }>({
       query: ({ classId, days }) => `/classes/${classId}/schedule?days=${days}`,
+      providesTags: ['Schedule'],
     }),
     subjects: build.query<Subject[], void>({
       query: () => '/subjects',
@@ -207,6 +208,7 @@ export const teacherApi = baseApi.injectEndpoints({
     /** Уроки вчителя: свої чернетки й опубліковані */
     lessons: build.query<LessonSummary[], void>({
       query: () => '/lessons',
+      providesTags: ['LessonList'],
     }),
   }),
 })
