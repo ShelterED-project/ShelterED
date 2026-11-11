@@ -2187,6 +2187,78 @@
         "title": "ManualAlertCreate",
         "type": "object"
       },
+      "MeOut": {
+        "description": "Поточний користувач. Для учня `class_id` -- його клас (потрібен, щоб запитати «Рюкзак»);\nдля інших ролей `null`.",
+        "examples": [
+          {
+            "class_id": "0192f0a0-0000-7000-8000-000000000001",
+            "display_name": "Іван",
+            "id": "0192f0a0-0000-7000-8000-0000000000bb",
+            "last_name": "Петренко",
+            "role": "student",
+            "school_id": "0192f0a0-0000-7000-8000-0000000000aa"
+          }
+        ],
+        "properties": {
+          "class_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Class Id"
+          },
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "last_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Name"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          },
+          "school_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "School Id"
+          }
+        },
+        "required": [
+          "id",
+          "role",
+          "display_name",
+          "last_name",
+          "school_id"
+        ],
+        "title": "MeOut",
+        "type": "object"
+      },
       "MediaManifestItem": {
         "description": "Медіафайл для кешу Service Worker (окремий URL, кешується незалежно від пакета).",
         "properties": {
@@ -7091,13 +7163,14 @@
     },
     "/auth/me": {
       "get": {
+        "description": "Поточний користувач. Для учня додає `class_id`: без нього не запитати «Рюкзак».",
         "operationId": "me_auth_me_get",
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/UserOut"
+                  "$ref": "#/components/schemas/MeOut"
                 }
               }
             },

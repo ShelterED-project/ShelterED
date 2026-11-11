@@ -1,23 +1,56 @@
 import { generateId } from '@/shared/lib/uuid'
 import { db } from './db'
-import type { OutboxEvent } from './types'
+import type { EventPayloads, OutboxEvent, SyncEventType } from './types'
 
-export async function addEvent(type: string, payload: unknown): Promise<OutboxEvent> {
-  const event: OutboxEvent = {
-    id: generateId(),
+/** Подія для шару синхронізації: черга поповнилась. Dexie-хуки спрацьовують до коміту, тому окрема подія. */
+export const OUTBOX_ADDED = 'shelter:outbox-added'
+
+let deviceId: Promise<string> | null = null
+
+/** Id пристрою: створюється один раз і живе в IndexedDB. */
+export function getDeviceId(): Promise<string> {
+  deviceId ??= (async () => {
+    const stored = await db.meta.get('device_id')
+    if (typeof stored?.value === 'string') return stored.value
+    const id = generateId()
+    await db.meta.put({ key: 'device_id', value: id })
+    return id
+  })()
+  return deviceId
+}
+
+/** Кладе подію в чергу. Час береться з годинника пристрою в момент дії. */
+export async function addEvent<T extends SyncEventType>(
+  type: T,
+  userId: string,
+  payload: EventPayloads[T],
+): Promise<OutboxEvent> {
+  const event = {
+    client_event_id: generateId(),
     type,
+    device_id: await getDeviceId(),
+    occurred_at: new Date().toISOString(),
     payload,
-    createdAt: Date.now(),
+    user_id: userId,
     attempts: 0,
-  }
-  await db.outbox.add(event)
+  } as OutboxEvent
+  await db.events.add(event)
+  window.dispatchEvent(new Event(OUTBOX_ADDED))
   return event
 }
 
-export function getPendingEvents(): Promise<OutboxEvent[]> {
-  return db.outbox.orderBy('createdAt').toArray()
+/** Найстаріші події користувача за часом події, не більше limit. */
+export async function getPendingEvents(userId: string, limit: number): Promise<OutboxEvent[]> {
+  const events = await db.events.where('user_id').equals(userId).sortBy('occurred_at')
+  return events.slice(0, limit)
 }
 
 export async function removeEvents(ids: string[]): Promise<void> {
-  await db.outbox.bulkDelete(ids)
+  await db.events.bulkDelete(ids)
+}
+
+export async function markAttempted(ids: string[]): Promise<void> {
+  await db.events.where('client_event_id').anyOf(ids).modify((event) => {
+    event.attempts += 1
+  })
 }

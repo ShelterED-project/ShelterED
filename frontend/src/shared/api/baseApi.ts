@@ -97,5 +97,7 @@ const baseQueryWithReauth: BaseQueryFn<string | FetchArgs, unknown, FetchBaseQue
 export const baseApi = createApi({
   reducerPath: 'api',
   baseQuery: baseQueryWithReauth,
+  // Теги кешу: після змін уроку у вчителя оновлюються список уроків, відкритий урок і розклад.
+  tagTypes: ['Lesson', 'LessonList', 'Schedule'],
   endpoints: () => ({}),
 })

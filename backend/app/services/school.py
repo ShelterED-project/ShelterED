@@ -78,6 +78,16 @@ async def teacher_ids(session: AsyncSession, class_id: uuid.UUID) -> list[uuid.U
     return list(rows)
 
 
+async def student_class_id(session: AsyncSession, student_id: uuid.UUID) -> uuid.UUID | None:
+    """Клас учня. Учень входить за кодом одного класу; якщо їх кілька, береться найновіший."""
+    return await session.scalar(
+        select(ClassMembership.class_id)
+        .where(ClassMembership.user_id == student_id, ClassMembership.member_role == "student")
+        .order_by(ClassMembership.joined_at.desc(), ClassMembership.class_id)
+        .limit(1)
+    )
+
+
 async def class_out(session: AsyncSession, klass: SchoolClass) -> ClassOut:
     out = ClassOut.model_validate(klass)
     out.teacher_ids = await teacher_ids(session, klass.id)
