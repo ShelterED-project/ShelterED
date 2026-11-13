@@ -18,6 +18,7 @@ import LessonEditorPage from '@/pages/teacher/lessons/LessonEditorPage'
 import LessonsListPage from '@/pages/teacher/lessons/LessonsListPage'
 import RollCallPage from '@/pages/teacher/RollCallPage'
 import SchedulePage from '@/pages/teacher/SchedulePage'
+import SyncPage from '@/pages/teacher/SyncPage'
 import TeacherPage from '@/pages/teacher/TeacherPage'
 import RootLayout from './RootLayout'
 
@@ -54,6 +55,7 @@ export const router = createBrowserRouter([
           { path: '/teacher/rollcall', element: <RollCallPage /> },
           { path: '/teacher/schedule', element: <SchedulePage /> },
           { path: '/teacher/map', element: <ClassMapPage /> },
+          { path: '/teacher/sync', element: <SyncPage /> },
         ],
       },
       {

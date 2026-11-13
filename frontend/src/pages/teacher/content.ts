@@ -150,11 +150,51 @@ export const testStatus: Record<'passed' | 'not_passed' | 'closing_soon' | 'pend
 
 export const localServer = {
   title: 'Локальний сервер укриття',
-  textBefore: 'Сюди: назва мережі, кількість підключених пристроїв, адреса для учнів: ',
-  address: '—',
-  sync: 'Синхронізувати з хмарою',
+  soon: 'Буде пізніше',
+  text: 'Ноутбук вчителя роздаватиме Wi-Fi в укритті: учні працюватимуть без інтернету, а вчитель одним натиском передасть зібране в хмару.',
 }
 
+export const qrSync = {
+  title: 'QR-синхронізація',
+  soon: 'Буде пізніше',
+  text: 'Якщо немає ні інтернету, ні локального сервера, учень покаже QR зі своїм прогресом, а вчитель відсканує його телефоном.',
+}
+
+export const syncPage = {
+  title: 'Синхронізація',
+  subtitle: 'Чи готовий клас до роботи без інтернету',
+  readiness: {
+    title: 'Готовність до укриття',
+    hint: 'Учні завантажують ці дні на пристрої, щойно відкривають застосунок з інтернетом.',
+    summary: (ready: number, total: number) => `Уроки готові на ${ready} з ${total} навчальних днів`,
+    allReady: 'Усі навчальні дні тижня готові.',
+    loading: 'Завантаження…',
+    offline: 'Немає звʼязку з сервером. Перевірте мережу й натисніть «Оновити».',
+    today: 'сьогодні',
+    lessons: (n: number, word: string) => `${n} ${word}`,
+    state: {
+      ready: 'Готово',
+      missing: 'Пакета немає',
+      unassigned: 'Уроки не призначено',
+      free: 'Уроків немає',
+    },
+    missingHint: 'Перевірте, чи опубліковані уроки цього дня. Пакет збирається за кілька секунд після публікації.',
+    built: (size: string, time: string) => `${size} · зібрано ${time}`,
+  },
+  connection: {
+    title: 'Звʼязок',
+    internet: 'Інтернет',
+    server: 'Сервер',
+    updated: 'Оновлено',
+    yes: 'Є',
+    no: 'Немає',
+    ok: 'Відповідає',
+    down: 'Не відповідає',
+    never: 'Ще не було',
+    refresh: 'Оновити',
+    refreshing: 'Оновлюємо…',
+  },
+}
 export type NavId = 'overview' | 'rollcall' | 'lessons' | 'schedule' | 'map' | 'sync' | 'settings'
 
 /** Розділи з готовою сторінкою мають маршрут; решта поки без переходу. */
@@ -162,6 +202,7 @@ export const navRoutes: Partial<Record<NavId | TabId, string>> = {
   overview: '/teacher',
   rollcall: '/teacher/rollcall',
   lessons: '/teacher/lessons',
+  sync: '/teacher/sync',
   schedule: '/teacher/schedule',
   map: '/teacher/map',
 }
