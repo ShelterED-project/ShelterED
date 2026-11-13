@@ -7,8 +7,12 @@ import type { AttemptResultChange, ModuleProgressChange, SyncChange } from './sy
 /** Скільки сторінок стрічки тягнемо за раз; решту — при наступній синхронізації. */
 const MAX_PAGES = 10
 
-/** Курсор стрічки окремий для кожного учня: на одному пристрої може бути кілька. */
-const cursorKey = (userId: string) => `changes_cursor:${userId}`
+/**
+ * Курсор стрічки окремий для кожного учня: на одному пристрої може бути кілька.
+ * v2: перша версія пропускала зміни уроків, пакети яких приходили пізніше за стрічку;
+ * новий ключ змушує вже збережені пристрої один раз перечитати стрічку з початку.
+ */
+const cursorKey = (userId: string) => `changes_cursor:v2:${userId}`
 
 /** До якого уроку належать тест чи модуль: беремо з пакетів «Рюкзака» на пристрої. */
 async function lessonIndex(): Promise<Map<string, string>> {
@@ -82,6 +86,16 @@ async function apply(userId: string, changes: SyncChange[], nextCursor: string) 
     }
     await db.meta.put({ key: cursorKey(userId), value: nextCursor })
   })
+}
+
+/**
+ * Перечитати стрічку з початку. Потрібно, коли на пристрій прийшли нові пакети: зміни про уроки,
+ * яких тоді ще не було (модулі, тести), раніше пропущено, бо їх нікуди було записати.
+ * Безпечно: стрічка віддає стан, а не історію, і застосування ідемпотентне.
+ */
+export async function resetChangesCursor(): Promise<void> {
+  const userId = store.getState().auth.session?.user.id
+  if (userId) await db.meta.delete(cursorKey(userId))
 }
 
 /**

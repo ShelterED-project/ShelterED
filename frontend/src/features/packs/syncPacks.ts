@@ -3,6 +3,8 @@ import { authApi } from '@/features/auth/authApi'
 import { saveSession } from '@/features/auth/session'
 import { db } from '@/shared/db/db'
 import { markContact } from '@/features/sync/contact'
+import { resetChangesCursor } from '@/features/sync/syncChanges'
+import { requestSync } from '@/features/sync/syncOutbox'
 import { packsApi } from './packsApi'
 
 let running: Promise<void> | null = null
@@ -38,13 +40,24 @@ async function sync() {
   await db.packs.where('pack_date').below(manifest.data.date_from).delete()
 
   const known = new Map((await db.packs.toArray()).map((pack) => [pack.id, pack.content_hash]))
+  let saved = 0
   for (const item of manifest.data.packs) {
     if (known.get(item.id) === item.content_hash) continue
     const result = await store.dispatch(
       packsApi.endpoints.pack.initiate(item.id, { forceRefetch: true, subscribe: false }),
     )
     // Помилку одного пакета не вважаємо фатальною: решту докачуємо, цей повторимо при наступному запуску.
-    if ('data' in result && result.data) await db.packs.put(result.data)
+    if ('data' in result && result.data) {
+      await db.packs.put(result.data)
+      saved += 1
+    }
+  }
+
+  // Нові уроки на пристрої: перечитуємо стрічку змін, щоб підхопити їхній прогрес і оцінки
+  // (раніше їх пропустили, бо уроку ще не було в пакетах).
+  if (saved > 0) {
+    await resetChangesCursor()
+    void requestSync()
   }
 }
 

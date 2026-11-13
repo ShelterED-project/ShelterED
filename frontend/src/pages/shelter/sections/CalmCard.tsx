@@ -1,3 +1,4 @@
+import { Link } from 'react-router'
 import iconChevron from '@/assets/shelter/chevron.svg'
 import iconPin from '@/assets/shelter/pin.svg'
 import { calm } from '../content'
@@ -12,14 +13,13 @@ export default function CalmCard() {
       <div className="flex min-w-0 flex-1 flex-col gap-1 pb-px">
         <h2 className="font-heading text-lg leading-7 tracking-[-0.18px] text-parchment">{calm.title}</h2>
         <p className="text-xs leading-4 text-dim">{calm.text}</p>
-        {/* TODO: запускати вправу з диханням, коли зʼявиться відповідна сторінка */}
-        <button
-          type="button"
+        <Link
+          to="/student/calm#breathing"
           className="flex items-center gap-1 self-start rounded pt-[3.5px] text-sm font-semibold text-muted hover:text-parchment focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:outline-none"
         >
           {calm.start}
           <img src={iconChevron} alt="" width={16} height={16} />
-        </button>
+        </Link>
       </div>
     </section>
   )
