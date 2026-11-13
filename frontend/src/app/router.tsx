@@ -8,6 +8,7 @@ import NotFoundPage from '@/pages/not-found/NotFoundPage'
 import ParentPage from '@/pages/parent/ParentPage'
 import RegisterPage from '@/pages/register/RegisterPage'
 import ShelterModePage from '@/pages/shelter/ShelterModePage'
+import LessonPage from '@/pages/student/LessonPage'
 import LessonsPage from '@/pages/student/LessonsPage'
 import StudentPage from '@/pages/student/StudentPage'
 import ClassMapPage from '@/pages/teacher/ClassMapPage'
@@ -34,6 +35,7 @@ export const router = createBrowserRouter([
             children: [
               { path: '/student', element: <StudentPage /> },
               { path: '/student/lessons', element: <LessonsPage /> },
+              { path: '/student/lesson', element: <LessonPage /> },
               { path: '/shelter', element: <ShelterModePage /> },
             ],
           },

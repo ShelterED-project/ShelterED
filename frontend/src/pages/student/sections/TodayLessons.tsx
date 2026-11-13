@@ -34,7 +34,7 @@ export default function TodayLessons() {
         {(lessons ?? []).map((item) => (
           <li key={item.key}>
           <Link
-            to={`/shelter?lesson=${item.lesson.id}`}
+            to={`/student/lesson?lesson=${item.lesson.id}`}
             className={`flex items-center gap-4 rounded-2xl border p-4 focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:outline-none ${
               item.status === 'now' ? 'border-accent/50 bg-surface-2' : 'border-line bg-surface-2/50'
             }`}
