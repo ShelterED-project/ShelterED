@@ -30,7 +30,7 @@ class CheckResult(BaseModel):
 
 
 class ChatRequest(BaseModel):
-  action: Literal["explain", "practice", "check"]
+  action: Optional[Literal["explain", "practice", "check"]] = None
   grade: int = Field(..., ge=1, le=11)
   subject: Optional[str] = None
   topic: Optional[str] = None

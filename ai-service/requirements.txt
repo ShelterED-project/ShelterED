@@ -6,3 +6,8 @@ openai
 httpx
 PyYAML
 pillow
+scikit-learn
+joblib
+langgraph
+torch --index-url https://download.pytorch.org/whl/cpu
+sentence-transformers
