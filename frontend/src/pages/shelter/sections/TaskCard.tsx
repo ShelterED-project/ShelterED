@@ -4,6 +4,7 @@ import { useAppSelector } from '@/app/hooks'
 import { useShelterLesson } from '@/features/lessons/useShelterLesson'
 import { task } from '../content'
 import ModuleTask from './ModuleTask'
+import TestResults from './TestResults'
 import TestTask from './TestTask'
 
 /** Рамка завдання: підпис зверху, заголовок і тіло. Спільна для модуля, тесту й порожніх станів. */
@@ -33,11 +34,17 @@ export function TaskFrame({ meta, title, children }: { meta?: string; title: str
 }
 
 export default function TaskCard() {
-  const { lesson, currentStep } = useShelterLesson()
+  const { lesson, currentStep, steps, records } = useShelterLesson()
   const userId = useAppSelector((s) => s.auth.session?.user.id)
 
   if (!lesson || !userId) return <TaskFrame title={task.empty} />
-  if (!currentStep) return <TaskFrame title={task.allDone} />
+  if (!currentStep) {
+    return (
+      <TaskFrame title={task.allDone}>
+        <TestResults steps={steps} records={records} />
+      </TaskFrame>
+    )
+  }
 
   // key: при переході до наступного кроку стан завдання починається з нуля.
   return currentStep.kind === 'module' ? (
