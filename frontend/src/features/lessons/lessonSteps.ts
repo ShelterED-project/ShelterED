@@ -12,7 +12,7 @@ function partRank(part: string): number {
   return PART_ORDER[part] ?? 2
 }
 
-/** Кроки уроку: модулі (спершу укриттєві), потім тести. done береться з локального прогресу. */
+/** Кроки уроку: модулі (спершу укриттєві), потім тести з питаннями. done береться з локального прогресу. */
 export function buildSteps(lesson: PackLesson, progress: LessonProgressRecord[]): LessonStep[] {
   const doneIds = new Set(progress.map((record) => record.id))
   const modules = [...lesson.modules].sort(
@@ -26,7 +26,8 @@ export function buildSteps(lesson: PackLesson, progress: LessonProgressRecord[])
       module,
       done: doneIds.has(module.id),
     })),
-    ...lesson.tests.map((test): LessonStep => ({
+    // Тест без питань пройти неможливо: пропускаємо, щоб учень на ньому не застряг.
+    ...lesson.tests.filter((test) => test.questions.length > 0).map((test): LessonStep => ({
       id: test.id,
       kind: 'test',
       title: test.title,
