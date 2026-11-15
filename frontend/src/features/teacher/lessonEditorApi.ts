@@ -258,6 +258,8 @@ function publishProblems(details: unknown): string {
   const checks = Array.isArray(details) ? details.map((d) => (d as { check?: string }).check) : []
   const text: Record<string, string> = {
     shelter_part: 'заповніть «Текст для укриття»',
+    modules: 'додайте хоча б один модуль',
+    test_questions: 'додайте питання в кожен тест або видаліть порожній',
     video_subtitles: 'додайте субтитри до відео',
     lesson_size: 'урок завеликий для телефонів учнів',
     pack_day_size: 'пакет дня, де стоїть урок, завеликий',
