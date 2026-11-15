@@ -1,8 +1,13 @@
 import iconSync from '@/assets/student/sync.svg'
 import { pluralUk } from '@/shared/lib/plural'
+import { useTodayPack } from '@/features/packs/usePacks'
 import { sync } from '../content'
 
 export default function SyncStatus({ pending }: { pending: number }) {
+  const { builtAt } = useTodayPack()
+  const packLine = builtAt
+    ? sync.saved(new Date(builtAt).toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' }))
+    : sync.noPack
   const title =
     pending === 0
       ? 'Усе синхронізовано'
@@ -17,7 +22,7 @@ export default function SyncStatus({ pending }: { pending: number }) {
         <p role="status" className="text-[15px] leading-[22.5px] font-semibold text-parchment">
           {title}
         </p>
-        <p className="text-xs text-dim">{sync.package}</p>
+        <p className="text-xs text-dim">{packLine}</p>
       </div>
     </section>
   )

@@ -14,12 +14,14 @@ def test_preflight_allowed_origin():
     )
     assert response.status_code == 200
     assert response.headers["access-control-allow-origin"] == PWA
-    assert response.headers["access-control-allow-credentials"] == "true"
+    # Лише Bearer-токен, без cookie: credentials не дозволяються.
+    assert "access-control-allow-credentials" not in response.headers
 
 
 def test_exposes_request_id():
     response = client.get("/health", headers={"Origin": PWA})
-    assert "X-Request-ID" in response.headers["access-control-expose-headers"]
+    exposed = response.headers["access-control-expose-headers"]
+    assert {"X-Request-ID", "ETag", "Retry-After"} <= set(exposed.split(", ")), exposed
 
 
 def test_unknown_origin_not_allowed():

@@ -10,7 +10,7 @@ from app.core.logging import request_id_var
 
 HEADER = "X-Request-ID"
 # Приймаємо ID від клієнта лише в безпечному форматі, щоб у лог не потрапило сміття.
-VALID_ID = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
+VALID_ID = re.compile(r"[A-Za-z0-9._-]{1,64}")
 
 logger = logging.getLogger("app.request")
 
@@ -27,7 +27,7 @@ class RequestIdMiddleware:
             return
 
         incoming = dict(scope["headers"]).get(HEADER.lower().encode(), b"").decode("latin-1")
-        request_id = incoming if VALID_ID.match(incoming) else uuid.uuid4().hex
+        request_id = incoming if VALID_ID.fullmatch(incoming) else uuid.uuid4().hex
         request_id_var.set(request_id)
 
         status = 500

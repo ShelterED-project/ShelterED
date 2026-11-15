@@ -2,8 +2,9 @@ import datetime as dt
 import re
 import unicodedata
 import uuid
+from collections.abc import Awaitable, Callable
 
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import load_only
@@ -21,6 +22,7 @@ from app.core.security import (
     verify_secret_async,
 )
 from app.models.auth import AuthCode, ParentLinkCode, RefreshToken
+from app.models.push import PushSubscription
 from app.models.school import ClassMembership, ParentChild, SchoolClass, User
 from app.schemas.auth import TokenResponse
 
@@ -63,7 +65,6 @@ async def issue_tokens(
     settings: Settings,
     *,
     family_id: uuid.UUID | None = None,
-    user_agent: str | None = None,
 ) -> tuple[TokenResponse, RefreshToken]:
     """Видає пару токенів. Commit робить викликач."""
     raw = new_opaque_token()
@@ -72,7 +73,6 @@ async def issue_tokens(
         family_id=family_id or uuid.uuid4(),
         token_hash=hash_token(raw),
         expires_at=_now() + dt.timedelta(days=settings.refresh_token_ttl_days),
-        user_agent=user_agent[:200] if user_agent else None,
         token_version=user.token_version,
     )
     session.add(row)
@@ -94,8 +94,17 @@ async def _revoke_tokens(session: AsyncSession, *criteria) -> None:
     )
 
 
+async def revoke_all_sessions(session: AsyncSession, user: User) -> None:
+    """Нова епоха облікових даних (скидання PIN чи пароля): живі access-токени, усі
+    refresh-токени й push-підписки користувача перестають діяти. Загублений телефон не
+    отримує більше сповіщень класу; новий вхід підпишеться заново. Без commit."""
+    user.token_version += 1
+    await _revoke_tokens(session, RefreshToken.user_id == user.id)
+    await session.execute(delete(PushSubscription).where(PushSubscription.user_id == user.id))
+
+
 async def refresh_tokens(
-    session: AsyncSession, raw_token: str, settings: Settings, user_agent: str | None = None
+    session: AsyncSession, raw_token: str, settings: Settings
 ) -> TokenResponse:
     """Ротація refresh-токена.
 
@@ -141,9 +150,7 @@ async def refresh_tokens(
         or user.token_version != row.token_version
     ):
         raise _invalid_grant()
-    response, new_row = await issue_tokens(
-        session, user, settings, family_id=row.family_id, user_agent=user_agent
-    )
+    response, new_row = await issue_tokens(session, user, settings, family_id=row.family_id)
     # Повтор лишає токен «ротованим» з початковим часом; перша ротація ставить час.
     row.replaced_by_id = new_row.id
     if row.rotated_at is None:
@@ -176,9 +183,11 @@ async def authorize(
 ) -> str:
     if client_id not in settings.oauth_client_ids:
         raise AppError("INVALID_CLIENT", "Unknown client_id", status_code=400)
+    if redirect_uri is not None and redirect_uri not in settings.oauth_redirect_uris:
+        raise AppError("INVALID_REDIRECT_URI", "redirect_uri is not allowed", status_code=400)
     user = await session.scalar(select(User).where(User.email == email))
     # verify_secret_async з None виконує фіктивну перевірку: час відповіді не видає, чи існує email.
-    # TODO: захист від підбору пароля — rate limiting запитів (за клієнтом/IP) в епіку безпеки,
+    # Захист від підбору пароля — rate limiting невдалих спроб у роутері (app/core/rate_limit.py),
     # а не блокування акаунтів (діти могли б навмисно блокувати інших).
     password_ok = await verify_secret_async(password, user.password_hash if user else None)
     if user is None or not user.is_active or not password_ok:
@@ -206,7 +215,6 @@ async def exchange_code(
     client_id: str,
     redirect_uri: str | None,
     settings: Settings,
-    user_agent: str | None = None,
 ) -> TokenResponse:
     row = await session.scalar(
         select(AuthCode).where(AuthCode.code_hash == hash_token(code)).with_for_update()
@@ -226,7 +234,7 @@ async def exchange_code(
     user = await session.get(User, row.user_id)
     if user is None or not user.is_active:
         raise _invalid_grant()
-    response, _ = await issue_tokens(session, user, settings, user_agent=user_agent)
+    response, _ = await issue_tokens(session, user, settings)
     await session.commit()
     return response
 
@@ -275,7 +283,7 @@ async def _find_student(session: AsyncSession, class_id: uuid.UUID, key: str) ->
 
 
 async def _login_existing_student(
-    session: AsyncSession, student: User, pin: str, settings: Settings, user_agent: str | None
+    session: AsyncSession, student: User, pin: str, settings: Settings
 ) -> TokenResponse:
     if not student.is_active:
         raise _invalid_credentials()
@@ -298,7 +306,7 @@ async def _login_existing_student(
             raise _invalid_credentials()
     elif pin_hash is None:
         student.pin_hash = new_hash
-    response, _ = await issue_tokens(session, student, settings, user_agent=user_agent)
+    response, _ = await issue_tokens(session, student, settings)
     await session.commit()
     return response
 
@@ -311,8 +319,10 @@ async def student_join(
     last_name: str,
     pin: str,
     settings: Settings,
-    user_agent: str | None = None,
+    before_create: Callable[[uuid.UUID], Awaitable[None]] | None = None,
 ) -> TokenResponse:
+    """`before_create(class_id)` викликається лише перед створенням нового учня (не для входу
+    наявного): там API рахує ліміт нових учнів і може кинути 429."""
     # Код класу зберігається у нормалізованому вигляді (normalize_link_code).
     code = normalize_link_code(join_code)
     klass = await session.scalar(
@@ -329,11 +339,13 @@ async def student_join(
     # Наявний учень входить і після завершення терміну коду: він лише обмежує створення нових.
     student = await _find_student(session, class_id, key)
     if student is not None:
-        return await _login_existing_student(session, student, pin, settings, user_agent)
+        return await _login_existing_student(session, student, pin, settings)
     if _join_code_expired(klass):
         # Той самий 401, що й для хибного PIN: не розкриваємо, які імена є в класі.
         await verify_secret_async(pin, None)
         raise _invalid_credentials()
+    if before_create is not None:
+        await before_create(class_id)
 
     # Хеш рахуємо до блокування: argon2 повільний, а блокування тримає всіх, хто входить у клас.
     pin_hash = await hash_secret_async(pin)
@@ -351,7 +363,7 @@ async def student_join(
     if student is not None:
         # Паралельний запит встиг створити учня: звільняємо блокування класу (commit) до argon2.
         await session.commit()
-        return await _login_existing_student(session, student, pin, settings, user_agent)
+        return await _login_existing_student(session, student, pin, settings)
     if _join_code_expired(klass):
         raise _invalid_credentials()
 
@@ -366,7 +378,7 @@ async def student_join(
     session.add(student)
     await session.flush()
     session.add(ClassMembership(class_id=class_id, user_id=student.id, member_role="student"))
-    response, _ = await issue_tokens(session, student, settings, user_agent=user_agent)
+    response, _ = await issue_tokens(session, student, settings)
     await session.commit()
     return response
 
@@ -388,10 +400,9 @@ async def reset_student_pin(
     if student is None:
         raise AppError("NOT_FOUND", "Student not found in this class", status_code=404)
     student.pin_hash = None
-    # Нова епоха: живі access-токени й refresh-токени, видані раніше (зокрема паралельними
-    # входами), перестають діяти. PIN могли скинути через компрометацію.
-    student.token_version += 1
-    await _revoke_tokens(session, RefreshToken.user_id == student.id)
+    # Нова епоха: живі access-токени, refresh-токени, видані раніше (зокрема паралельними
+    # входами), і push-підписки перестають діяти. PIN могли скинути через компрометацію.
+    await revoke_all_sessions(session, student)
     await session.commit()
 
 

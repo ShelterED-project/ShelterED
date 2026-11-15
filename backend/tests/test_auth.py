@@ -79,6 +79,7 @@ async def test_pkce_happy_path(client: AsyncClient, world) -> None:
         "display_name": "Олена",
         "last_name": None,
         "school_id": str(world.school.id),
+        "class_id": None,
     }
 
 
@@ -372,6 +373,7 @@ async def test_student_first_join_creates_student(client: AsyncClient, world) ->
     assert me.json()["role"] == "student"
     assert me.json()["last_name"] == "Мельник"
     assert me.json()["school_id"] == str(world.school.id)
+    assert me.json()["class_id"] == str(world.class_a.id)
 
 
 async def test_student_rejoin_with_right_pin(client: AsyncClient, world) -> None:
@@ -670,3 +672,43 @@ async def test_control_chars_rejected_and_cyrillic_lookalike_code(
     klass.join_code = "ABCE1234"
     cyr = {**join_body(klass), "join_code": "АВСЕ1234"}
     assert (await client.post("/auth/student/join", json=cyr)).status_code == 200
+
+
+async def test_redirect_uri_must_be_allow_listed(client: AsyncClient, world, app) -> None:
+    """Невідомий redirect_uri відхиляється до перевірки пароля; дозволений прив'язується до
+    коду й має збігтися при обміні."""
+    verifier, challenge = pkce_pair()
+    body = {
+        "email": world.teacher_a.email,
+        "password": PASSWORD,
+        "code_challenge": challenge,
+        "code_challenge_method": "S256",
+        "client_id": CLIENT_ID,
+    }
+    evil = await client.post(
+        "/auth/authorize", json={**body, "redirect_uri": "https://evil.example/cb"}
+    )
+    assert evil.status_code == 400
+    assert evil.json()["error"]["code"] == "INVALID_REDIRECT_URI"
+    wrong_password = await client.post(
+        "/auth/authorize",
+        json={**body, "password": "wrong-password-1", "redirect_uri": "https://evil.example/cb"},
+    )
+    assert wrong_password.json()["error"]["code"] == "INVALID_REDIRECT_URI"
+
+    allowed = "https://app.sheltered.example/auth/callback"
+    settings = get_settings().model_copy(update={"oauth_redirect_uris": [allowed]})
+    app.dependency_overrides[get_settings] = lambda: settings
+    resp = await client.post("/auth/authorize", json={**body, "redirect_uri": allowed})
+    assert resp.status_code == 200, resp.text
+    token = await client.post(
+        "/auth/token",
+        json={
+            "grant_type": "authorization_code",
+            "code": resp.json()["code"],
+            "code_verifier": verifier,
+            "client_id": CLIENT_ID,
+            "redirect_uri": allowed,
+        },
+    )
+    assert token.status_code == 200, token.text

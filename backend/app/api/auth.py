@@ -1,15 +1,17 @@
 import json
 import uuid
-from typing import Annotated
+from collections.abc import Awaitable, Callable
+from typing import Annotated, Literal
 from urllib.parse import parse_qsl
 
-from fastapi import APIRouter, Header, Request, Response, status
+from fastapi import APIRouter, Query, Request, Response, status
 from pydantic import ValidationError
 
 from app.api.deps import (
     AccessibleStudent,
     Admin,
     CurrentUser,
+    Limiter,
     Parent,
     Session,
     SettingsDep,
@@ -17,11 +19,14 @@ from app.api.deps import (
     StaffClass,
 )
 from app.core.errors import AppError
+from app.core.rate_limit import RateLimiter, Rule, enforce, rate_limited, rule
+from app.core.security import normalize_link_code
 from app.schemas.auth import (
     AdminCreateUserRequest,
     AuthorizeRequest,
     AuthorizeResponse,
     LogoutRequest,
+    MeOut,
     ParentLinkCodeResponse,
     ParentLinkRequest,
     ParentLinkResponse,
@@ -32,39 +37,107 @@ from app.schemas.auth import (
 )
 from app.schemas.errors import ErrorResponse
 from app.services import auth as service
+from app.services import school as school_service
 
 router = APIRouter(tags=["auth"])
-
-UserAgent = Annotated[str | None, Header()]
 
 R401 = {401: {"model": ErrorResponse, "description": "Не автентифіковано"}}
 R403 = {403: {"model": ErrorResponse, "description": "Недостатньо прав"}}
 R404 = {404: {"model": ErrorResponse, "description": "Не знайдено"}}
+R429 = {
+    429: {
+        "model": ErrorResponse,
+        "description": "RATE_LIMITED: забагато невдалих спроб; повторити після `Retry-After` с",
+        "headers": {"Retry-After": {"schema": {"type": "integer"}}},
+    }
+}
+
+# Невдалі спроби входу, які рахує rate limiter (успішний вхід не рахується).
+_FAILED_LOGIN = {"INVALID_CREDENTIALS", "INVALID_JOIN_CODE"}
+
+
+def _client_ip(request: Request) -> str:
+    # За Nginx `request.client` — це адреса клієнта з X-Forwarded-For лише тоді, коли uvicorn
+    # довіряє проксі: `--proxy-headers` + FORWARDED_ALLOW_IPS з IP/підмережею Nginx (Dockerfile).
+    # Інакше тут IP Nginx — один спільний лічильник «на IP» і «IP + акаунт» для всіх клієнтів.
+    return request.client.host if request.client else "unknown"
+
+
+async def _limited[T](
+    limiter: RateLimiter,
+    rules: list[Rule],
+    call: Callable[[], Awaitable[T]],
+    failed: frozenset[str] | set[str] = _FAILED_LOGIN,
+) -> T:
+    """Виклик із лімітом невдалих спроб (коди помилок `failed`): вичерпаний ключ — 429 з
+    Retry-After, без виклику."""
+    retry_after = await limiter.retry_after(rules)
+    if retry_after is not None:
+        raise rate_limited(retry_after, "Too many failed attempts, try again later")
+    try:
+        return await call()
+    except AppError as exc:
+        if exc.code in failed:
+            await limiter.hit(rules)
+        raise
 
 
 @router.post(
     "/auth/authorize",
     response_model=AuthorizeResponse,
     responses={
-        400: {"model": ErrorResponse, "description": "Невідомий client_id"},
+        400: {
+            "model": ErrorResponse,
+            "description": "INVALID_CLIENT (невідомий client_id) / INVALID_REDIRECT_URI "
+            "(redirect_uri не з OAUTH_REDIRECT_URIS)",
+        },
         401: {"model": ErrorResponse, "description": "INVALID_CREDENTIALS"},
+        **R429,
     },
 )
 async def authorize(
-    body: AuthorizeRequest, session: Session, settings: SettingsDep
+    body: AuthorizeRequest,
+    request: Request,
+    session: Session,
+    settings: SettingsDep,
+    limiter: Limiter,
 ) -> AuthorizeResponse:
     """OAuth 2.0 Authorization Code + PKCE (S256) для вчителів, батьків, адміністрації.
 
     Форму входу малює PWA; відповідь — одноразовий `code` (60 с) для `POST /auth/token`.
+    Невдалі спроби обмежені на пару IP + email, на IP і високим загальним лімітом на email з
+    усіх IP (`RATE_LIMIT_LOGIN_*` за `RATE_LIMIT_WINDOW_S`); понад ліміт — 429 з `Retry-After`.
+    Акаунт не блокується: перебір з одного IP не заважає власнику входити з іншого.
     """
-    code = await service.authorize(
-        session,
-        email=body.email,
-        password=body.password,
-        code_challenge=body.code_challenge,
-        client_id=body.client_id,
-        redirect_uri=body.redirect_uri,
-        settings=settings,
+    window = settings.rate_limit_window_s
+    ip = _client_ip(request)
+    rules = [
+        rule(
+            "login:acct",
+            f"{ip}\n{body.email.casefold()}",
+            settings.rate_limit_login_account,
+            window,
+        ),
+        rule("login:ip", ip, settings.rate_limit_login_ip, window),
+        rule(
+            "login:acct_all",
+            body.email.casefold(),
+            settings.rate_limit_login_account_all_ips,
+            window,
+        ),
+    ]
+    code = await _limited(
+        limiter,
+        rules,
+        lambda: service.authorize(
+            session,
+            email=body.email,
+            password=body.password,
+            code_challenge=body.code_challenge,
+            client_id=body.client_id,
+            redirect_uri=body.redirect_uri,
+            settings=settings,
+        ),
     )
     return AuthorizeResponse(code=code)
 
@@ -101,9 +174,7 @@ async def _read_token_request(request: Request) -> TokenRequest:
     },
     responses={400: {"model": ErrorResponse, "description": "INVALID_GRANT / INVALID_REQUEST"}},
 )
-async def token(
-    request: Request, session: Session, settings: SettingsDep, user_agent: UserAgent = None
-) -> TokenResponse:
+async def token(request: Request, session: Session, settings: SettingsDep) -> TokenResponse:
     """Обмін `code` + `code_verifier` на токени або ротація `refresh_token` (RFC 6749).
 
     Тіло: JSON або `application/x-www-form-urlencoded`. Refresh-токен ротується; повтор уже
@@ -123,11 +194,10 @@ async def token(
             client_id=body.client_id,
             redirect_uri=body.redirect_uri,
             settings=settings,
-            user_agent=user_agent,
         )
     if not body.refresh_token:
         raise AppError("INVALID_REQUEST", "refresh_token is required", 400)
-    return await service.refresh_tokens(session, body.refresh_token, settings, user_agent)
+    return await service.refresh_tokens(session, body.refresh_token, settings)
 
 
 @router.post("/auth/logout", status_code=status.HTTP_204_NO_CONTENT)
@@ -137,9 +207,13 @@ async def logout(body: LogoutRequest, session: Session) -> Response:
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@router.get("/auth/me", response_model=UserOut, responses=R401)
-async def me(user: CurrentUser) -> UserOut:
-    return UserOut.model_validate(user)
+@router.get("/auth/me", response_model=MeOut, responses=R401)
+async def me(user: CurrentUser, session: Session) -> MeOut:
+    """Поточний користувач. Для учня додає `class_id`: без нього не запитати «Рюкзак»."""
+    out = MeOut.model_validate(user)
+    if user.role == "student":
+        out.class_id = await school_service.student_class_id(session, user.id)
+    return out
 
 
 @router.post(
@@ -148,10 +222,19 @@ async def me(user: CurrentUser) -> UserOut:
     responses={
         400: {"model": ErrorResponse, "description": "INVALID_JOIN_CODE"},
         401: {"model": ErrorResponse, "description": "INVALID_CREDENTIALS (хибний PIN)"},
+        429: {
+            **R429[429],
+            "description": "RATE_LIMITED: забагато невдалих спроб або нових учнів з однієї "
+            "адреси в клас; повторити після `Retry-After` с",
+        },
     },
 )
 async def student_join(
-    body: StudentJoinRequest, session: Session, settings: SettingsDep, user_agent: UserAgent = None
+    body: StudentJoinRequest,
+    request: Request,
+    session: Session,
+    settings: SettingsDep,
+    limiter: Limiter,
 ) -> TokenResponse:
     """Вхід учня: код класу + імʼя + прізвище + PIN (4–6 цифр).
 
@@ -159,15 +242,56 @@ async def student_join(
     Код класу нормалізується (лише A-Z і 0-9; кириличні двійники латиниці замінюються).
     Прострочений код пускає лише наявних учнів із вірним PIN; для невідомого імені й хибного PIN
     відповідь однакова: 401 `INVALID_CREDENTIALS`.
+
+    Захист від перебору PIN: невдалі спроби обмежені на пару IP + (код класу + ім'я), на IP і
+    високим загальним лімітом на (код класу + ім'я) з усіх IP (`RATE_LIMIT_JOIN_*` за
+    `RATE_LIMIT_WINDOW_S`) і добовим лімітом на (код класу + ім'я) з усіх IP
+    (`RATE_LIMIT_JOIN_ACCOUNT_DAILY`); понад ліміт — 429 з `Retry-After`.
+    Блокування акаунта немає: однокласник, що вводить чужий PIN, блокує лише себе (свій IP),
+    а справжній учень входить з іншого пристрою/IP; ліміт знімається сам після вікна.
+
+    Створення нових учнів обмежене на пару IP + клас (`RATE_LIMIT_JOIN_NEW_STUDENTS` за
+    `RATE_LIMIT_JOIN_NEW_STUDENTS_WINDOW_S`): хто знає код, не засипле клас вигаданими іменами.
+    Ліміт розрахований на весь клас за одним NAT; вхід наявних учнів він не зачіпає.
     """
-    return await service.student_join(
-        session,
-        join_code=body.join_code,
-        display_name=body.display_name,
-        last_name=body.last_name,
-        pin=body.pin,
-        settings=settings,
-        user_agent=user_agent,
+    window = settings.rate_limit_window_s
+    ip = _client_ip(request)
+    account = f"{normalize_link_code(body.join_code)}\n"
+    account += service.name_key(body.display_name, body.last_name)
+    rules = [
+        rule("join:acct", f"{ip}\n{account}", settings.rate_limit_join_account, window),
+        rule("join:ip", ip, settings.rate_limit_join_ip, window),
+        rule("join:acct_all", account, settings.rate_limit_join_account_all_ips, window),
+        rule(
+            "join:acct_day",
+            account,
+            settings.rate_limit_join_account_daily,
+            settings.rate_limit_daily_window_s,
+        ),
+    ]
+
+    async def before_create(class_id: uuid.UUID) -> None:
+        # Рахується кожне створення (не лише невдале), атомарно; 429 — до створення учня.
+        new_rule = rule(
+            "join:new",
+            f"{ip}\n{class_id}",
+            settings.rate_limit_join_new_students,
+            settings.rate_limit_join_new_students_window_s,
+        )
+        await enforce(limiter, [new_rule])
+
+    return await _limited(
+        limiter,
+        rules,
+        lambda: service.student_join(
+            session,
+            join_code=body.join_code,
+            display_name=body.display_name,
+            last_name=body.last_name,
+            pin=body.pin,
+            settings=settings,
+            before_create=before_create,
+        ),
     )
 
 
@@ -178,7 +302,7 @@ async def student_join(
 )
 async def pin_reset(klass: StaffClass, student_id: uuid.UUID, session: Session) -> Response:
     """Скидає PIN учня (вчитель цього класу або адмін школи): наступний вхід задасть новий.
-    Усі сесії учня (access- і refresh-токени) перестають діяти."""
+    Усі сесії учня (access- і refresh-токени) і його push-підписки перестають діяти."""
     await service.reset_student_pin(session, klass, student_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -204,11 +328,31 @@ async def create_parent_link_code(
         400: {"model": ErrorResponse, "description": "INVALID_LINK_CODE"},
         **R401,
         **R403,
+        **R429,
     },
 )
-async def parent_link(body: ParentLinkRequest, parent: Parent, session: Session):
-    """Прив'язує батьків до дитини за кодом від вчителя. Повторний виклик ідемпотентний."""
-    child = await service.link_parent(session, parent, body.code)
+async def parent_link(
+    body: ParentLinkRequest,
+    request: Request,
+    parent: Parent,
+    session: Session,
+    settings: SettingsDep,
+    limiter: Limiter,
+):
+    """Прив'язує батьків до дитини за кодом від вчителя. Повторний виклик ідемпотентний.
+    Невдалі коди обмежені на акаунт батьків і на IP (`RATE_LIMIT_PARENT_LINK*` за
+    `RATE_LIMIT_WINDOW_S`); понад ліміт — 429 з `Retry-After`."""
+    window = settings.rate_limit_window_s
+    rules = [
+        rule("link:user", str(parent.id), settings.rate_limit_parent_link, window),
+        rule("link:ip", _client_ip(request), settings.rate_limit_parent_link_ip, window),
+    ]
+    child = await _limited(
+        limiter,
+        rules,
+        lambda: service.link_parent(session, parent, body.code),
+        failed={"INVALID_LINK_CODE"},
+    )
     return ParentLinkResponse(
         child_id=child.id, display_name=child.display_name, last_name=child.last_name
     )
@@ -238,3 +382,19 @@ async def admin_create_user(body: AdminCreateUserRequest, admin: Admin, session:
         school_id=admin.school_id,
     )
     return UserOut.model_validate(user)
+
+
+@router.get("/admin/users", response_model=list[UserOut], responses={**R401, **R403})
+async def admin_list_users(
+    admin: Admin,
+    session: Session,
+    role: Annotated[Literal["teacher", "admin", "student"] | None, Query()] = None,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> list[UserOut]:
+    """Активні користувачі школи адміна (напр. `?role=teacher` для призначення на клас),
+    за прізвищем та ім'ям. Батьки до школи не прив'язані й тут не показуються."""
+    if admin.school_id is None:
+        raise AppError("FORBIDDEN", "Admin is not attached to a school", status_code=403)
+    users = await school_service.list_school_users(session, admin.school_id, role, limit, offset)
+    return [UserOut.model_validate(u) for u in users]

@@ -1,12 +1,14 @@
 export type Role = 'student' | 'teacher' | 'parent' | 'admin'
 
-/** Відповідь `GET /auth/me` (backend/app/schemas/auth.py: UserOut). */
+/** Відповідь `GET /auth/me` (backend/app/schemas/auth.py: MeOut; інші ендпоінти віддають UserOut без class_id). */
 export interface User {
   id: string
   role: Role
   display_name: string
   last_name: string | null
   school_id: string | null
+  /** Клас учня; для інших ролей null. Немає в сесіях, збережених до появи поля: потрібен повторний вхід. */
+  class_id?: string | null
 }
 
 export interface TokenResponse {

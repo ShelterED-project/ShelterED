@@ -17,15 +17,35 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, TimestampMixin, uuid_pk
 
+# Точні локації школи в словнику alerts.in.ua (`location_uid`): район, громада, місто.
+ALERT_LOCATION_COLUMNS = ("alert_raion_uid", "alert_hromada_uid", "alert_city_uid")
+
 
 class School(TimestampMixin, Base):
     __tablename__ = "school"
-    __table_args__ = (Index("ix_school_region_code", "region_code"),)
+    __table_args__ = (
+        Index("ix_school_region_code", "region_code"),
+        # Опитування тривог шукає школи за uid району / громади / міста з активних тривог.
+        *(
+            Index(f"ix_school_{col}", col, postgresql_where=text(f"{col} IS NOT NULL"))
+            for col in ALERT_LOCATION_COLUMNS
+        ),
+        *(
+            CheckConstraint(f"{col} ~ '^[0-9]{{1,9}}$'", name=f"{col}_format")
+            for col in ALERT_LOCATION_COLUMNS
+        ),
+    )
 
     id: Mapped[uuid.UUID] = uuid_pk()
     name: Mapped[str]
     # Регіон для API тривог; формат залежить від обраного API.
     region_code: Mapped[str]
+    # Необов'язкові точні локації (локація школи, не персональні дані): тривога району,
+    # громади чи міста школи вмикає тривогу для школи так само, як тривога області.
+    # NULL — лише тривоги рівня області (region_code).
+    alert_raion_uid: Mapped[str | None]
+    alert_hromada_uid: Mapped[str | None]
+    alert_city_uid: Mapped[str | None]
     timezone: Mapped[str] = mapped_column(server_default="Europe/Kyiv")
 
 
@@ -86,7 +106,6 @@ class User(TimestampMixin, Base):
     # refresh) із меншою версією перестають діяти.
     token_version: Mapped[int] = mapped_column(default=0, server_default=text("0"))
     is_active: Mapped[bool] = mapped_column(server_default=text("true"))
-    last_seen_at: Mapped[dt.datetime | None]
 
 
 class ClassMembership(Base):
@@ -150,6 +169,16 @@ class ScheduleOverride(TimestampMixin, Base):
         CheckConstraint(
             "starts_at IS NULL OR ends_at IS NULL OR ends_at > starts_at", name="time_order"
         ),
+        # Урок ставиться лише в додатковий урок без слота (у слот — через lesson_assignment).
+        CheckConstraint(
+            "lesson_id IS NULL OR (kind = 'extra' AND slot_id IS NULL)", name="extra_lesson"
+        ),
+        # Не більше одного перевизначення слота на дату (extra без слота — не обмежені).
+        UniqueConstraint("slot_id", "date", name="uq_schedule_override_slot_date"),
+        # Розклад класу на період.
+        Index("ix_schedule_override_class_id_date", "class_id", "date"),
+        # У які дні стоїть урок (як ix_lesson_assignment_lesson_id).
+        Index("ix_schedule_override_lesson_id", "lesson_id"),
     )
 
     id: Mapped[uuid.UUID] = uuid_pk()
@@ -161,12 +190,20 @@ class ScheduleOverride(TimestampMixin, Base):
     subject_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("subject.id"))
     starts_at: Mapped[dt.time | None] = mapped_column(Time)
     ends_at: Mapped[dt.time | None] = mapped_column(Time)
+    # Додатковий урок поза розкладом, який ставить вчитель класу (kind = extra, без слота);
+    # час тоді необов'язковий.
+    lesson_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("lesson.id"))
+    # Видалений додатковий урок вчителя (надгробок): не показується ніде, а повтор створення
+    # з тим самим id отримує 410 замість воскресіння уроку.
+    deleted_at: Mapped[dt.datetime | None]
 
 
 class LessonAssignment(Base):
     """Який урок іде в слоті в конкретну дату."""
 
     __tablename__ = "lesson_assignment"
+    # Перевірки при публікації: у які дні вже стоїть урок.
+    __table_args__ = (Index("ix_lesson_assignment_lesson_id", "lesson_id"),)
 
     slot_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("schedule_slot.id", ondelete="CASCADE"), primary_key=True

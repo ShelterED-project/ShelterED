@@ -1,0 +1,15 @@
+# Секрети й локальне оточення не потрапляють в образ.
+.env
+.env.*
+!.env.example
+.venv/
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+media/
+tests/
+docker-compose.dev.yml
+Dockerfile
+.dockerignore

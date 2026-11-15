@@ -14,6 +14,12 @@ class RefreshToken(Base):
     __table_args__ = (
         Index("ix_refresh_token_family_id", "family_id"),
         Index("ix_refresh_token_user_id", "user_id"),
+        # Перевірка самопосилання FK під час видалення прострочених токенів (retention.purge).
+        Index(
+            "ix_refresh_token_replaced_by_id",
+            "replaced_by_id",
+            postgresql_where=text("replaced_by_id IS NOT NULL"),
+        ),
     )
 
     id: Mapped[uuid.UUID] = uuid_pk()
@@ -28,7 +34,6 @@ class RefreshToken(Base):
     # Найновіший токен, виданий замість цього (при повторі переставляється на новіший).
     replaced_by_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("refresh_token.id"))
     created_at: Mapped[dt.datetime] = mapped_column(server_default=func.now())
-    user_agent: Mapped[str | None]
     # Версія облікових даних користувача на момент видачі (див. User.token_version).
     token_version: Mapped[int] = mapped_column(default=0, server_default=text("0"))
 

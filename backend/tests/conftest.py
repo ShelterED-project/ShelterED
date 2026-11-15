@@ -18,7 +18,43 @@ os.environ["REFRESH_REUSE_GRACE_SECONDS"] = "300"
 os.environ["AUTH_CODE_TTL_S"] = "60"
 os.environ["PARENT_LINK_CODE_TTL_DAYS"] = "7"
 os.environ["OAUTH_CLIENT_IDS"] = '["sheltered-pwa"]'
+os.environ["OAUTH_REDIRECT_URIS"] = "[]"
 os.environ["CORS_ORIGINS"] = '["http://localhost:5173"]'
+# Опитування API тривог у тестах вимкнене; провайдер підміняють фейком.
+os.environ["ALERTS_API_TOKEN"] = ""
+os.environ["ALERTS_SOURCE_STALE_S"] = "300"
+os.environ["SYNC_SUSPICIOUS_SKEW_S"] = "300"
+os.environ["SYNC_ROLLCALL_CLOSE_GRACE_S"] = "120"
+os.environ["STATS_PASS_SCORE"] = "60"
+os.environ["STATS_CLOSING_SOON_H"] = "6"
+os.environ["STATS_CLASS_DEBOUNCE_S"] = "30"
+os.environ["RATE_LIMIT_JOIN_ACCOUNT"] = "10"
+os.environ["RATE_LIMIT_JOIN_IP"] = "300"
+os.environ["RATE_LIMIT_LOGIN_ACCOUNT"] = "10"
+os.environ["RATE_LIMIT_LOGIN_IP"] = "300"
+os.environ["RATE_LIMIT_JOIN_ACCOUNT_ALL_IPS"] = "100"
+os.environ["RATE_LIMIT_LOGIN_ACCOUNT_ALL_IPS"] = "100"
+os.environ["RATE_LIMIT_WINDOW_S"] = "900"
+os.environ["RATE_LIMIT_PARENT_LINK"] = "10"
+os.environ["RATE_LIMIT_PARENT_LINK_IP"] = "100"
+os.environ["RATE_LIMIT_JOIN_ACCOUNT_DAILY"] = "300"
+os.environ["RATE_LIMIT_DAILY_WINDOW_S"] = "86400"
+os.environ["RATE_LIMIT_JOIN_NEW_STUDENTS"] = "40"
+os.environ["RATE_LIMIT_JOIN_NEW_STUDENTS_WINDOW_S"] = "900"
+os.environ["ALERTS_MANUAL_MAX_HOURS"] = "6"
+os.environ["RATE_LIMIT_TUTOR"] = "20"
+os.environ["RATE_LIMIT_TUTOR_WINDOW_S"] = "600"
+os.environ["RATE_LIMIT_QR_RELAY"] = "120"
+os.environ["RATE_LIMIT_QR_RELAY_WINDOW_S"] = "600"
+# Web Push у тестах без ключів VAPID (тести, яким треба, підставляють свої).
+os.environ["VAPID_PUBLIC_KEY"] = ""
+os.environ["VAPID_PRIVATE_KEY"] = ""
+os.environ["VAPID_SUBJECT"] = ""
+os.environ["PUSH_MAX_SUBSCRIPTIONS_PER_USER"] = "10"
+os.environ["RETENTION_SYNC_EVENT_DAYS"] = "180"
+os.environ["RETENTION_AUTH_DAYS"] = "7"
+os.environ["RETENTION_PARENT_LINK_CODE_DAYS"] = "30"
+os.environ["RETENTION_WELLBEING_VIEW_LOG_DAYS"] = "365"
 
 import uuid  # noqa: E402
 from collections.abc import AsyncIterator  # noqa: E402
@@ -34,10 +70,14 @@ from httpx import ASGITransport, AsyncClient  # noqa: E402
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine  # noqa: E402
 from sqlalchemy.pool import NullPool  # noqa: E402
 
+from app.api.deps import get_rate_limiter, get_storage  # noqa: E402
 from app.core.config import get_settings  # noqa: E402
 from app.core.db import get_session  # noqa: E402
+from app.core.rate_limit import MemoryRateLimiter  # noqa: E402
 from app.core.security import create_access_token, hash_secret, new_link_code  # noqa: E402
+from app.core.storage import LocalMediaStorage  # noqa: E402
 from app.main import create_app  # noqa: E402
+from app.models.lessons import Subject  # noqa: E402
 from app.models.school import (  # noqa: E402
     ClassMembership,
     ParentChild,
@@ -46,8 +86,33 @@ from app.models.school import (  # noqa: E402
     User,
 )
 from app.services.auth import name_key  # noqa: E402
+from app.workers.celery_app import celery_app  # noqa: E402
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent
+
+
+@pytest.fixture(autouse=True)
+def enqueued(monkeypatch: pytest.MonkeyPatch) -> list[SimpleNamespace]:
+    """Задачі, поставлені в чергу Celery (брокер у тестах не потрібен).
+
+    Кожен елемент: name, args, queue. Push — name == "push.send", args[0] — payload.
+    """
+    calls: list[SimpleNamespace] = []
+
+    def send_task(name, args=None, kwargs=None, queue=None, **options):
+        calls.append(SimpleNamespace(name=name, args=list(args or []), queue=queue))
+
+    monkeypatch.setattr(celery_app, "send_task", send_task)
+    return calls
+
+
+def pushes(calls: list[SimpleNamespace], push_type: str | None = None) -> list[dict]:
+    """Payload поставлених push (опційно лише одного типу)."""
+    return [
+        c.args[0]
+        for c in calls
+        if c.name == "push.send" and (push_type is None or c.args[0]["type"] == push_type)
+    ]
 
 
 @pytest.fixture(scope="session")
@@ -165,6 +230,12 @@ class Factory:
         await self.session.flush()
         return student
 
+    async def subject(self, school: School | None = None, name: str = "Математика") -> Subject:
+        subject = Subject(name=name, school_id=school.id if school else None)
+        self.session.add(subject)
+        await self.session.flush()
+        return subject
+
     async def parent_of(self, student: User) -> User:
         parent = await self.adult("parent", None, "Марія")
         self.session.add(ParentChild(parent_id=parent.id, child_id=student.id))
@@ -212,6 +283,9 @@ def app(db_session: AsyncSession) -> FastAPI:
         yield db_session
 
     application.dependency_overrides[get_session] = override_session
+    # Rate limiter у пам'яті (свіжий на тест): тести не залежать від Redis і один від одного.
+    limiter = MemoryRateLimiter()
+    application.dependency_overrides[get_rate_limiter] = lambda: limiter
     return application
 
 
@@ -219,3 +293,55 @@ def app(db_session: AsyncSession) -> FastAPI:
 async def client(app: FastAPI) -> AsyncIterator[AsyncClient]:
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         yield c
+
+
+@pytest.fixture
+def media_storage(app: FastAPI, tmp_path: Path) -> LocalMediaStorage:
+    """Медіа пишуться в тимчасовий каталог тесту, а не в MEDIA_ROOT."""
+    storage = LocalMediaStorage(tmp_path / "media", "/media")
+    app.dependency_overrides[get_storage] = lambda: storage
+    return storage
+
+
+# ---------- справжні commit-и (паралельні запити, збій посеред пакета, стрічка змін) ----------
+
+
+class Committed(SimpleNamespace):
+    """Дані закомічені, кожен HTTP-запит отримує власну сесію (окреме з'єднання)."""
+
+
+@pytest.fixture
+async def committed(migrated_db: str) -> AsyncIterator[Committed]:
+    """Режим без обгортки-транзакції: потрібен там, де важливі справжні commit-и й
+    паралельні з'єднання. Після тесту всі таблиці очищуються (TRUNCATE ... CASCADE)."""
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    from app.models import Base
+
+    engine = create_async_engine(migrated_db, poolclass=NullPool)
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+    application = create_app()
+
+    async def override_session() -> AsyncIterator[AsyncSession]:
+        async with maker() as session:
+            yield session
+
+    application.dependency_overrides[get_session] = override_session
+    limiter = MemoryRateLimiter()
+    application.dependency_overrides[get_rate_limiter] = lambda: limiter
+    setup = maker()
+    try:
+        async with AsyncClient(
+            transport=ASGITransport(app=application, raise_app_exceptions=False),
+            base_url="http://test",
+        ) as http:
+            yield Committed(
+                app=application, client=http, maker=maker, session=setup, factory=Factory(setup)
+            )
+    finally:
+        await setup.close()
+        tables = ", ".join(t.name for t in Base.metadata.sorted_tables)
+        async with engine.begin() as conn:
+            await conn.execute(text(f"TRUNCATE {tables} CASCADE"))
+        await engine.dispose()

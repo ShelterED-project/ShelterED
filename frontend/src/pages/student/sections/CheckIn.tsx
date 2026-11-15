@@ -4,12 +4,12 @@ import type { RollCallStatus } from '@/features/roll-call/types'
 import { checkIn } from '../content'
 
 const STATUS_LABELS: Record<RollCallStatus, string> = {
-  shelter: checkIn.shelter,
+  in_shelter: checkIn.shelter,
   safe: checkIn.safe,
 }
 
 export default function CheckIn() {
-  const { lastStatus, mark } = useRollCall()
+  const { lastStatus, error, mark } = useRollCall()
 
   return (
     <section className="flex flex-col gap-3 rounded-[22px] border border-line bg-surface p-5 xl:p-6">
@@ -18,7 +18,7 @@ export default function CheckIn() {
 
       <button
         type="button"
-        onClick={() => mark('shelter')}
+        onClick={() => mark('in_shelter')}
         className="h-14 rounded-[10px] bg-accent text-base font-semibold text-oil focus-visible:ring-2 focus-visible:ring-parchment/60 focus-visible:outline-none"
       >
         {checkIn.shelter}
@@ -30,6 +30,12 @@ export default function CheckIn() {
       >
         {checkIn.safe}
       </button>
+
+      {error && (
+        <p role="alert" className="text-sm font-semibold text-accent">
+          {error}
+        </p>
+      )}
 
       {lastStatus && (
         <p role="status" className="text-sm font-semibold text-safe">

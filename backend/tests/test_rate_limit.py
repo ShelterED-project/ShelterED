@@ -1,0 +1,456 @@
+"""Rate limiting входу (B15.3): лише невдалі спроби, 429 + Retry-After для вичерпаного ключа,
+ключ акаунта = IP + акаунт (перебір з одного IP не блокує власника на іншому IP);
+Redis-реалізація й fail-open при недоступному Redis."""
+
+import logging
+import uuid
+
+import pytest
+from conftest import PASSWORD, PIN, auth_header
+from fastapi import FastAPI
+from httpx import ASGITransport, AsyncClient
+from redis.asyncio import Redis
+
+from app.api.deps import get_rate_limiter
+from app.core.config import get_settings
+from app.core.rate_limit import MemoryRateLimiter, RedisRateLimiter, rule
+
+pytestmark = pytest.mark.anyio
+
+ACCOUNT_LIMIT = 10  # RATE_LIMIT_JOIN_ACCOUNT / RATE_LIMIT_LOGIN_ACCOUNT у conftest
+
+
+def join(klass, name="Іван", last="Петренко", pin=PIN) -> dict:
+    return {"join_code": klass.join_code, "display_name": name, "last_name": last, "pin": pin}
+
+
+def from_ip(app: FastAPI, ip: str) -> AsyncClient:
+    """Клієнт, запити якого приходять з адреси `ip` (той самий застосунок і rate limiter)."""
+    return AsyncClient(transport=ASGITransport(app=app, client=(ip, 50000)), base_url="http://test")
+
+
+def authorize(email: str, password: str) -> dict:
+    return {
+        "email": email,
+        "password": password,
+        "code_challenge": "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
+        "code_challenge_method": "S256",
+        "client_id": "sheltered-pwa",
+    }
+
+
+async def test_pin_guessing_is_limited_per_class_code_and_name(client: AsyncClient, world) -> None:
+    for _ in range(ACCOUNT_LIMIT):
+        r = await client.post("/auth/student/join", json=join(world.class_a, pin="9999"))
+        assert r.status_code == 401
+    r = await client.post("/auth/student/join", json=join(world.class_a, pin="9999"))
+    assert r.status_code == 429
+    assert r.json()["error"]["code"] == "RATE_LIMITED"
+    retry_after = int(r.headers["Retry-After"])
+    assert 0 < retry_after <= get_settings().rate_limit_window_s
+    assert r.json()["error"]["details"] == {"retry_after": retry_after}
+    # Ключ вичерпано: навіть вірний PIN чекає до кінця вікна (PIN не перевіряється).
+    r = await client.post("/auth/student/join", json=join(world.class_a))
+    assert r.status_code == 429
+    # Ім'я нормалізується так само, як при вході: регістр і пробіли не обходять ліміт.
+    r = await client.post("/auth/student/join", json=join(world.class_a, " іВАН ", "петренко"))
+    assert r.status_code == 429
+    # Інший учень того ж класу входить: блокування акаунтів однокласників немає.
+    second = await client.post("/auth/student/join", json=join(world.class_a, "Нова", "Учениця"))
+    assert second.status_code == 200
+
+
+async def test_pin_guessing_from_one_ip_does_not_block_owner_on_another_ip(
+    app: FastAPI, world
+) -> None:
+    """Однокласник перебирає PIN з телефона (IP A) — блокує лише себе; власник з IP B входить."""
+    async with from_ip(app, "10.0.0.1") as attacker, from_ip(app, "10.0.0.2") as owner:
+        for _ in range(ACCOUNT_LIMIT):
+            r = await attacker.post("/auth/student/join", json=join(world.class_a, pin="9999"))
+            assert r.status_code == 401
+        r = await attacker.post("/auth/student/join", json=join(world.class_a))
+        assert r.status_code == 429
+        r = await owner.post("/auth/student/join", json=join(world.class_a))
+        assert r.status_code == 200
+        # Невдачі власника рахуються окремо від невдач нападника.
+        r = await owner.post("/auth/student/join", json=join(world.class_a, pin="9999"))
+        assert r.status_code == 401
+
+
+async def test_password_guessing_from_one_ip_does_not_block_owner_on_another_ip(
+    app: FastAPI, world
+) -> None:
+    email = world.teacher_a.email
+    async with from_ip(app, "10.0.0.1") as attacker, from_ip(app, "10.0.0.2") as owner:
+        for _ in range(ACCOUNT_LIMIT):
+            r = await attacker.post("/auth/authorize", json=authorize(email, "wrong-password-123"))
+            assert r.status_code == 401
+        r = await attacker.post("/auth/authorize", json=authorize(email, PASSWORD))
+        assert r.status_code == 429
+        r = await owner.post("/auth/authorize", json=authorize(email, PASSWORD))
+        assert r.status_code == 200
+
+
+async def test_ip_limit_is_high_enough_for_a_class_behind_one_nat(
+    client: AsyncClient, world
+) -> None:
+    """Уся школа за одним NAT: ліміт на IP (300) не менший за десятки помилок класу."""
+    settings = get_settings()
+    assert settings.rate_limit_join_ip >= 300 and settings.rate_limit_login_ip >= 300
+    for i in range(30):
+        r = await client.post(
+            "/auth/student/join", json=join(world.class_a, f"Учень{i}", pin="9999")
+        )
+        assert r.status_code in (200, 401)
+    r = await client.post("/auth/student/join", json=join(world.class_a))
+    assert r.status_code == 200
+
+
+async def test_successful_logins_are_not_counted(client: AsyncClient, world) -> None:
+    for _ in range(ACCOUNT_LIMIT + 3):
+        r = await client.post("/auth/student/join", json=join(world.class_a))
+        assert r.status_code == 200
+
+
+async def test_per_ip_limit_across_names_and_codes(client: AsyncClient, world) -> None:
+    """Перебір кодів класів з однієї адреси: кожен код — новий ключ акаунта, але IP один."""
+    ip_limit = get_settings().rate_limit_join_ip
+    for i in range(ip_limit):
+        body = {**join(world.class_a, f"Учень{i}"), "join_code": f"BAD{i:05d}"}
+        r = await client.post("/auth/student/join", json=body)
+        assert r.status_code == 400
+    r = await client.post("/auth/student/join", json=join(world.class_a, "Ще", "Один"))
+    assert r.status_code == 429
+
+
+async def test_adult_password_guessing_is_limited(client: AsyncClient, world) -> None:
+    email = world.teacher_a.email
+    for _ in range(ACCOUNT_LIMIT):
+        r = await client.post("/auth/authorize", json=authorize(email, "wrong-password-123"))
+        assert r.status_code == 401
+    r = await client.post("/auth/authorize", json=authorize(email.upper(), PASSWORD))
+    assert r.status_code == 429 and "Retry-After" in r.headers
+    # Інший акаунт не зачеплено.
+    r = await client.post("/auth/authorize", json=authorize(world.admin.email, PASSWORD))
+    assert r.status_code == 200
+
+
+async def test_memory_limiter_window_expires(monkeypatch) -> None:
+    import app.core.rate_limit as rl
+
+    clock = [1000.0]
+    monkeypatch.setattr(rl.time, "monotonic", lambda: clock[0])
+    limiter = MemoryRateLimiter()
+    rules = [rule("t", "k", 2, 60)]
+    await limiter.hit(rules)
+    assert await limiter.retry_after(rules) is None
+    await limiter.hit(rules)
+    assert await limiter.retry_after(rules) == 61
+    clock[0] += 61
+    assert await limiter.retry_after(rules) is None
+
+
+async def test_redis_limiter_counts_in_fixed_window() -> None:
+    """Справжній Redis (docker-compose.dev.yml, порт 6380); у CI без Redis — пропуск."""
+    settings = get_settings()
+    limiter = RedisRateLimiter(settings.rate_limit_redis_url)
+    try:
+        await limiter.redis.ping()
+    except Exception:
+        await limiter.close()
+        pytest.skip("Redis is not available")
+    rules = [rule("test", uuid.uuid4().hex, 3, 30)]
+    try:
+        for _ in range(3):
+            assert await limiter.retry_after(rules) is None
+            await limiter.hit(rules)
+        assert 0 < await limiter.retry_after(rules) <= 30
+        # У Redis — хеш, а не ідентифікатор.
+        assert rules[0].key.startswith("rl:test:") and len(rules[0].key) == len("rl:test:") + 32
+    finally:
+        await limiter.redis.delete(rules[0].key)
+        await limiter.close()
+
+
+async def test_redis_down_fails_open(caplog, app: FastAPI, client: AsyncClient, world) -> None:
+    # Порт без Redis: ліміт не діє, вхід працює, у лог — попередження без ключів.
+    limiter = RedisRateLimiter("redis://127.0.0.1:1/0", timeout_s=0.2)
+    app.dependency_overrides[get_rate_limiter] = lambda: limiter
+    with caplog.at_level(logging.WARNING, logger="app.core.rate_limit"):
+        for _ in range(ACCOUNT_LIMIT + 1):
+            r = await client.post("/auth/student/join", json=join(world.class_a, pin="9999"))
+            assert r.status_code == 401
+        r = await client.post("/auth/student/join", json=join(world.class_a))
+        assert r.status_code == 200
+    assert any("Rate limiter unavailable" in m for m in caplog.messages)
+    assert not any("rl:" in m for m in caplog.messages)
+    await limiter.close()
+
+
+async def test_redis_client_is_separate_from_celery_db() -> None:
+    client = Redis.from_url(get_settings().rate_limit_redis_url)
+    assert client.connection_pool.connection_kwargs["db"] == 2
+    await client.aclose()
+
+
+async def test_client_ip_comes_from_trusted_proxy_header(app: FastAPI, world) -> None:
+    """За Nginx (довірений проксі uvicorn, Dockerfile: --proxy-headers + FORWARDED_ALLOW_IPS)
+    клієнти з різними X-Forwarded-For мають окремі лічильники, а не один на IP Nginx."""
+    from pathlib import Path
+
+    from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
+
+    dockerfile = (Path(__file__).resolve().parent.parent / "Dockerfile").read_text()
+    assert '"--proxy-headers"' in dockerfile and "ENV FORWARDED_ALLOW_IPS=" in dockerfile
+
+    proxied = ProxyHeadersMiddleware(app, trusted_hosts="172.18.0.2")
+    transport = ASGITransport(app=proxied, client=("172.18.0.2", 50000))
+    async with AsyncClient(transport=transport, base_url="http://test") as nginx:
+        attacker = {"X-Forwarded-For": "203.0.113.1"}
+        owner = {"X-Forwarded-For": "203.0.113.2"}
+        for _ in range(ACCOUNT_LIMIT):
+            r = await nginx.post(
+                "/auth/student/join", json=join(world.class_a, pin="9999"), headers=attacker
+            )
+            assert r.status_code == 401
+        r = await nginx.post("/auth/student/join", json=join(world.class_a), headers=attacker)
+        assert r.status_code == 429
+        r = await nginx.post("/auth/student/join", json=join(world.class_a), headers=owner)
+        assert r.status_code == 200
+
+
+async def test_redis_limiter_never_leaves_a_key_without_ttl() -> None:
+    """Ключ без TTL (старий неатомарний SET NX + INCR) не блокує назавжди: `hit` ставить
+    вікно атомарно, а `retry_after` не обмежує за ключем без строку й повертає йому вікно."""
+    settings = get_settings()
+    limiter = RedisRateLimiter(settings.rate_limit_redis_url)
+    try:
+        await limiter.redis.ping()
+    except Exception:
+        await limiter.close()
+        pytest.skip("Redis is not available")
+    stuck = rule("test", uuid.uuid4().hex, 3, 30)
+    fresh = rule("test", uuid.uuid4().hex, 3, 30)
+    try:
+        await limiter.redis.set(stuck.key, 99)  # без EX: TTL -1
+        assert await limiter.retry_after([stuck]) is None
+        assert 0 < await limiter.redis.ttl(stuck.key) <= 30
+        await limiter.redis.set(stuck.key, 1)
+        await limiter.hit([stuck, fresh])
+        assert int(await limiter.redis.get(stuck.key)) == 2
+        assert int(await limiter.redis.get(fresh.key)) == 1
+        assert 0 < await limiter.redis.ttl(stuck.key) <= 30
+        assert 0 < await limiter.redis.ttl(fresh.key) <= 30
+    finally:
+        await limiter.redis.delete(stuck.key, fresh.key)
+        await limiter.close()
+
+
+async def test_account_wide_limit_stops_guessing_with_rotating_ips(app: FastAPI, world) -> None:
+    """Перебір PIN зі зміною IP (по 9 спроб з адреси, нижче ліміту пари IP + акаунт) упирається
+    в загальний ліміт акаунта; інший учень класу входить, акаунт не блокується назавжди."""
+    limit = get_settings().rate_limit_join_account_all_ips
+    assert limit >= 100  # однокласник руками стільки не набере
+    per_ip = ACCOUNT_LIMIT - 1
+    for n in range(0, limit, per_ip):
+        async with from_ip(app, f"10.1.{n // 250}.{n % 250 + 1}") as bot:
+            for _ in range(min(per_ip, limit - n)):
+                r = await bot.post("/auth/student/join", json=join(world.class_a, pin="9999"))
+                assert r.status_code == 401
+    async with from_ip(app, "10.9.9.9") as owner:
+        r = await owner.post("/auth/student/join", json=join(world.class_a))
+        assert r.status_code == 429
+        r = await owner.post("/auth/student/join", json=join(world.class_a, "Нова", "Учениця"))
+        assert r.status_code == 200
+
+
+async def test_daily_account_limit_stops_slow_pin_guessing(app: FastAPI, world) -> None:
+    """15-хвилинні ліміти не зупиняють повільний перебір 4-значного PIN зі зміною IP (100 спроб
+    на вікно — у середньому ~12 год); добовий ліміт на акаунт з усіх IP — зупиняє."""
+    settings = get_settings()
+    # За добу перебирається не більше ~5 % варіантів 4-значного PIN.
+    assert settings.rate_limit_join_account_daily <= 500
+    assert settings.rate_limit_daily_window_s >= 86400
+    daily = 12
+    app.dependency_overrides[get_settings] = lambda: settings.model_copy(
+        update={"rate_limit_join_account_daily": daily}
+    )
+    for n in range(daily):
+        async with from_ip(app, f"10.3.0.{n + 1}") as bot:
+            r = await bot.post("/auth/student/join", json=join(world.class_a, pin="9999"))
+            assert r.status_code == 401
+    async with from_ip(app, "10.9.9.9") as owner:
+        r = await owner.post("/auth/student/join", json=join(world.class_a))
+        assert r.status_code == 429
+        assert int(r.headers["Retry-After"]) > settings.rate_limit_window_s
+
+
+async def test_account_wide_limit_for_adult_logins(app: FastAPI, world) -> None:
+    email = world.teacher_a.email
+    limit = get_settings().rate_limit_login_account_all_ips
+    for n in range(0, limit, ACCOUNT_LIMIT - 1):
+        async with from_ip(app, f"10.2.0.{n + 1}") as bot:
+            for _ in range(min(ACCOUNT_LIMIT - 1, limit - n)):
+                r = await bot.post("/auth/authorize", json=authorize(email, "wrong-password-123"))
+                assert r.status_code == 401
+    async with from_ip(app, "10.9.9.9") as owner:
+        r = await owner.post("/auth/authorize", json=authorize(email, PASSWORD))
+        assert r.status_code == 429
+
+
+async def test_parent_link_code_guessing_is_limited(client: AsyncClient, world) -> None:
+    """Перебір кодів прив'язки (доступ до чужої дитини) упирається в ліміт на акаунт батьків."""
+    headers = auth_header(world.parent_a)
+    limit = get_settings().rate_limit_parent_link
+    for _ in range(limit):
+        r = await client.post("/parent/link", json={"code": "ZZZZZZZZ"}, headers=headers)
+        assert r.status_code == 400
+    r = await client.post("/parent/link", json={"code": "ZZZZZZZZ"}, headers=headers)
+    assert r.status_code == 429
+    assert r.json()["error"]["code"] == "RATE_LIMITED"
+    # Інші батьки не заблоковані.
+    r = await client.post(
+        "/parent/link", json={"code": "ZZZZZZZZ"}, headers=auth_header(world.parent_free)
+    )
+    assert r.status_code == 400
+
+
+# ---------- ліміт запитів: ШІ-репетитор і QR-ретрансляція ----------
+
+
+def tutor_body() -> dict:
+    return {
+        "request_id": str(uuid.uuid4()),
+        "mode": "explain_again",
+        "lesson_id": "0192f0a0-0000-7000-8000-00000000ffff",
+    }
+
+
+def relay_body() -> dict:
+    return {
+        "sent_at": "2026-11-05T09:55:00Z",
+        "events": [
+            {
+                "client_event_id": str(uuid.uuid4()),
+                "type": "rollcall_status",
+                "device_id": str(uuid.uuid4()),
+                "occurred_at": "2026-11-05T09:54:10Z",
+                "payload": {"session_id": str(uuid.uuid4()), "status": "in_shelter"},
+            }
+        ],
+    }
+
+
+async def test_tutor_is_limited_per_student(client: AsyncClient, world) -> None:
+    """Кожен запит рахується (і поки заглушка відповідає 501); інший учень не зачеплений."""
+    headers = auth_header(world.student_a)
+    for _ in range(20):
+        r = await client.post("/tutor/ask", json=tutor_body(), headers=headers)
+        assert r.status_code == 501
+    r = await client.post("/tutor/ask", json=tutor_body(), headers=headers)
+    assert r.status_code == 429 and r.json()["error"]["code"] == "RATE_LIMITED"
+    assert 0 < int(r.headers["Retry-After"]) <= 600
+    other = await client.post("/tutor/ask", json=tutor_body(), headers=auth_header(world.student_b))
+    assert other.status_code == 501
+
+
+async def test_tutor_limit_not_spent_by_denied_roles(client: AsyncClient, world) -> None:
+    for _ in range(25):
+        r = await client.post("/tutor/ask", json=tutor_body(), headers=auth_header(world.teacher_a))
+        assert r.status_code == 403
+
+
+async def test_qr_relay_is_limited_per_teacher(client: AsyncClient, world) -> None:
+    headers = auth_header(world.teacher_a)
+    for _ in range(120):
+        r = await client.post("/sync/events", json=relay_body(), headers=headers)
+        assert r.status_code == 501
+    r = await client.post("/sync/events", json=relay_body(), headers=headers)
+    assert r.status_code == 429 and "Retry-After" in r.headers
+    other = await client.post(
+        "/sync/events", json=relay_body(), headers=auth_header(world.teacher_b)
+    )
+    assert other.status_code == 501
+
+
+async def test_student_sync_is_not_limited_by_relay_limit(
+    app: FastAPI, client: AsyncClient, world
+) -> None:
+    """Звичайна синхронізація учня не обмежується: outbox після днів офлайну має пройти."""
+    limiter = app.dependency_overrides[get_rate_limiter]()
+    await client.post("/sync/events", json=relay_body(), headers=auth_header(world.student_a))
+    assert limiter.counters == {}
+
+
+async def _parallel_enforce(limiter, rules, n: int) -> int:
+    import asyncio
+
+    from app.core.errors import AppError
+    from app.core.rate_limit import enforce
+
+    async def one() -> bool:
+        try:
+            await enforce(limiter, rules)
+        except AppError as exc:
+            assert exc.status_code == 429 and exc.headers["Retry-After"]
+            return False
+        return True
+
+    return sum(await asyncio.gather(*(one() for _ in range(n))))
+
+
+async def test_enforce_is_atomic_in_memory() -> None:
+    rules = [rule("t", uuid.uuid4().hex, 3, 60)]
+    assert await _parallel_enforce(MemoryRateLimiter(), rules, 10) == 3
+
+
+async def test_enforce_is_atomic_in_redis() -> None:
+    """Паралельні запити не проходять понад ліміт: перевірка й зарахування — один INCR."""
+    settings = get_settings()
+    limiter = RedisRateLimiter(settings.rate_limit_redis_url)
+    try:
+        await limiter.redis.ping()
+    except Exception:
+        await limiter.close()
+        pytest.skip("Redis is not available")
+    rules = [rule("test", uuid.uuid4().hex, 3, 30)]
+    try:
+        assert await _parallel_enforce(limiter, rules, 20) == 3
+        assert 0 < await limiter.redis.ttl(rules[0].key) <= 30
+    finally:
+        await limiter.redis.delete(rules[0].key)
+        await limiter.close()
+
+
+async def test_new_student_creation_is_limited_per_ip_and_class(app: FastAPI, world) -> None:
+    """Код класу знають усі: з однієї адреси в клас — не більше N нових учнів за вікно; вхід
+    наявних учнів, інший клас та інша адреса не зачеплені."""
+    settings = get_settings()
+    app.dependency_overrides[get_settings] = lambda: settings.model_copy(
+        update={"rate_limit_join_new_students": 3}
+    )
+    async with from_ip(app, "10.0.0.7") as flooder, from_ip(app, "10.0.0.8") as other:
+        for i in range(3):
+            r = await flooder.post("/auth/student/join", json=join(world.class_a, f"Фейк{i}"))
+            assert r.status_code == 200
+        r = await flooder.post("/auth/student/join", json=join(world.class_a, "Фейк9"))
+        assert r.status_code == 429
+        assert r.json()["error"]["code"] == "RATE_LIMITED"
+        assert 0 < int(r.headers["Retry-After"]) <= settings.rate_limit_join_new_students_window_s
+        # Наявні учні входять (зокрема щойно створені) — ліміт лише на створення.
+        for _ in range(5):
+            r = await flooder.post("/auth/student/join", json=join(world.class_a, "Фейк0"))
+            assert r.status_code == 200
+        # Інший клас з тієї ж адреси й той самий клас з іншої адреси — окремі лічильники.
+        r = await flooder.post("/auth/student/join", json=join(world.class_b, "Фейк9"))
+        assert r.status_code == 200
+        r = await other.post("/auth/student/join", json=join(world.class_a, "Фейк9"))
+        assert r.status_code == 200
+
+
+async def test_whole_class_joins_from_one_nat(client: AsyncClient, world) -> None:
+    """Ліміт нових учнів за замовчуванням пропускає звичайний клас (30+) з одного NAT."""
+    assert get_settings().rate_limit_join_new_students >= 40
+    for i in range(35):
+        r = await client.post("/auth/student/join", json=join(world.class_a, f"Учень{i}"))
+        assert r.status_code == 200

@@ -72,8 +72,11 @@ erDiagram
 | name | text NOT NULL | |
 | region_code | text NOT NULL | регіон для API тривог; формат залежить від обраного API ❓9 |
 | timezone | text NOT NULL default `'Europe/Kyiv'` | для логіки розкладу |
+| alert_raion_uid | text NULL CHECK `^[0-9]{1,9}$` | uid району школи в alerts.in.ua (необов'язково) |
+| alert_hromada_uid | text NULL CHECK `^[0-9]{1,9}$` | uid громади школи |
+| alert_city_uid | text NULL CHECK `^[0-9]{1,9}$` | uid міста школи (не м. Київ / Севастополь — це `region_code`) |
 
-Індекс: `ix_school_region_code` — B7.2 шукає всі школи регіону при тривозі.
+Індекс: `ix_school_region_code` — B7.2 шукає всі школи регіону при тривозі. Часткові індекси `ix_school_alert_raion_uid`, `ix_school_alert_hromada_uid`, `ix_school_alert_city_uid` (WHERE NOT NULL) — пошук шкіл за локаціями активних тривог. Точні локації — розташування школи, не персональні дані.
 
 ### `school_class`
 | Поле | Тип | Примітка |
@@ -102,7 +105,6 @@ UNIQUE (`school_id`, `academic_year`, `name`).
 | name_key | text NULL, індекс | нормалізовані імʼя+прізвище учня для пошуку в класі; у дорослих NULL |
 | token_version | integer NOT NULL default 0 | епоха облікових даних: скидання PIN збільшує; access-токен несе `ver`, refresh-токен зберігає версію |
 | is_active | boolean default true | |
-| last_seen_at | timestamptz NULL | |
 
 CHECK: `role <> 'student' OR (email IS NULL AND password_hash IS NULL)`; `role = 'student' OR pin_hash IS NULL`.
 
@@ -193,7 +195,7 @@ UNIQUE (`lesson_id`, `part`, `position`).
 | kind | text CHECK IN (`single`, `multiple`) | |
 | prompt | text NOT NULL | |
 | options | jsonb NOT NULL | `[{"id": "a", "text": "..."}]` |
-| answer_key | jsonb NOT NULL | правильні `id`; чи йде в пакет — відкрите питання плану ❓5 |
+| answer_key | jsonb NOT NULL | правильні `id`; у пакет — лише для тренувального тесту (`window_enabled = false`) |
 | points | smallint default 1 | |
 
 ### `media_asset`
@@ -201,10 +203,11 @@ UNIQUE (`lesson_id`, `part`, `position`).
 |---|---|---|
 | id | uuid PK | |
 | kind | text CHECK IN (`video`, `image`, `subtitles`) | |
-| storage_key | text UNIQUE NOT NULL | шлях в об'єктному сховищі або томі (відкрите питання плану) |
+| storage_key | text NOT NULL | шлях у томі; не унікальний: записи з однаковим вмістом посилаються на один файл |
 | mime_type | text NOT NULL | |
 | size_bytes | bigint NOT NULL | для лімітів пакета (B6.5) |
-| sha256 | text NOT NULL | кешування й дедуплікація |
+| sha256 | text NOT NULL | sha256 збереженого файла (того, що за URL): кешування й перевірка клієнтом |
+| source_sha256 | text NOT NULL | sha256 файла, надісланого клієнтом: ідемпотентність повтору `PUT /media/{id}` (зображення перекодовуються, тож може відрізнятися від `sha256`) |
 | duration_s | integer NULL | для відео |
 | subtitles_id | uuid FK → media_asset NULL | VTT до відео; публікація відео без субтитрів заборонена (B5.3) |
 | uploaded_by | uuid FK → app_user | |
@@ -237,8 +240,11 @@ UNIQUE (`lesson_id`, `part`, `position`).
 | date | date NOT NULL | |
 | slot_id | uuid FK → schedule_slot NULL | NULL для додаткового уроку |
 | kind | text CHECK IN (`cancel`, `replace`, `extra`) | |
-| subject_id | uuid FK → subject NULL | для replace / extra |
-| starts_at, ends_at | time NULL | для replace / extra |
+| subject_id | uuid FK → subject NULL | для replace / extra (у додаткового уроку вчителя — предмет уроку) |
+| starts_at, ends_at | time NULL | для replace / extra (додатковий урок вчителя — необов'язково) |
+| lesson_id | uuid FK → lesson NULL | урок додаткового уроку вчителя; CHECK `extra_lesson`: лише для `extra` без слота |
+
+Індекси: (`class_id`, `date`), `lesson_id`.
 
 ### `lesson_assignment`
 Який урок іде в слоті в конкретну дату (B5.3 «прив'язка уроку до слоту»). У плані урок прив'язаний до слоту; оскільки урок щотижня різний, прив'язка робиться на дату ❓4.
@@ -259,9 +265,12 @@ UNIQUE (`lesson_id`, `part`, `position`).
 | class_id | uuid FK → school_class ON DELETE CASCADE | пакет = клас + дата |
 | pack_date | date NOT NULL | |
 | version | integer NOT NULL | UNIQUE (class_id, pack_date, version); актуальна — найбільша |
-| content_hash | text NOT NULL | sha256 вмісту; він же ETag (B6.3) |
-| size_bytes | bigint NOT NULL | фактичний розмір (B6.5) |
+| content_hash | text NOT NULL | sha256 канонічного JSON вмісту без id, версії й часу збірки; він же ETag (B6.3) |
+| size_bytes | bigint NOT NULL | розмір JSON без стиснення (B6.5); медіа рахуються окремо |
 | built_at | timestamptz NOT NULL | |
+| content_gzip | bytea NOT NULL | готова відповідь `GET /packs/{id}`: канонічний JSON, gzip (B6, міграція `0edf076a683a`) |
+
+Версія пакета незмінна: новий вміст → нова версія, стара лишається доступною за id.
 
 ### `knowledge_pack_lesson`
 | Поле | Тип | Примітка |
@@ -287,18 +296,18 @@ UNIQUE (`lesson_id`, `part`, `position`).
 | client_event_id | uuid PK | створює клієнт; `INSERT ... ON CONFLICT DO NOTHING` |
 | type | text CHECK IN (`module_progress`, `test_attempt`, `rollcall_status`, `survey_answer`) | |
 | user_id | uuid FK → app_user | автор події (учень) |
-| device_id | uuid NOT NULL | id пристрою, який створює клієнт ❓7 |
+| device_id | uuid NULL | id пристрою, який створює клієнт ❓7; NULL — стерто за строком зберігання (180 днів) |
 | occurred_at | timestamptz NOT NULL | годинник пристрою |
 | received_at | timestamptz default now() | годинник сервера |
-| clock_skew_ms | bigint NULL | зсув годинника пристрою з пакета (B9.4) |
-| is_suspicious | boolean default false | час у майбутньому / великий зсув — позначка, не блокування |
+| clock_skew_ms | bigint NULL | зсув годинника пристрою з пакета (B9.4); стирається разом із payload |
+| is_suspicious | boolean default false | час у майбутньому / великий зсув — позначка, не блокування; за строком не стирається |
 | source | text CHECK IN (`online`, `qr`) default `online` | QR — B10 |
 | relayed_by | uuid FK → app_user NULL | вчитель, який передав QR-події (B10.3) |
 | payload | jsonb NOT NULL | |
 | status | text CHECK IN (`accepted`, `rejected`) | |
 | reject_reason | text NULL | |
 
-Індекс: (`user_id`, `received_at`). Курсор для `GET /sync/changes` проєктується в B9.5.
+Індекси: (`user_id`, `received_at`); частковий `ix_sync_event_retention` (`received_at`) WHERE `device_id IS NOT NULL` — пакетне прибирання за строком. Курсор для `GET /sync/changes` -- див. «Рішення B9».
 
 ### `attempt`
 Спроба тесту.
@@ -324,6 +333,7 @@ UNIQUE (`lesson_id`, `part`, `position`).
 | module_id | uuid FK → module ON DELETE CASCADE | |
 | progress_pct | smallint CHECK 0..100 | оновлення через `GREATEST` — беремо максимум (B9.3) |
 | completed_at_client | timestamptz NULL | |
+| full_at | timestamptz NULL | `occurred_at` найранішої прийнятої події з 100% — момент завершення модуля (`LEAST`); вікно тесту B11, день навчання B14 |
 | last_event_id | uuid FK → sync_event | остання подія, яка змінила рядок |
 
 ---
@@ -334,17 +344,29 @@ UNIQUE (`lesson_id`, `part`, `position`).
 | Поле | Тип | Примітка |
 |---|---|---|
 | id | uuid PK | |
-| region_code | text NOT NULL | |
-| school_id | uuid FK → school NULL | запис для кожної школи регіону (B7.2) |
+| region_code | text NOT NULL | регіон школи (`school.region_code`) |
+| school_id | uuid FK → school NULL | запис для кожної школи, якої стосується тривога (B7.2) |
 | class_id | uuid FK → school_class NULL | ручна тривога для класу (B7.3) |
 | source | text CHECK IN (`api`, `manual`) | |
-| external_id | text NULL | id події від AI-сервісу; унікальний індекс (source, external_id, school_id) NULLS NOT DISTINCT WHERE external_id IS NOT NULL — повтори ігноруються, NULL у school_id не обходить унікальність; ручні тривоги без external_id можуть повторюватися (B7.1) |
+| external_id | text NULL | id тривоги провайдера (бекенд опитує API сам, B7); унікальний індекс `uq_alert_event_source_region_external_school` (source, region_code, external_id, school_id) NULLS NOT DISTINCT WHERE external_id IS NOT NULL — повтори ігноруються, NULL у school_id не обходить унікальність; відбій — `ended_at` того самого рядка, а не окрема подія; ручні тривоги без external_id можуть повторюватися (B7.1) |
 | is_drill | boolean default false | тренувальна |
 | started_at | timestamptz NOT NULL | |
 | ended_at | timestamptz NULL | відбій |
 | created_by | uuid FK → app_user NULL | вчитель для ручної |
+| location_type | text NULL | тривога провайдера, з якої почалась тривога школи: `oblast` / `raion` / `hromada` / `city` (лише `api`) |
+| location_uid | text NULL | її `location_uid` |
+| location_title | text NULL | назва локації від провайдера (до 200 символів) |
+| alert_type | text NULL | `air_raid`, `artillery_shelling`, `urban_fights`, ... |
 
 Індекс: (`school_id`, `started_at`) — журнал тривог школи (B14.4). Частковий індекс для `GET /alerts/active`: WHERE `ended_at IS NULL`.
+
+### `alert_source` (B7.6)
+| Поле | Тип | Примітка |
+|---|---|---|
+| name | text PK | провайдер, напр. `alerts.in.ua` |
+| last_success_at | timestamptz NULL | останнє успішне опитування; давніше `ALERTS_SOURCE_STALE_S` → `source_available = false` |
+| last_attempt_at | timestamptz NULL | |
+| last_error | text NULL | лише тип помилки (без тексту: там може бути URL із токеном) |
 
 ### `rollcall_session`
 | Поле | Тип | Примітка |
@@ -355,7 +377,7 @@ UNIQUE (`lesson_id`, `part`, `position`).
 | opened_by | uuid FK → app_user NULL | NULL при автовідкритті |
 | is_drill | boolean default false | |
 | opened_at | timestamptz NOT NULL | |
-| closed_at | timestamptz NULL | закривається з відбоєм (B12.1) |
+| closed_at | timestamptz NULL | закривається з відбоєм останньої тривоги, що покриває клас (B12.1) |
 
 Частковий UNIQUE (`class_id`) WHERE `closed_at IS NULL` — не більше однієї відкритої переклички на клас.
 
@@ -380,7 +402,7 @@ UNIQUE (`lesson_id`, `part`, `position`).
 | p256dh | text NOT NULL | ключі підписки |
 | auth | text NOT NULL | |
 | last_success_at | timestamptz NULL | метрики (B8.5) |
-| failed_at | timestamptz NULL | 404/410 → видалити (B8.4) |
+| failed_at | timestamptz NULL | остання постійна помилка (4xx, крім 404/410) чи вичерпані повтори; 404/410 → рядок видаляється (B8.4) |
 
 ---
 
@@ -401,7 +423,6 @@ UNIQUE (`lesson_id`, `part`, `position`).
 | replaced_by_id | uuid FK → refresh_token NULL | найновіший токен, виданий замість цього (при повторі переставляється) |
 | token_version | integer NOT NULL default 0 | `app_user.token_version` на момент видачі |
 | created_at | timestamptz default now() | |
-| user_agent | text NULL | без IP-адреси |
 
 ### `auth_code`
 Код авторизації OAuth 2.0 PKCE.
@@ -427,13 +448,25 @@ UNIQUE (`lesson_id`, `part`, `position`).
 | used_at | timestamptz NULL | одноразовий |
 | used_by | uuid FK → app_user ON DELETE SET NULL | батьки, які ввели код |
 
+### `task_outbox`
+Задачі Celery, які `enqueue` не зміг поставити (брокер недоступний); публікує beat-задача `outbox.flush` (кожні 30 с).
+| Поле | Тип | Примітка |
+|---|---|---|
+| id | uuid PK | |
+| task_name | text NOT NULL | ім'я задачі (`push.send`, `sync.regrade_test`, ...) |
+| args | jsonb NOT NULL | аргументи задачі (лише id і коди) |
+| queue | text NOT NULL | черга Celery |
+| created_at | timestamptz default now() | частковий індекс `ix_task_outbox_pending` WHERE `sent_at IS NULL` |
+| attempts | integer NOT NULL default 0 | невдалі спроби публікації |
+| sent_at | timestamptz NULL | опубліковано; такі рядки видаляє `retention.purge` через 1 день |
+
 ---
 
 ## Поза B2 (з'явиться у своїх епіках)
 
 - Ключ пристрою для підпису QR — B10.2 (можливо, разом із таблицею `device` ❓7).
-- Відповіді опитування «як ти зараз?» і журнал доступу до них — B13.4 / B15.4, окремо від решти даних.
-- Агрегати (прогрес класу, мапа знань) — B9.6 / B14.
+- Відповіді опитування «як ти зараз?» і журнал доступу до них — див. «Рішення «Як ти зараз?»».
+- Агрегати (прогрес класу, мапа знань) — B9.6 / B14, див. «Рішення B14».
 
 ## Рішення (раніше ❓)
 
@@ -451,4 +484,166 @@ UNIQUE (`lesson_id`, `part`, `position`).
 10. **Предмети** — ✅ `subject.school_id = NULL` означає загальний довідник.
 
 
-> `alert_event`: унікальний індекс `uq_alert_event_source_external_school` частковий, тому ідемпотентна вставка має бути `on_conflict_do_nothing(index_elements=[...], index_where=text("external_id IS NOT NULL"))`, а не `constraint=`.
+> `alert_event`: унікальний індекс `uq_alert_event_source_region_external_school` частковий, тому ідемпотентна вставка має бути `on_conflict_do_nothing(index_elements=[...], index_where=text("external_id IS NOT NULL"))`, а не `constraint=`.
+
+## Рішення B5 (05.11.2026)
+
+Міграція `b8f50e29ecc5`: UNIQUE (`schedule_override.slot_id`, `date`) — не більше одного перевизначення слота на дату (extra без слота не обмежені); індекси `ix_schedule_override_class_id_date`, `ix_lesson_assignment_lesson_id`, `ix_lesson_author_id`. Нових полів про дітей немає.
+
+- **Клієнтські id й ідемпотентність.** Створення (`POST` класу, предмета, слота, перевизначення, уроку, модуля, картки, тесту, питання; `PUT /media/{id}`) приймає `id` від клієнта: `INSERT ... ON CONFLICT (id) DO NOTHING`. Повтор із тими самими даними → 200 і наявний ресурс, той самий id з іншими даними чи іншим власником → 409 `ID_CONFLICT`. Інші записи ідемпотентні за природою (PATCH, PUT прив'язок, DELETE відсутнього → 204).
+- **Класи.** Пише лише адміністрація своєї школи; `join_code` генерує сервер (`new_link_code`), перегенерація одразу робить старий код недійсним для нових учнів. Видалити можна лише клас без учнів (409 `CLASS_NOT_EMPTY`), бо CASCADE зніс би перекличку й пакети.
+- **Розклад.** Слоти й перевизначення пише адміністрація; читають учні, вчителі класу й адміністрація. Видалення слота видаляє його перевизначення й прив'язки уроків (щоб завершити слот без втрати історії — `valid_to`). «Який урок зараз» — чисті функції `app/services/schedule.py` (`resolve_day`, `current_item`) у поясі `school.timezone`; межі уроку `[початок, кінець)`; неоднозначна година при переході на зимовий час — `fold=0`.
+- **Уроки.** Пише лише автор (вчитель); адміністрація й інші вчителі школи читають, учні й батьки — ні (їм урок прийде в пакеті B6). **Опублікований урок незмінний** (409 `LESSON_PUBLISHED`): вчитель робить `unpublish` → правки → `publish`; повторна публікація збільшує `version`. Прив'язки в розкладі при цьому лишаються, пакети беруть лише опубліковані уроки. Видалити можна лише чернетку без прив'язок і результатів (409 `LESSON_IN_USE`).
+- **Публікація** перевіряє все разом і повертає 422 `LESSON_NOT_PUBLISHABLE` зі списком у `details`: `shelter_part` не порожня; кожне відео має VTT-субтитри; урок ≤ `PACK_MAX_DAY_BYTES`; пакети днів, де урок уже стоїть, ≤ ліміту. Розмір = текст уроку (octet_length полів) + унікальні медіа карток із їхніми субтитрами.
+- **Прив'язка уроку** (`lesson_assignment`): лише вчитель цього класу, лише опублікований урок своєї школи, лише в день слота й не в скасований слот. Пакет класу на дату (унікальні уроки слотів, що справді йдуть цього дня за розкладом: без скасованих і недійсних слотів) ≤ 50 МБ, інакше 422 `PACK_DAY_LIMIT_EXCEEDED`. Предмет уроку має збігатися з предметом слота на цю дату (з урахуванням заміни `replace`), інакше 422 `LESSON_SUBJECT_MISMATCH`; так само адміністрація не може замінити предмет слота на дату чи змінити предмет слота, якщо там уже стоїть урок іншого предмета (для слота — на дні з сьогодні; у `details.dates` — ці дні).
+- **Додатковий урок поза розкладом** (міграція `c930d9500c52`): вчитель класу ставить опублікований урок своєї школи на дату без слота — `POST /classes/{id}/schedule/extra-lessons` (клієнтський `id`, `date`, `lesson_id`, необов'язкові `starts_at`/`ends_at` у місцевому часі школи), `DELETE .../extra-lessons/{id}`. Зберігається як `schedule_override` з `kind = extra` і `lesson_id` (окремої таблиці не треба: «додатковий урок» уже був видом перевизначення, бракувало лише уроку); предмет — предмет уроку. Ліміт пакета дня й ідемпотентність — як у прив'язки до слота. Урок іде в розклад дня (`kind = extra`, `override_id`), у пакет дня (зміна ставить `packs.rebuild_class`) і, якщо має час, у «який урок зараз»; без часу `starts_at*`/`ends_at*` = null і урок стоїть наприкінці дня. Усі запити «у які дні/класи стоїть урок» (перевірка публікації, перезбірка пакетів після публікації, агрегати прогресу, доступ учня в синхронізації) беруть і прив'язки до слотів, і додаткові уроки (`school.scheduled_lessons()`). Додаткові уроки адміністрації без уроку (`subject_id` + час) лишаються як були.
+- **Медіа.** `PUT /media/{id}?kind=` із сирим тілом (не multipart, без нових залежностей): потік пишеться в тимчасовий файл із перевіркою розміру на льоту, потім атомарно перейменовується. Тип перевіряється за `Content-Type` і сигнатурою; VTT — UTF-8. Ключ `<kind>/<id>-<random>.<ext>`, ім'я файла від клієнта не використовується. Ліміти: відео 30 МБ, зображення 2 МБ, VTT 200 КБ. Зображення після прийому перекодовуються у WebP (Pillow, у потоці): довша сторона ≤ 1280 px без збільшення, орієнтація з EXIF застосована, EXIF/GPS/XMP прибрані (RGB-профіль ICC лишається; CMYK і інші режими перетворюються в RGB — CMYK через свій профіль у sRGB — без невідповідного профілю), якість 80. Оригінал зберігається як є, лише якщо WebP не менший і в оригіналі немає EXIF/XMP. Понад 40 Мп для звичайного JPEG (декодується одразу зменшеним, `draft`) і понад 24 Мп для PNG, WebP і прогресивного JPEG (декодуються цілими) — за заголовком, до декодування → 422 `IMAGE_TOO_LARGE` (`details.max_pixels`), пошкоджене зображення → 422 `INVALID_IMAGE`. `mime_type`, `size_bytes`, `sha256` і розширення ключа описують збережений файл; ідемпотентність повтору — за `source_sha256` (хеш надісланого файла), тож повтор того самого файла не перекодовується й дає наявний запис. Дедуплікація: після запису файла шукається наявний із тим самим `sha256`, розміром, `kind` і `mime_type` (індекс `ix_media_asset_sha256`); знайдено — новий запис бере його `storage_key`, щойно записана копія видаляється. Паралельні завантаження однакового вмісту в гіршому разі лишають дві копії, але не втрачають файл. Видаляти файл зі сховища можна лише тоді, коли на його `storage_key` не посилається жоден запис (зараз видалення медіа немає; завантаження видаляє лише власну щойно записану копію). Сховище — `LocalMediaStorage` (`MEDIA_ROOT`, URL `MEDIA_URL_PREFIX`) за інтерфейсом `MediaStorage` (`app/core/storage.py`) для заміни на S3. До картки можна прикріпити лише власний файл вчителя; відв'язати субтитри від відео опублікованого уроку не можна; заміна субтитрів такого відео ставить `packs.rebuild_for_lesson` для кожного опублікованого уроку з ним.
+
+## Рішення B7 «Тривоги» (05.11.2026)
+
+Міграція `39ee76b5434f`: ключ дедуплікації тривог `uq_alert_event_source_region_external_school` (source, region_code, external_id, school_id) замість (source, external_id, school_id); таблиця `alert_source`. Нових полів про дітей немає.
+
+- **Провайдер.** alerts.in.ua (`GET https://api.alerts.in.ua/v1/alerts/active.json`, `Authorization: Bearer`), за інтерфейсом `AlertProvider` (`app/services/alert_provider.py`) — інше API підключається новим класом. Токен — `ALERTS_API_TOKEN` (порожній → опитування вимкнене), у логи не потрапляє; у `alert_source.last_error` — лише код (`timeout`, `http_429`, `invalid_response`).
+- **`school.region_code`** = id області провайдера як текст (`location_uid`: «31» — м. Київ, «14» — Київська область). Тривога рівня регіону (`location_type = oblast` або `city` для міст зі спеціальним статусом, `REGION_CITY_UIDS`: «31» — м. Київ, «30» — м. Севастополь) стосується всіх шкіл регіону.
+- **Точні локації школи (10.11.2026, міграція `a66996138f87`).** Необов'язкові `school.alert_raion_uid`, `alert_hromada_uid`, `alert_city_uid` — `location_uid` району, громади й міста школи зі словника alerts.in.ua. Тривога району / громади / міста стосується школи, лише якщо тип і uid збігаються з її локацією; тривога іншого району тієї ж області школу не чіпає. Без точних локацій — як раніше, лише тривоги регіону. API словника локацій alerts.in.ua не має: список — таблиця «Повний список локацій» у https://devs.alerts.in.ua/; адмін вводить uid через `PUT /schools/{id}/alert-locations` (лише своя школа). Провайдер повертає всі активні тривоги будь-якого рівня; невідомий `location_type` — невалідний запис (відповідь неповна, хибного відбою немає).
+- **Типи тривог.** Будь-який тип (`air_raid`, `artillery_shelling`, `urban_fights`, `chemical`, `nuclear`) запускає однакову реакцію: у кожному випадку діти мають бути в укритті. Тип і локація тривоги, з якої почалась тривога школи, зберігаються в `alert_event` (`location_type`, `location_uid`, `location_title`, `alert_type`) і віддаються в `GET /alerts`, `GET /alerts/active` — адмін бачить, чому спрацювало.
+- **Опитування** — Celery beat `alerts.poll` (черга `default`, `ALERTS_POLL_INTERVAL_S` = 30 с). Стан-орієнтоване, по школах: школа під тривогою з API, поки активна хоч одна тривога провайдера, що її стосується. Перша така тривога → один рядок `alert_event` для школи (найраніша з них, `ON CONFLICT DO NOTHING`) + реакція; ще одні тривоги поверх (район + область, `air_raid` + `artillery_shelling`) — нового рядка й push немає. Жодної такої тривоги не лишилось → відбій школи (`ended_at` = час опитування, `UPDATE ... WHERE ended_at IS NULL`); те, що скінчилась саме тривога з рядка журналу, — ще не відбій. Опитування — під advisory lock (`alerts-poll`), паралельні запуски не відкривають школі двох рядків. Помилка API — не відбій. Відповідь із невалідними записами (не пройшли валідацію) — неповна: нові тривоги з неї журналюються, але відбою в цьому опитуванні немає (у лог — попередження з кількістю пропущених записів). Тривога, що знову з'явилась після відбою (API на мить її «загубило»), відновлюється (`ended_at = NULL`) і реакція повторюється. Повторні й паралельні запуски не дублюють рядків, перекличок і push.
+- **Реакція** на початок тривоги з API: класи школи, де зараз іде урок за розкладом (`current_lesson`, Europe/Kyiv) → сесія переклички (`rollcall_session`, одна відкрита на клас; B12 додасть відмітки) + push `alert` з `lesson_id`. Відбій закриває сесії переклички цієї тривоги й ставить push `all_clear` тим самим класам — лише якщо клас не покриває інша активна тривога (ручна цього класу або з API його школи). Інакше сесія лишається відкритою й переходить до найранішої з активних тривог (`alert_event_id` і `is_drill` оновлюються), без `all_clear`; закриється з відбоєм останньої. Якщо в класі вже відкрита перекличка без тривоги (ручний старт) або навчальної тривоги, а починається справжня, сесія переходить до неї (`alert_event_id`, `is_drill = false`), відмітки лишаються. Навпаки, ручний старт переклички (`POST /classes/{id}/rollcall`), коли клас уже покриває активна тривога того ж типу (урок почався під час тривоги), прив'язує сесію до цієї тривоги: її відбій закриває перекличку й шле `all_clear`.
+- **Урок почався під час тривоги** (beat `alerts.lesson_starts`, щохвилини): для кожної активної тривоги (з API — усі класи школи, ручна — лише її клас) класи, у яких поточний урок за розкладом (`current_lesson`, Europe/Kyiv, межі в UTC — безпечно щодо переходу на літній/зимовий час) почався за останні 2 хв (два інтервали — запас на затримку beat), отримують ту саму реакцію, що й на початку тривоги (`react_class`: перекличка, прив'язана до тривоги, + push `alert` з `lesson_id`). Клас, у якого вже є перекличка (відкрита чи закрита) однієї з тривог, що його покривають, пропускається — зокрема, якщо реакція була на старті тривоги чи на попередньому уроці. Перевірка й реакція під advisory lock класу, тривога читається `FOR SHARE` (паралельний відбій закриє щойно відкриту сесію); повтор чи паралельний запуск не дає дублів. Справжня тривога має пріоритет над навчальною.
+- **Автозакриття** (beat `alerts.auto_close`, кожні 5 хв): ручна (зокрема навчальна) тривога, старша за `ALERTS_MANUAL_MAX_HOURS` (6 год), завершується як звичайний відбій (перекличка закривається, push `all_clear`), а ручна перекличка без тривоги такого віку закривається як вчителем (без push). Поки школу покриває тривога з API, нічого не закривається.
+- **Push**: єдина функція `enqueue_push` (`app/workers/push.py`) ставить задачу `push.send` у чергу `push` з payload `{type, class_id, alert_id?, lesson_id?, pack_id?, pack_date?}` — без персональних даних (одержувачі й доставка — «Рішення B8»). Задачі ставляться лише після commit; недоступний брокер логується, а не ламає запит (запасний шлях — `GET /alerts/active`).
+- **Ручна тривога** (`POST /alerts/manual`): вчитель цього класу **або адміністрація його школи** (контракт змінено: раніше лише вчитель). `id` від клієнта, повтор → 200 без нового push. Перекличка відкривається навіть без уроку зараз; `lesson_id` у push — якщо урок іде. `is_drill` зберігається в тривозі й сесії переклички. Відбій (`POST /alerts/{id}/end`) — вчитель класу або адміністрація; тривога з API вручну не закінчується (409 `ALERT_NOT_MANUAL`).
+- **`GET /alerts/active`**: тривоги з API шкіл користувача + ручні тривоги його класів (батьки — шкіл і класів дітей, адміністрація — усе по школі). `source_available = false`, якщо опитування вимкнене або останній успіх давніший за `ALERTS_SOURCE_STALE_S` (300 с).
+- **Журнал** `GET /alerts`: адміністрація своєї школи, `from`/`to` — дати за київським часом.
+
+## Рішення B6 «Рюкзак» (05.11.2026)
+
+Міграція `0edf076a683a`: `knowledge_pack.content_gzip` (bytea NOT NULL; наявні рядки без вмісту видаляються — пакети похідні й перезбираються). Нових полів про дітей немає.
+
+- **Вміст пакета** (клас + дата): розклад дня, опубліковані уроки дня (модулі — спершу укриттєва частина, картки, тести й питання; `answer_key` — лише в питаннях тренувального тесту (`window_enabled = false`) для миттєвої перевірки офлайн, у тесті з вікном (B11, оцінюваному) поля немає зовсім — оцінює сервер після синхронізації. Ключ тренувального тесту входить у хеш, тож його виправлення дає нову версію пакета. Інших оцінюваних вправ у моделі немає: картки (`text`/`image`/`video`) — лише контент, відповіді на них лишаються на пристрої), `explanations` (поки порожній список, сховища пояснень немає — B13.3). Урок, знятий з публікації, у пакет не йде, а в розкладі пакета його `lesson_id = null`. День без уроків у розкладі пакета не має.
+- **Версія й хеш.** `content_hash` = sha256 канонічного JSON (сортовані ключі, без пробілів, UTF-8) вмісту без `id`, `version`, `built_at`. Той самий вміст → той самий хеш → нова версія не створюється (повтор і паралельна перезбірка нічого не дублюють; гонку версій ловить UNIQUE (class_id, pack_date, version) + `ON CONFLICT DO NOTHING`; програвша збірка перечитує дані й збирає пакет знову — до 3 спроб, тож виграють найсвіжіші дані). У хешований вміст входить `media` — id медіа уроків разом із субтитрами, тож заміна субтитрів дає нову версію. Готова відповідь зберігається в `content_gzip`, тому ETag завжди відповідає тілу.
+- **Перезбірка** — Celery (черга `default`): `packs.rebuild_for_lesson` після `publish`/`unpublish`; `packs.rebuild_class` після змін слотів, перевизначень і прив'язок уроків; `packs.refresh_all` — beat раз на `PACKS_REFRESH_INTERVAL_S` (3600 с): новий день у горизонті 7 днів і все, що могло не перезібратися (недоступний брокер). Нова версія хоч одного дня → **один** push `pack_updated` класу за перезбірку (`class_id`, `pack_id` і `pack_date` найранішого зміненого дня).
+- **Прогрес не губиться при зміні уроку.** Версія пакета незмінна, стара лишається доступною за id (`GET /packs/{old_id}`), пристрій тримає її, доки учень не закінчить. Id модулів, карток, тестів і питань стабільні між версіями уроку (правка — `unpublish` → зміни → `publish`, id ті самі), тож прогрес і спроби (B9) прив'язані до них, а не до версії пакета; `knowledge_pack_lesson.lesson_version` фіксує, з якою версією уроку зібрано пакет.
+- **Маніфест** `GET /packs/manifest?class_id&from&to`: найновіша версія кожного дня, діапазон до 7 днів (за замовчуванням сьогодні..+6 за часом школи; інакше 422 `VALIDATION_ERROR`). Медіа (з субтитрами) — лише для днів «сьогодні + завтра» в межах діапазону, з URL сховища, розміром, sha256 і `needed_on`.
+- **Завантаження** `GET /packs/{id}`: `ETag` = `"<content_hash>"`, `If-None-Match` → 304; gzip, якщо клієнт його приймає (`Accept-Encoding` з q-значеннями: `gzip`/`x-gzip` або `*` з q > 0; `gzip;q=0` — без стиснення; brotli не додаємо — немає залежності); `Cache-Control: private, no-cache`, `Vary: Accept-Encoding`.
+- **Доступ:** учень свого класу, вчитель своїх класів, адміністрація школи; батьки — ні (403).
+- **Ліміти й розміри.** `size_bytes` — JSON без стиснення. Кожна збірка логує `json_bytes` і `media_bytes` (без персональних даних). День > `PACK_MAX_DAY_BYTES` (50 МБ) чи 7 днів > `PACK_MAX_WEEK_BYTES` (200 МБ) → попередження в лог, пакет усе одно збирається (блокує ліміт дня при прив'язці уроку, B5).
+
+## Рішення B9 «Синхронізація» (05.11.2026)
+
+Міграція `827ed8465b1b`: послідовність `sync_change_seq`, функція `sync_change_stamp()` і тригери `<table>_sync_change` (BEFORE INSERT OR UPDATE) на `attempt`, `module_progress`, `rollcall_status`; у цих таблицях колонки `change_seq` (bigint NOT NULL) і `change_xid` (bigint NOT NULL, `pg_current_xact_id()` -- xid8, що вміщується в bigint) та індекси `ix_<table>_sync_changes` (`student_id`, `change_xid`, `change_seq`). Код ці колонки не пише (у моделях `server_default=FetchedValue()`). Нових полів про дітей немає.
+
+- **Прийом** (`app/services/sync.py`): кожна подія -- окрема транзакція (commit після кожної); `INSERT INTO sync_event ... ON CONFLICT (client_event_id) DO NOTHING RETURNING`, програвший паралельний запит чекає на commit переможця й повертає збережений результат. Відхилена подія записується з `status = rejected` і причиною; `unknown_type` не записується (CHECK), але результат той самий. `received_at` -- один час сервера на пакет; `clock_skew_ms = received_at - sent_at`; `is_suspicious`, якщо `|зсув|` чи `occurred_at - received_at` > `SYNC_SUSPICIOUS_SKEW_S` (300 с).
+- **Доступ:** модуль/тест -- урок був у будь-якій версії пакета класу учня (`knowledge_pack_lesson`) або прив'язаний до слота його класу (`lesson_assignment`); перекличка -- учень класу сесії.
+- **Зарахування спроби:** `pg_advisory_xact_lock` на (учень, тест) серіалізує паралельні спроби; частковий UNIQUE `uq_attempt_student_id_test_id_credited` -- остання лінія захисту. Вікно тесту -- див. «Рішення B11».
+- **Стрічка змін:** порядок і курсор -- (`change_xid`, `change_seq`), фільтр `change_xid < pg_snapshot_xmin(pg_current_snapshot())`; див. `docs/sync-protocol.md`, розділ 8.
+- **Агрегати** (B9.6: прогрес класу, мапа знань) — див. «Рішення B14» (Celery, черга `default`).
+
+## Рішення B12 «Перекличка» (05.11.2026)
+
+Міграцій немає, нових полів про дітей немає.
+
+- **Відмітка учня** -- лише подією `rollcall_status` через `POST /sync/events` (B9): конфлікт -- найпізніший `occurred_at`; статус, пізніший за `closed_at` і за годинником пристрою, і з поправкою на зсув годинника пакета (з допуском `SYNC_ROLLCALL_CLOSE_GRACE_S`, 120 с) -- `session_closed`, раніший (офлайн до відбою) приймається й після закриття; сумнівну відмітку приймаємо, а не губимо.
+- **Ручний старт** `POST /classes/{id}/rollcall` -- вчитель цього класу (адмін -- ні, як у контракті). `id` від клієнта: повтор -- 200 з наявною сесією (навіть закритою); інша відкрита сесія класу (зокрема від тривоги) -- 409 `ROLLCALL_ALREADY_OPEN` з `details.session_id`; той самий id з іншим `is_drill` чи класом -- 409 `ID_CONFLICT`. Push при ручному старті не шлеться (немає типу push; учні бачать сесію через `GET .../rollcall/current`).
+- **Закриття** `POST /classes/{id}/rollcall/{session_id}/close` -- вчитель класу, ідемпотентно; сесія іншого класу -- 404.
+- **Перегляд** `GET /classes/{id}/rollcall/current` -- лише відкрита сесія; вчитель і адмін школи -- увесь клас (за прізвищем), учень -- лише себе (і `summary` лише по собі); «немає відповіді» = нема рядка. `ETag` (sha256 тіла) + `If-None-Match` → 304 для опитування кожні 10 с; `Cache-Control: private, no-cache`.
+- **Батьки** `GET /students/{id}/rollcall/current` -- найновіша відкрита сесія класів дитини; немає -- `session_id`/`status` = null.
+- **Push батькам** (B12.4, 06.11.2026): коли статус дитини у **відкритій** сесії справді змінюється (нема → є, `in_shelter` ↔ `safe`), після commit події — push `rollcall_status` батькам цієї дитини (див. «Рішення B8»). Повтор події (`duplicate`), той самий статус іншою подією, старша подія, що не перемогла, і відмітка в уже закритій сесії push не дають. Попередній статус читається під `pg_advisory_xact_lock` на (сесія, учень), тож паралельні пакети з двох пристроїв не дають двох push. Кілька змін в одному пакеті — один push з останнім статусом, і лише якщо він відрізняється від статусу до пакета (A→B→A push не дає).
+- Не зроблено: кількість дітей в укритті по школі для адміна (B12.5, P2).
+
+## Рішення B14 «Кабінети» (05.11.2026)
+
+Міграція `69af2adf1d7f`: `module_progress.full_at` (заповнюється з журналу `sync_event`) і таблиці агрегатів `student_lesson_stat` (PK student_id, lesson_id), `student_test_stat` (PK student_id, test_id), `student_study_day` (PK student_id, day), `class_lesson_stat` (PK class_id, lesson_id), `class_question_stat` (PK class_id, question_id); усі FK з `ON DELETE CASCADE` (видалення учня, класу чи уроку прибирає агрегати). Лише id і числа — нових персональних полів про дітей немає.
+
+- **Агрегати рахує Celery** (`app/services/stats.py`, черга `default`): `stats.recompute_student` — після commit пакета `POST /sync/events`, у якому є прийняті події (одна задача на пакет, а не на подію; помилка брокера не ламає прийом); `stats.refresh_all` — beat раз на `STATS_REFRESH_INTERVAL_S` (3600 с). Перерахунок — повна заміна рядків учня, потім (окремою задачею `stats.recompute_class`, з уже закоміченими рядками учнів) його класів, під `pg_advisory_xact_lock`: повтор і паралельні задачі дають той самий результат. Перерахунок класу відкладений на `STATS_CLASS_DEBOUNCE_S` (30 с) і не дублюється: ключ у Redis (`SET NX`) ставить задачу лише для першого учня, задача знімає ключ перед перерахунком (зміни після її старту ставлять наступну); Redis недоступний — задача ставиться без дедуплікації. Так синхронізація всього класу дає один перерахунок класу, а не N (було O(n²)). Ендпоінти читають лише готові рядки (`computed_at` показує свіжість).
+- **Урок учня** — опублікований урок, призначений класу учня на дату ≤ сьогодні (пояс школи), або урок, з якого є прогрес чи спроби. **Урок завершено** — усі поточні модулі 100%; час завершення — найпізніший `full_at` модулів (годинник пристрою).
+- **Час навчання** — сума `module.duration_min` завершених модулів (плановий час 3–5 хв), день — дата `full_at` у поясі школи. Різницю позначок часу пристрою не використовуємо: її не перевірити, а відкритий екран її завищує; спроби тестів час не додають. Тож показник консервативний (нижня оцінка).
+- **Тест складено** — оцінка зарахованої спроби ≥ `STATS_PASS_SCORE` (60 %). Статус для кабінетів рахується при читанні з агрегатів і поточного часу: `passed`, `not_passed` (оцінка нижча або вікно минуло без зарахованої спроби), `closing_soon` (до дедлайну < `STATS_CLOSING_SOON_H` = 6 год, спроби немає), `pending`. Дедлайн = завершення уроку + `window_hours`.
+- **Прогалини** — тема = урок (окремих тем у моделі немає): середня оцінка класу за зарахованими спробами (`is_gap`, якщо нижча за поріг) і частка правильних відповідей на кожне питання.
+- **Ендпоінти й доступ:** `GET /classes/{id}/progress`, `/tests`, `/gaps` — лише вчитель цього класу (адмін, чужий вчитель, учень, батьки — 403); `GET /students/{id}/progress` (уроки, тести з дедлайном, час навчання) і `/knowledge-map` (P1) — учень себе, батьки свою дитину, вчитель учнів своїх класів; адміністрація — 403 (навчальні дані учнів їй не потрібні). Статус переклички для батьків — наявний `GET /students/{id}/rollcall/current`.
+- **Адміністрація (P2)** — міграція `7019ba2b2183`: `alert_study_stat` (PK alert_event_id, CASCADE від тривоги й школи). `GET /alerts/study?from&to&limit` — лише адмін своєї школи: тривоги (як журнал `GET /alerts`) з тривалістю, кількістю учнів, що завершували модулі під час тривоги, і хвилинами навчання (`duration_min` модулів із `full_at` у [початок, відбій); ручна тривога класу — лише учні цього класу). Без даних окремих учнів. Перераховує `stats.refresh_all` для тривог за `STATS_ALERT_LOOKBACK_DAYS` (14 днів); ще не пораховані тривоги мають `students`/`study_minutes` = null.
+
+## Рішення B11 «Тест із вікном» (05.11.2026)
+
+Міграцій немає (налаштування `test.window_enabled` / `window_hours` 24/48/72 -- з B2, `module_progress.full_at` -- міграція B14 `69af2adf1d7f`). Нових полів про дітей немає.
+
+- **Старт вікна:** окремої події «урок завершено» немає -- вікно відкривається від `occurred_at` події `module_progress` (100%), що завершила останній модуль уроку (найпізніший `full_at` модулів, кожен `full_at` -- найраніша прийнята подія зі 100%). Дедлайн = старт + `window_hours`. У пакет іде `window_hours` тесту (ключа відповідей немає), пристрій рахує дедлайн сам і закриває тест офлайн.
+- **Зарахування:** статуси спроб учня з тесту -- чиста функція від набору спроб і дедлайну (`_recredit` у `app/services/sync.py`), перераховується після кожної спроби й кожної події, що завершила модуль уроку з тестом із вікном. Перша завершена спроба з `completed_at` ≤ дедлайну -- `credited`; після дедлайну -- `not_credited_late` (зберігається, не зараховується); інші -- `not_credited_repeat`. Поки серверу невідоме завершення уроку (події модулів ще в outbox), дедлайну немає і спроба зараховується; пізніше вона може стати `not_credited_late` -- рядок оновлюється й потрапляє в `GET /sync/changes`. Час -- годинник пристрою з обох боків (один пристрій -- один зсув).
+- **Підозрілий час** (B9.4) -- лише `attempt.is_suspicious`, позначка для вчителя в `GET /classes/{id}/tests`; зарахування не блокується.
+- **Оцінювання** -- на сервері за `answer_key` (у пакеті тесту з вікном ключа немає).
+- **Статус для вчителя** (`GET /classes/{id}/tests`): `passed` / `not_passed` / `closing_soon` (до дедлайну < 6 год і спроби немає) / `pending`. Дедлайн для кабінету -- з агрегатів (`student_lesson_stat.completed_at` + `window_hours`).
+- Зміна вікна тесту (`window_enabled`, `window_hours`), ключа, балів, варіантів чи типу питання, додавання чи видалення питання після спроб (unpublish → правка → publish) ставить після commit задачу `sync.regrade_test` (черга `sync`): переоцінка всіх спроб тесту за поточним ключем і `_recredit` кожного учня під тим самим advisory lock, потім `stats.recompute_student` для цих учнів. Ідемпотентно; змінені спроби з'являються в `GET /sync/changes`.
+
+## Рішення B15.3 «Rate limiting входу» (05.11.2026)
+
+Міграцій немає (лічильники в Redis БД 2), нових полів про дітей немає.
+
+- **Ключі:** пара IP + акаунт (10 невдач / 15 хв) — хто перебирає чужий PIN, блокує лише себе; IP (300) — увесь клас за одним NAT; загальний ключ акаунта з усіх IP (`RATE_LIMIT_JOIN_ACCOUNT_ALL_IPS` / `RATE_LIMIT_LOGIN_ACCOUNT_ALL_IPS`, 100) — проти перебору зі зміною IP.
+- **Компроміс загального ліміту:** його вичерпання на вікно (15 хв) не пускає й справжнього власника, тобто це DoS-важіль. Поріг навмисно високий: однокласник руками 100 хибних PIN за 15 хв не введе, тож досягти його можна лише скриптом зі зміною IP — а такий перебір і треба зупинити. Це тимчасовий ліміт, а не блокування: знімається сам, вчитель може скинути PIN.
+- **Лічильник** — атомарний Lua-скрипт (`INCR` + `EXPIRE` на першій спробі вікна); ключ без TTL не блокує й отримує вікно заново.
+- **IP клієнта** за Nginx — лише через `uvicorn --proxy-headers` з `FORWARDED_ALLOW_IPS` = IP/підмережа Nginx (Dockerfile); без цього всі клієнти мали б один IP Nginx.
+
+## Рішення «Як ти зараз?» (06.11.2026)
+
+Міграція `3fbf7c1bc79d`. Деталі й тексти — `docs/wellbeing-checkin.md`.
+
+### `wellbeing_answer`
+| Поле | Тип | Примітка |
+|---|---|---|
+| id | uuid PK | `client_event_id` події, що дала поточне значення |
+| student_id | uuid FK → app_user ON DELETE CASCADE | |
+| answered_on | date | дата відповіді в поясі школи (`Europe/Kyiv`) за виправленим часом |
+| value | smallint CHECK 1..5 | картинка погоди; людям число не показується |
+| occurred_at | timestamptz | час пристрою, виправлений на зсув годинника пакета (`occurred_at` + `clock_skew_ms`); від нього дата й «пізніша відповідь дня перемагає» |
+| created_at | timestamptz default now() | |
+
+UNIQUE (`student_id`, `answered_on`) — одна відповідь на день, upsert з `WHERE (occurred_at, id) > ...`. Дата з майбутнього чи старша за 30 днів не записується (подія все одно `accepted`), читання обмежені `answered_on <= сьогодні`. Індекс `answered_on` — для видалення: Celery `wellbeing.purge` (crontab щодня 01:30 UTC і при старті воркера, ідемпотентно) видаляє рядки, старші за 30 днів, і датовані пізніше за завтра (Київ).
+
+У `sync_event.payload` для `survey_answer` — `{}`; міграція стирає payload уже збережених подій цього типу (відкат його не відновлює). Записи `sync_event` типу `survey_answer` той самий `wellbeing.purge` видаляє через 30 днів після `received_at`: payload порожній, але видно, коли й з якого пристрою дитина відповідала. Повтор такої події після видалення прийметься знову, але її дата вже поза строком — відповідь не запишеться.
+
+### `wellbeing_view_log`
+| Поле | Тип | Примітка |
+|---|---|---|
+| id | uuid PK | |
+| viewer_id | uuid FK → app_user ON DELETE SET NULL | хто дивився |
+| student_id | uuid FK → app_user ON DELETE CASCADE | чию дитину дивилися |
+| viewed_at | timestamptz default now() | |
+
+Пишеться при кожному перегляді батьків (власний перегляд учня — ні). Вчитель і адміністрація доступу не мають зовсім, тож і записів від них немає. Нових персональних полів про дітей немає; агрегатів не зберігаємо — тижневе зведення батькам рахується на льоту.
+
+## Рішення B8 «Web Push» (06.11.2026)
+
+Міграцій немає (таблиця `push_subscription` з B2). Нових полів про дітей немає. Бібліотека — `pywebpush` 2.5.0.
+
+- **VAPID:** `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` (SecretStr), `VAPID_SUBJECT` (`mailto:`) — лише в `.env`/секретах; пару друкує `python -m app.cli gen-vapid`. `GET /push/vapid-key` (будь-яка автентифікована роль) → `{public_key}`; ключі не задані → `503 PUSH_NOT_CONFIGURED`, а задачі пропускають відправку з попередженням.
+- **Підписки:** `POST /push/subscriptions` — будь-яка роль, `id` від клієнта. Той самий `endpoint` (будь-чий) → наявна підписка, переприв'язана до поточного користувача з новими ключами (на пристрої увійшов інший користувач), 200 з її `id`; той самий `id` власної підписки з іншим `endpoint` → оновлення, 200; `id` чужої підписки → 409 `ID_CONFLICT`; інакше 201. Перевірка: `endpoint` — https за доменним ім'ям (IP, localhost, ім'я без крапки й облікові дані в URL відхиляються; хост має бути відомим push-сервісом із `PUSH_ALLOWED_HOST_SUFFIXES` — `fcm.googleapis.com`, `push.services.mozilla.com`, `push.apple.com`, `notify.windows.com` або їхні піддомени; інше → 422 — захист від SSRF), `p256dh` — 65 байт і точка кривої P-256, `auth` — 16 байт (base64url, з `=` у кінці чи без). До `PUSH_MAX_SUBSCRIPTIONS_PER_USER` (10) підписок на користувача, понад ліміт видаляються спершу підписки з `failed_at`, далі найдавніші за `created_at` (не `updated_at`: його змінюють і спроби доставки). `DELETE /push/subscriptions/{id}` — ідемпотентно, завжди 204: видаляється лише власна підписка; повтор, неіснуюча чи чужа → теж 204 без дії (чужа не видаляється, відповідь не розкриває, що вона існує).
+- **Одержувачі** (лише `is_active`): `alert`, `all_clear` — учні й вчителі класу та батьки учнів класу; `pack_updated` — учні й вчителі класу; `rollcall_status` — батьки цієї дитини.
+- **Payload** (JSON у push, без імен і персональних даних): `{type: "alert", class_id, alert_id, lesson_id}` (`lesson_id` = null, якщо уроку зараз немає), `{type: "all_clear", class_id, alert_id}`, `{type: "pack_updated", class_id, pack_id, pack_date}`, `{type: "rollcall_status", student_id, session_id, status: "in_shelter"|"safe"}`. Push `rollcall_status` містить статус дитини (`in_shelter`/`safe`) — це свідоме продуктове рішення (06.11.2026); імен та інших персональних даних у ньому, як і раніше, немає. TTL і `Urgency`: `alert`/`all_clear` — 600 с, high; `rollcall_status` — 3600 с, high; `pack_updated` — 12 год, normal.
+- **Відправка** (Celery, черга `push`): `push.send(payload, key)` визначає одержувачів і ставить `push.deliver(subscription_id, payload, key)` на кожну підписку. 2xx → `last_success_at`; 404/410 → підписка видаляється; 429/5xx/мережа → повтор із відступом 30 с · 2ⁿ (не менше `Retry-After`, не більше 15 хв), до 5 повторів, далі `failed_at`; інші 4xx → `failed_at` без повтору; ключі підписки, якими не зашифрувати payload (p256dh не точка P-256), → підписка видаляється без повторів (при підписці такі ключі вже відхиляються з 422). HTTP-запит іде в потоці й поза транзакцією БД: поля підписки читаються, транзакція закривається, результат пишеться окремою короткою транзакцією (якщо підписку тим часом перевидали з іншим endpoint чи ключами, результат старої відправки її не чіпає).
+- **Ідемпотентність:** ключ повідомлення `key` — за замовчуванням sha256 payload (тривога/відбій класу, пакет), для `rollcall_status` — `rollcall_status:<client_event_id>`. Перед відправкою — Redis `SET NX` на (ключ, підписка) з TTL 24 год (БД `REDIS_URL`); тимчасова помилка знімає ключ перед повтором. Redis недоступний — надсилаємо без дедуплікації (fail-open: дубль тривоги кращий за пропущену). Збій воркера між `SET NX` і відправкою — це повідомлення цій підписці не дійде (актуальний стан клієнт однаково бере з API: `GET /alerts/active`, `GET /students/{id}/rollcall/current`, маніфест пакетів).
+- **Логи:** лише id підписки, хост push-сервісу й HTTP-статус; повний `endpoint`, ключі підписки й VAPID-ключ не логуються. Метрики B8.5 — поки лише в логах (`fan-out: N subscriptions`, відхилення, вичерпані повтори).
+
+## Рішення B15 «Безпека даних» (06.11.2026)
+
+Міграції `cd5251c1640d` (запити на видалення; підтверджені запити — журнал видалень) і `ab864a5a777c` (прибрано `app_user.last_seen_at` і `refresh_token.user_agent` — не читалися; `sync_event.device_id` став NULL; індекс `ix_sync_event_retention`). Інвентаризація даних про дітей і строки зберігання — `docs/data-inventory.md`.
+
+### `data_deletion_request`
+| Поле | Тип | Примітка |
+|---|---|---|
+| id | uuid PK | створює клієнт; повтор — той самий запит |
+| student_id | uuid FK → app_user ON DELETE SET NULL NULL | NULL після видалення учня |
+| student_hash | text NOT NULL | sha256(`student:<id>`): псевдонім учня, лишається після видалення |
+| school_id | uuid FK → school ON DELETE SET NULL NULL | школа учня; рішення — лише адміністрація цієї школи; NULL після видалення школи (запис аудиту лишається) |
+| requested_by | uuid FK → app_user ON DELETE SET NULL NULL | батьки або адміністратор |
+| requested_by_role | text CHECK IN (`parent`, `admin`) | |
+| reason | text NULL CHECK IN (`left_school`, `consent_withdrawn`, `duplicate_account`, `other`) | лише перелік, вільного тексту немає |
+| status | text CHECK IN (`pending`, `confirmed`, `rejected`) default `pending` | |
+| created_at, decided_at | timestamptz | |
+| decided_by | uuid FK → app_user ON DELETE SET NULL NULL | |
+
+Частковий UNIQUE `uq_data_deletion_request_student_id_pending` (`student_id`) WHERE `status = 'pending'` — один відкритий запит на учня. Індекси (`school_id`, `status`), `requested_by`.
+
+- **Видалення:** `POST /deletion-requests/{id}/confirm` видаляє рядок `app_user` учня, решту — каскадом (членство, прив'язки батьків і коди, токени, коди авторизації, push-підписки, `sync_event` → `attempt`, `module_progress`, `rollcall_status`, `wellbeing_*`, агрегати учня); `stats.recompute_class` для його класів. Запит блокується `FOR UPDATE`; повтор підтвердження — той самий результат. Окремого журналу немає: підтверджені запити (без персональних даних, `student_hash`) зберігаються безстроково й переживають видалення школи. `GET /deletion-requests`: адміністрація — запити своєї школи; батьки — запити щодо своїх дітей (і створені школою чи другим із батьків) та власні; автор — лише роллю.
+- **Строки зберігання** (`retention.purge`, crontab 02:00 UTC, ідемпотентно): `sync_event` старші за `RETENTION_SYNC_EVENT_DAYS` (180) — payload `{}`, `device_id` і `clock_skew_ms` NULL (`is_suspicious` лишається), відхилені видаляються; пакетами по 5000 рядків, кожен у своїй транзакції, до 300 с за запуск; `refresh_token` і `auth_code` — через `RETENTION_AUTH_DAYS` (7) після `expires_at` (посилання `replaced_by_id` спершу обнуляються); `parent_link_code` — через `RETENTION_PARENT_LINK_CODE_DAYS` (30) після `expires_at`; `wellbeing_view_log` — `RETENTION_WELLBEING_VIEW_LOG_DAYS` (365). Рядки прийнятих подій лишаються: на них ідемпотентність і FK (`attempt.client_event_id` ON DELETE CASCADE!). Тригер стрічки змін на `sync_event` не стоїть, тож курсор `/sync/changes` не зачіпається.
+- **Заголовки безпеки й ліміти:** без змін схеми — див. `backend/README.md`.
+

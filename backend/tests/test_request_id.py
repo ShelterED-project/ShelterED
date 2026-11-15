@@ -33,3 +33,34 @@ def test_access_log_has_request_id(caplog):
     assert entry["path"] == "/health"
     assert entry["status"] == 200
     assert "secret" not in json.dumps(entry)
+
+
+def test_rejects_request_id_with_trailing_newline():
+    """`$` у регулярному виразі пропускав `abc\n`; ID має збігатися повністю."""
+    import anyio
+
+    from app.core.request_id import VALID_ID, RequestIdMiddleware
+
+    assert VALID_ID.fullmatch("abc-123\n") is None
+    seen: list[list[tuple[bytes, bytes]]] = []
+
+    async def inner(scope, receive, send):
+        await send({"type": "http.response.start", "status": 204, "headers": []})
+        await send({"type": "http.response.body", "body": b""})
+
+    async def send(message):
+        if message["type"] == "http.response.start":
+            seen.append(message["headers"])
+
+    async def receive():
+        return {"type": "http.request", "body": b""}
+
+    scope = {
+        "type": "http",
+        "method": "GET",
+        "path": "/health",
+        "headers": [(b"x-request-id", b"abc-123\n")],
+    }
+    anyio.run(RequestIdMiddleware(inner), scope, receive, send)
+    request_id = dict(seen[0])[b"x-request-id"].decode()
+    assert request_id != "abc-123\n" and "\n" not in request_id

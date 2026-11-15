@@ -190,9 +190,14 @@ async def test_clock_skew_fits_beyond_int32(db_session: AsyncSession) -> None:
     assert stored == 3_000_000_000
 
 
-def alert(school_id: uuid.UUID | None, external_id: str | None = "a-1", source: str = "api"):
+def alert(
+    school_id: uuid.UUID | None,
+    external_id: str | None = "a-1",
+    source: str = "api",
+    region_code: str = "kyiv",
+):
     return AlertEvent(
-        region_code="kyiv",
+        region_code=region_code,
         school_id=school_id,
         source=source,
         external_id=external_id,
@@ -204,7 +209,7 @@ async def test_alert_duplicate_with_null_school_rejected(db_session: AsyncSessio
     db_session.add(alert(None))
     await db_session.flush()
     db_session.add(alert(None))
-    with pytest.raises(IntegrityError, match="uq_alert_event_source_external_school"):
+    with pytest.raises(IntegrityError, match="uq_alert_event_source_region_external_school"):
         await db_session.flush()
 
 
@@ -217,7 +222,7 @@ async def test_alert_duplicate_for_school_rejected_but_other_school_ok(
     db_session.add_all([alert(school_a.id), alert(school_b.id), alert(None)])
     await db_session.flush()
     db_session.add(alert(school_a.id))
-    with pytest.raises(IntegrityError, match="uq_alert_event_source_external_school"):
+    with pytest.raises(IntegrityError, match="uq_alert_event_source_region_external_school"):
         await db_session.flush()
 
 
@@ -226,4 +231,12 @@ async def test_manual_alerts_without_external_id_may_repeat(db_session: AsyncSes
     db_session.add(school)
     await db_session.flush()
     db_session.add_all([alert(school.id, None, "manual"), alert(school.id, None, "manual")])
+    await db_session.flush()
+
+
+async def test_same_external_id_in_other_region_is_a_different_alert(
+    db_session: AsyncSession,
+) -> None:
+    # Ключ дедуплікації містить регіон: провайдер може нумерувати тривоги в межах регіону.
+    db_session.add_all([alert(None), alert(None, region_code="lviv")])
     await db_session.flush()

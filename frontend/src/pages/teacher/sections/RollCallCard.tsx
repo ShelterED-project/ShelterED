@@ -2,6 +2,7 @@ import iconSafe from '@/assets/parent/status-safe.svg'
 import iconShelter from '@/assets/parent/status-shelter.svg'
 import iconBell from '@/assets/teacher/bell.svg'
 import iconPending from '@/assets/teacher/status-pending.svg'
+import { useTeacherRollCall } from '@/features/teacher/useTeacherRollCall'
 import { rollCall } from '../content'
 import type { RollCallState } from '../content'
 
@@ -21,7 +22,21 @@ function Status({ state, label }: { state: RollCallState; label: string }) {
   )
 }
 
+function initials(name: string, lastName: string | null): string {
+  return [name, lastName]
+    .filter((part): part is string => Boolean(part))
+    .map((part) => part[0].toUpperCase())
+    .join('')
+}
+
+function timeLabel(iso: string | null): string {
+  return iso ? new Date(iso).toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' }) : '—'
+}
+
 export default function RollCallCard({ className = '' }: { className?: string }) {
+  const { session, isLoading } = useTeacherRollCall()
+  const students = session?.students ?? []
+
   return (
     <section className={`flex flex-col gap-4 rounded-[22px] border border-line bg-surface p-5 md:p-6 ${className}`}>
       <div className="flex items-center justify-between gap-3">
@@ -45,27 +60,38 @@ export default function RollCallCard({ className = '' }: { className?: string })
             </tr>
           </thead>
           <tbody>
-            {rollCall.rows.map((row) => (
-              <tr key={row.name} className="border-t border-line-soft">
-                <td className="py-3 pr-3">
-                  <span className="flex items-center gap-3">
-                    <span className="flex size-9 shrink-0 items-center justify-center rounded-full border border-line bg-surface-2 text-xs leading-4 font-semibold text-parchment">
-                      {row.initials}
+            {students.map((student) => {
+              const { state, label } = rollCall.states[student.status]
+              const name = [student.display_name, student.last_name].filter(Boolean).join(' ')
+              return (
+                <tr key={student.student_id} className="border-t border-line-soft">
+                  <td className="py-3 pr-3">
+                    <span className="flex items-center gap-3">
+                      <span className="flex size-9 shrink-0 items-center justify-center rounded-full border border-line bg-surface-2 text-xs leading-4 font-semibold text-parchment">
+                        {initials(student.display_name, student.last_name)}
+                      </span>
+                      <span className="text-[15px] leading-[22.5px] font-medium text-parchment">{name}</span>
                     </span>
-                    <span className="text-[15px] leading-[22.5px] font-medium text-parchment">{row.name}</span>
-                  </span>
-                </td>
-                <td className="py-3 pr-3 md:text-center">
-                  <span className="md:inline-flex">
-                    <Status state={row.state} label={row.label} />
-                  </span>
-                </td>
-                <td className="hidden py-3 text-right text-sm text-dim md:table-cell">{row.time}</td>
-              </tr>
-            ))}
+                  </td>
+                  <td className="py-3 pr-3 md:text-center">
+                    <span className="md:inline-flex">
+                      <Status state={state} label={label} />
+                    </span>
+                  </td>
+                  <td className="hidden py-3 text-right text-sm text-dim md:table-cell">
+                    {timeLabel(student.occurred_at)}
+                  </td>
+                </tr>
+              )
+            })}
           </tbody>
         </table>
       </div>
+      {!session && (
+        <p role="status" className="text-sm text-muted">
+          {isLoading ? rollCall.loading : rollCall.empty}
+        </p>
+      )}
       <p className="text-xs leading-4 text-dim">{rollCall.note}</p>
     </section>
   )

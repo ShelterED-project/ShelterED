@@ -6,6 +6,7 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from app.schemas.errors import ErrorBody, ErrorResponse
 
@@ -21,12 +22,14 @@ class AppError(Exception):
         message: str,
         status_code: int = 400,
         details: Any = None,
+        headers: dict[str, str] | None = None,
     ) -> None:
         super().__init__(message)
         self.code = code
         self.message = message
         self.status_code = status_code
         self.details = details
+        self.headers = headers
 
 
 def error_response(
@@ -41,12 +44,17 @@ def error_response(
 
 
 async def app_error_handler(request: Request, exc: AppError) -> JSONResponse:
-    return error_response(exc.status_code, exc.code, exc.message, exc.details)
+    return error_response(exc.status_code, exc.code, exc.message, exc.details, exc.headers)
 
 
 async def http_error_handler(request: Request, exc: StarletteHTTPException) -> JSONResponse:
-    code = HTTPStatus(exc.status_code).name
-    message = exc.detail if isinstance(exc.detail, str) else HTTPStatus(exc.status_code).phrase
+    try:
+        status = HTTPStatus(exc.status_code)
+        code, phrase = status.name, status.phrase
+    except ValueError:
+        # Нестандартний код (напр. 499 від стороннього middleware): не падаємо з 500.
+        code, phrase = f"HTTP_{exc.status_code}", "HTTP error"
+    message = exc.detail if isinstance(exc.detail, str) else phrase
     return error_response(exc.status_code, code, message, headers=exc.headers)
 
 
@@ -61,6 +69,41 @@ async def validation_error_handler(request: Request, exc: RequestValidationError
 async def unhandled_error_handler(request: Request, exc: Exception) -> JSONResponse:
     logger.exception("Unhandled error")
     return error_response(500, "INTERNAL_ERROR", "Internal server error")
+
+
+class UnhandledErrorMiddleware:
+    """Непередбачена помилка → 500 INTERNAL_ERROR усередині стеку middleware.
+
+    Обробник `Exception` у Starlette виконує зовнішній `ServerErrorMiddleware`, тож його
+    відповідь минає CORS, request ID і заголовки безпеки (`Cache-Control: no-store`): PWA з
+    іншого origin не може прочитати тіло й не бачить X-Request-ID. Цей middleware додається
+    першим (найглибшим), тож 500 проходить через усі інші. Якщо відповідь уже почалася —
+    помилка йде далі.
+    """
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        started = False
+
+        async def send_tracking(message: Message) -> None:
+            nonlocal started
+            if message["type"] == "http.response.start":
+                started = True
+            await send(message)
+
+        try:
+            await self.app(scope, receive, send_tracking)
+        except Exception:
+            if started:
+                raise
+            logger.exception("Unhandled error")
+            response = error_response(500, "INTERNAL_ERROR", "Internal server error")
+            await response(scope, receive, send)
 
 
 def register_error_handlers(app: FastAPI) -> None:

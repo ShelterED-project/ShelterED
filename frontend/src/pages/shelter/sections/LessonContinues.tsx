@@ -2,9 +2,11 @@ import iconCheck from '@/assets/landing/icon-check.svg'
 import iconArrow from '@/assets/register/icon-arrow-right.svg'
 import iconLantern from '@/assets/student/banner-lantern.svg'
 import iconDecor from '@/assets/shelter/decor.svg'
-import { lesson } from '../content'
+import { useShelterLesson } from '@/features/lessons/useShelterLesson'
+import { pluralUk } from '@/shared/lib/plural'
+import { lesson as texts } from '../content'
 
-type StepState = (typeof lesson.steps)[number]['state']
+type StepState = 'done' | 'current' | 'todo'
 
 function Step({ label, state }: { label: string; state: StepState }) {
   return (
@@ -23,12 +25,29 @@ function Step({ label, state }: { label: string; state: StepState }) {
         </span>
       )}
       {state === 'todo' && <span className="size-8 rounded-full border-2 border-line-strong bg-surface" />}
-      <span className={`text-xs leading-4 ${state === 'current' ? 'font-bold text-parchment' : 'text-dim'}`}>{label}</span>
+      <span
+        className={`max-w-full truncate px-1 text-center text-xs leading-4 ${state === 'current' ? 'font-bold text-parchment' : 'text-dim'}`}
+      >
+        {label}
+      </span>
     </li>
   )
 }
 
+function scrollTo(id: string) {
+  document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+
 export default function LessonContinues() {
+  const { hasPack, lesson, steps, currentStep, progress, lessons } = useShelterLesson()
+
+  const title = lesson?.lesson.title ?? (hasPack ? texts.noLesson : texts.noPack)
+  const text = lesson
+    ? `${lesson.lesson.modules.length} ${pluralUk(lesson.lesson.modules.length, ['модуль', 'модулі', 'модулів'])} · ${lesson.minutes} хв${currentStep ? '' : ` · ${texts.allDone}`}`
+    : hasPack
+      ? texts.noLessonText
+      : texts.noPackText
+
   return (
     <section
       aria-labelledby="lesson-title"
@@ -42,50 +61,60 @@ export default function LessonContinues() {
           <img src={iconLantern} alt="" width={28} height={28} className="relative" />
         </div>
         <div className="flex min-w-0 flex-col gap-2 pt-[5.5px]">
-          <p className="text-xs leading-4 font-bold tracking-[2px] text-accent uppercase">{lesson.eyebrow}</p>
+          <p className="text-xs leading-4 font-bold tracking-[2px] text-accent uppercase">{texts.eyebrow}</p>
           <h1
             id="lesson-title"
             className="font-heading text-[26px] leading-[29.9px] tracking-[-0.26px] text-parchment xl:pt-[2.5px] xl:text-[40px] xl:leading-[46px] xl:tracking-[-0.4px]"
           >
-            {lesson.title}
+            {title}
           </h1>
-          <p className="text-sm leading-5 text-muted xl:text-[15px]">{lesson.text}</p>
+          <p className="text-sm leading-5 text-muted xl:text-[15px]">{text}</p>
         </div>
       </div>
 
-      <div className="relative flex flex-col gap-4">
-        <div
-          role="progressbar"
-          aria-valuemin={0}
-          aria-valuemax={100}
-          aria-valuenow={lesson.progress * 100}
-          aria-label="Прогрес уроку"
-          className="h-2 rounded-full bg-line-soft"
-        >
-          <div className="h-2 rounded-full bg-accent" style={{ width: `${lesson.progress * 100}%` }} />
+      {steps.length > 0 && (
+        <div className="relative flex flex-col gap-4">
+          <div
+            role="progressbar"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={Math.round(progress * 100)}
+            aria-label="Прогрес уроку"
+            className="h-2 rounded-full bg-line-soft"
+          >
+            <div className="h-2 rounded-full bg-accent" style={{ width: `${progress * 100}%` }} />
+          </div>
+          <ol className="flex h-14 items-end">
+            {steps.map((step) => (
+              <Step
+                key={step.id}
+                label={step.title}
+                state={step.done ? 'done' : step.id === currentStep?.id ? 'current' : 'todo'}
+              />
+            ))}
+          </ol>
         </div>
-        <ol className="flex h-14 items-end">
-          {lesson.steps.map((step) => (
-            <Step key={step.label} {...step} />
-          ))}
-        </ol>
-      </div>
+      )}
 
-      {/* TODO: підключити перехід до уроку, коли зʼявиться сторінка уроку */}
       <div className="relative flex flex-col gap-3 md:flex-row">
         <button
           type="button"
-          className="flex h-14 items-center justify-center gap-2 rounded-[10px] bg-accent px-7 text-base font-bold text-oil focus-visible:ring-2 focus-visible:ring-parchment/60 focus-visible:outline-none"
+          onClick={() => scrollTo('task')}
+          disabled={!currentStep}
+          className="flex h-14 items-center justify-center gap-2 rounded-[10px] bg-accent px-7 text-base font-bold text-oil focus-visible:ring-2 focus-visible:ring-parchment/60 focus-visible:outline-none disabled:opacity-50"
         >
-          {lesson.resume}
+          {texts.resume}
           <img src={iconArrow} alt="" width={20} height={20} />
         </button>
-        <button
-          type="button"
-          className="h-14 rounded-[10px] border border-line-strong px-6 text-base font-semibold text-parchment hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:outline-none"
-        >
-          {lesson.others}
-        </button>
+        {lessons.length > 1 && (
+          <button
+            type="button"
+            onClick={() => scrollTo('next-offline')}
+            className="h-14 rounded-[10px] border border-line-strong px-6 text-base font-semibold text-parchment hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:outline-none"
+          >
+            {texts.others}
+          </button>
+        )}
       </div>
     </section>
   )
