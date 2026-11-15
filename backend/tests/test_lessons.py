@@ -294,6 +294,26 @@ async def test_publish_size_limit(client: AsyncClient, world, factory) -> None:
     assert detail["check"] == "lesson_size" and detail["limit_bytes"] == 50 * 1024 * 1024
 
 
+async def test_publish_rejects_lesson_without_modules_empty_test_or_placeholder_text(
+    client: AsyncClient, world, factory
+) -> None:
+    subject = await factory.subject()
+    h = auth_header(world.teacher_a)
+    lesson = await create_lesson(client, world.teacher_a, subject, shelter_part="***")
+    lid = lesson["id"]
+    test_id = str(uuid.uuid4())
+    resp = await client.post(
+        f"/lessons/{lid}/tests", json={"id": test_id, "title": "Порожній тест"}, headers=h
+    )
+    assert resp.status_code == 201, resp.text
+
+    failed = await client.post(f"/lessons/{lid}/publish", headers=h)
+    assert failed.status_code == 422
+    details = failed.json()["error"]["details"]
+    assert {d["check"] for d in details} == {"shelter_part", "modules", "test_questions"}
+    assert next(d for d in details if d["check"] == "test_questions")["test_id"] == test_id
+
+
 async def test_scheduled_lesson_cannot_be_deleted(client: AsyncClient, world, factory) -> None:
     subject = await factory.subject()
     h = auth_header(world.teacher_a)
@@ -302,6 +322,7 @@ async def test_scheduled_lesson_cannot_be_deleted(client: AsyncClient, world, fa
     assert (await client.get(f"/lessons/{draft['id']}", headers=h)).status_code == 404
 
     lesson = await create_lesson(client, world.teacher_a, subject)
+    assert (await add_module(client, world.teacher_a, lesson["id"])).status_code == 201
     assert (await client.post(f"/lessons/{lesson['id']}/publish", headers=h)).status_code == 200
     slot = await client.post(
         f"/classes/{world.class_a.id}/schedule/slots",

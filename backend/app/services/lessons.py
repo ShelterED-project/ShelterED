@@ -515,9 +515,25 @@ async def publish_problems(
 ) -> list[dict[str, Any]]:
     """Усі перевірки перед публікацією; порожній список — можна публікувати."""
     problems: list[dict[str, Any]] = []
-    if not lesson.shelter_part.strip():
+    # Лише пунктуація («***») — теж порожній текст: учневі в укритті нічого читати.
+    if not any(ch.isalnum() for ch in lesson.shelter_part):
         problems.append(
             {"check": "shelter_part", "message": "Lesson has no shelter part (shelter_part)"}
+        )
+
+    has_module = await session.scalar(select(exists().where(Module.lesson_id == lesson.id)))
+    if not has_module:
+        problems.append({"check": "modules", "message": "Lesson has no modules"})
+
+    # Тест без питань учень не може завершити — урок ніколи не стане «пройдено».
+    empty_tests = await session.scalars(
+        select(Test.id)
+        .where(Test.lesson_id == lesson.id, ~exists().where(Question.test_id == Test.id))
+        .order_by(Test.id)
+    )
+    for test_id in empty_tests:
+        problems.append(
+            {"check": "test_questions", "message": "Test has no questions", "test_id": str(test_id)}
         )
 
     subtitles = MediaAsset.__table__.alias("subtitles")
