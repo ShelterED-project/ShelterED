@@ -4,6 +4,9 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 import database, models , pytz
+import qrcode
+from io import BytesIO
+from fastapi.responses import StreamingResponse
 
 models.Base.metadata.create_all(bind=database.engine)
 
@@ -74,3 +77,12 @@ def teacher_dashboard(request: Request, db: Session = Depends(get_db)):
         name="teacher.html",
         context={"students": students}
     )
+
+@app.get("/qr")
+def generate_qr():
+    # Генеруємо QR-код з адресою для учнів
+    img = qrcode.make("http://192.168.137.1:8000")
+    buf = BytesIO()
+    img.save(buf)
+    buf.seek(0)
+    return StreamingResponse(buf, media_type="image/png")
