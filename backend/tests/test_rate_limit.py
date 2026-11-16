@@ -364,13 +364,13 @@ async def test_qr_relay_is_limited_per_teacher(client: AsyncClient, world) -> No
     headers = auth_header(world.teacher_a)
     for _ in range(120):
         r = await client.post("/sync/events", json=relay_body(), headers=headers)
-        assert r.status_code == 501
+        assert r.status_code == 200
     r = await client.post("/sync/events", json=relay_body(), headers=headers)
     assert r.status_code == 429 and "Retry-After" in r.headers
     other = await client.post(
         "/sync/events", json=relay_body(), headers=auth_header(world.teacher_b)
     )
-    assert other.status_code == 501
+    assert other.status_code == 200
 
 
 async def test_student_sync_is_not_limited_by_relay_limit(

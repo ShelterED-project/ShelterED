@@ -1056,6 +1056,38 @@
         "title": "ClassProgressOut",
         "type": "object"
       },
+      "ClassStudentOut": {
+        "description": "Учень класу: список для вчителя (локальний сервер укриття вибирає учня зі списку).",
+        "properties": {
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "last_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Name"
+          },
+          "student_id": {
+            "format": "uuid",
+            "title": "Student Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "student_id",
+          "display_name",
+          "last_name"
+        ],
+        "title": "ClassStudentOut",
+        "type": "object"
+      },
       "ClassTestOut": {
         "properties": {
           "counts": {
@@ -5537,6 +5569,19 @@
             ],
             "title": "Payload"
           },
+          "student_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Лише для ретрансляції вчителем (локальний сервер укриття): учень, чию подію пересилають. Учень поле не надсилає (або лише свій id)",
+            "title": "Student Id"
+          },
           "type": {
             "description": "Інший рядок не ламає пакет: подія отримує rejected/unknown_type",
             "enum": [
@@ -5575,7 +5620,9 @@
                   "unknown_type",
                   "unknown_entity",
                   "forbidden",
-                  "session_closed"
+                  "session_closed",
+                  "student_id_required",
+                  "relay_not_supported"
                 ],
                 "type": "string"
               },
@@ -5604,7 +5651,7 @@
         "type": "object"
       },
       "SyncEventsRequest": {
-        "description": "Пакет від 1 до 100 подій. Користувач — з JWT; учень надсилає лише свої події.",
+        "description": "Пакет від 1 до 100 подій. Користувач — з JWT; учень надсилає лише свої події, вчитель —\nвідмітки переклички учнів своїх класів (`student_id` у кожній події).",
         "examples": [
           {
             "events": [
@@ -10330,6 +10377,99 @@
         ]
       }
     },
+    "/classes/{class_id}/students": {
+      "get": {
+        "description": "Учні класу (id, ім'я, прізвище): вчитель класу й адмін школи. Потрібно, наприклад,\nлокальному серверу укриття, щоб учень вибрав себе зі списку ще до старту переклички.",
+        "operationId": "list_class_students_classes__class_id__students_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "class_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Class Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ClassStudentOut"
+                  },
+                  "title": "Response List Class Students Classes  Class Id  Students Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Не автентифіковано"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Недостатньо прав"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Не знайдено"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Class Students",
+        "tags": [
+          "school"
+        ]
+      }
+    },
     "/classes/{class_id}/students/{student_id}/pin-reset": {
       "post": {
         "description": "Скидає PIN учня (вчитель цього класу або адмін школи): наступний вхід задасть новий.\nУсі сесії учня (access- і refresh-токени) і його push-підписки перестають діяти.",
@@ -14803,7 +14943,7 @@
     },
     "/sync/events": {
       "post": {
-        "description": "Пакет 1–100 подій. Кожна подія приймається один раз за `client_event_id`: повтор\nприйнятої дає `duplicate`, повтор відхиленої — той самий `rejected` з причиною; нічого не\nдублюється. Погана подія отримує `rejected` і не блокує решту пакета. Події обробляються\nв порядку `occurred_at`, кожна у своїй транзакції; результати — у порядку запиту.\nСтатус 200, якщо конверт пакета валідний; 500 — частину подій не записано (повторити\nпакет: записані дадуть `duplicate`). Вчитель (QR, B10) поки отримує 501; його запити\nобмежені `RATE_LIMIT_QR_RELAY` за `RATE_LIMIT_QR_RELAY_WINDOW_S` (429 з `Retry-After`).",
+        "description": "Пакет 1–100 подій. Кожна подія приймається один раз за `client_event_id`: повтор\nприйнятої дає `duplicate`, повтор відхиленої — той самий `rejected` з причиною; нічого не\nдублюється. Погана подія отримує `rejected` і не блокує решту пакета. Події обробляються\nв порядку `occurred_at`, кожна у своїй транзакції; результати — у порядку запиту.\nСтатус 200, якщо конверт пакета валідний; 500 — частину подій не записано (повторити\nпакет: записані дадуть `duplicate`). Вчитель (локальний сервер укриття) пересилає\nвідмітки переклички учнів своїх класів: `student_id` у кожній події, лише\n`rollcall_status` (інші типи — `relay_not_supported`, B10). Його запити обмежені\n`RATE_LIMIT_QR_RELAY` за `RATE_LIMIT_QR_RELAY_WINDOW_S` (429 з `Retry-After`).",
         "operationId": "post_events_sync_events_post",
         "requestBody": {
           "content": {
@@ -14882,7 +15022,7 @@
                 }
               }
             },
-            "description": "RATE_LIMITED: ліміт QR-ретрансляції вчителя; повторити після `Retry-After` с",
+            "description": "RATE_LIMITED: ліміт ретрансляції вчителя; повторити після `Retry-After` с",
             "headers": {
               "Retry-After": {
                 "schema": {
@@ -14900,16 +15040,6 @@
               }
             },
             "description": "INTERNAL_ERROR: частину подій не оброблено — повторити пакет"
-          },
-          "501": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "NOT_IMPLEMENTED: QR-ретрансляція вчителем (B10) ще не реалізована"
           }
         },
         "security": [

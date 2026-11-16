@@ -42,7 +42,7 @@ class SyncEvent(Base):
             "type IN ('module_progress', 'test_attempt', 'rollcall_status', 'survey_answer')",
             name="type",
         ),
-        CheckConstraint("source IN ('online', 'qr')", name="source"),
+        CheckConstraint("source IN ('online', 'qr', 'local')", name="source"),
         CheckConstraint("status IN ('accepted', 'rejected')", name="status"),
         Index("ix_sync_event_user_id_received_at", "user_id", "received_at"),
         # Строки зберігання (retention.purge): лише ще не очищені події, тож індекс не росте
@@ -75,7 +75,7 @@ class SyncEvent(Base):
     # Час у майбутньому / великий зсув: позначка, не блокування.
     is_suspicious: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     source: Mapped[str] = mapped_column(server_default="online")
-    # Вчитель, який передав QR-події.
+    # Вчитель, який передав події учнів (QR — B10; `local` — локальний сервер укриття).
     relayed_by: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("app_user.id", ondelete="SET NULL")
     )

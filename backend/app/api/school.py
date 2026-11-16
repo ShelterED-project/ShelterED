@@ -27,6 +27,7 @@ from app.schemas.school import (
     AssignmentRequest,
     ClassCreate,
     ClassOut,
+    ClassStudentOut,
     ClassUpdate,
     CurrentLessonOut,
     ExtraLessonCreate,
@@ -143,6 +144,13 @@ async def create_class(
 @router.get("/classes/{class_id}", response_model=ClassOut, responses=ACCESS)
 async def get_class(klass: StaffClass, session: Session) -> ClassOut:
     return await service.class_out(session, klass)
+
+
+@router.get("/classes/{class_id}/students", response_model=list[ClassStudentOut], responses=ACCESS)
+async def list_class_students(klass: StaffClass, session: Session) -> list[ClassStudentOut]:
+    """Учні класу (id, ім'я, прізвище): вчитель класу й адмін школи. Потрібно, наприклад,
+    локальному серверу укриття, щоб учень вибрав себе зі списку ще до старту переклички."""
+    return await service.class_students(session, klass)
 
 
 @router.patch(
