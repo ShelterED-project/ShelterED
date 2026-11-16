@@ -9,6 +9,7 @@ class IntentEnum(str, Enum):
   practice = "practice"
   check = "check"
   safety = "safety"
+  
 
 
 class MasteryItem(BaseModel):
@@ -30,6 +31,7 @@ class CheckResult(BaseModel):
 
 
 class ChatRequest(BaseModel):
+  user_id: Optional[str] = None
   action: Optional[Literal["explain", "practice", "check"]] = None
   grade: int = Field(..., ge=1, le=11)
   subject: Optional[str] = None
@@ -50,3 +52,4 @@ class ChatResponse(BaseModel):
   task: Optional[Dict[str, Any]] = None
   hints_used: Optional[int] = None
   check_result: Optional[CheckResult] = None
+

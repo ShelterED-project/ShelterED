@@ -11,9 +11,11 @@ class AgentState(BaseModel):
 
   user_input: str = ""
   history: List[dict] = Field(default_factory=list)
+  profile: Optional[UserProfile] = None
 
-  current_action: str = "explain"  # "explain", "practice", "test"
-  depth_level: int = 1  # Для Крота-Дослідника (1-3)
+  current_action: str = "explain"
+  current_task: Optional[dict] = None
+  hints_used: int = 0
 
   output_text: str = ""
   suggestions: List[str] = Field(default_factory=list)

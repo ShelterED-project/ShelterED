@@ -1,30 +1,35 @@
+import asyncio
 import os
+
 import joblib
+from sentence_transformers import SentenceTransformer
 
-MODEL_PATH = os.path.join(os.path.dirname(__file__), "shelter_router.pkl")
+_BASE = os.path.dirname(os.path.abspath(__file__))
+CLF_PATH = os.path.join(_BASE, "..", "router_clf.joblib")
+EMBEDDER_NAME = "paraphrase-multilingual-MiniLM-L12-v2"
 
-_model_data = None
+_embedder = None
+_clf = None
 
 
-def get_model():
-  global _model_data
-  if _model_data is None:
-    if not os.path.exists(MODEL_PATH):
+def _load():
+  global _embedder, _clf
+  if _embedder is None:
+    if not os.path.exists(CLF_PATH):
       raise FileNotFoundError(
-          f"Файл моделі не знайдено: {MODEL_PATH}. Спочатку запустіть навчання!"
+          f"Файл класифікатора не знайдено: {CLF_PATH}. Спочатку натренуйте модель."
       )
-    _model_data = joblib.load(MODEL_PATH)
-  return _model_data
+    _embedder = SentenceTransformer(EMBEDDER_NAME)
+    _clf = joblib.load(CLF_PATH)
+  return _embedder, _clf
 
 
-async def route_intent(message: str, history: list = None) -> str:
-  """Визначає інтент за повідомленням учня."""
-  model_data = get_model()
-  embedder = model_data["embedder"]
-  classifier = model_data["classifier"]
-
-  # Можеш за потреби враховувати history, або класифікувати лише поточне повідомлення message
+def _predict(message: str) -> str:
+  embedder, clf = _load()
   embedding = embedder.encode([message])
-  intent = classifier.predict(embedding)[0]
+  return str(clf.predict(embedding)[0])
 
-  return intent
+
+async def route_intent(message: str, history: list | None = None) -> str:
+  # encode блокує event loop, тому виконуємо в окремому потоці
+  return await asyncio.to_thread(_predict, message)
