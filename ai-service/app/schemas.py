@@ -52,4 +52,5 @@ class ChatResponse(BaseModel):
   task: Optional[Dict[str, Any]] = None
   hints_used: Optional[int] = None
   check_result: Optional[CheckResult] = None
+  suggestions: List[str] = Field(default_factory=list)
 

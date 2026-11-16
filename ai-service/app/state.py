@@ -1,9 +1,13 @@
 from typing import List, Optional
+
 from pydantic import BaseModel, Field
+
+from app.schemas import UserProfile
 
 
 class AgentState(BaseModel):
-  user_id: str
+  user_id: Optional[str] = None
+  action: Optional[str] = None  
   grade: int
   subject: Optional[str] = None
   topic: Optional[str] = None
