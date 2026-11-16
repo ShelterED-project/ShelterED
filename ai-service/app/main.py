@@ -43,4 +43,4 @@ async def chat(req: ChatRequest, x_internal_key: str | None = Header(default=Non
         return ChatResponse(reply=safe_text, intent=IntentEnum.safety, topic_id=req.topic_id)
 
     handlers = {"explain": explain.run, "practice": practice.run, "check": check.run}
-    return await handlers[req.action](req)  # <--- Додали await
+    return await handlers[req.action](req) 

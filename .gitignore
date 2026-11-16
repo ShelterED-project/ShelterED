@@ -21,6 +21,8 @@ ENV/
 *.swp
 *.swo
 
+ai-service/app/shelter_router.pkl
+
 # Системні файли ОС
 .DS_Store
 Thumbs.db
