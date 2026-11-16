@@ -7,6 +7,7 @@ import database, models , pytz
 import qrcode
 from io import BytesIO
 from fastapi.responses import StreamingResponse
+import uuid
 
 models.Base.metadata.create_all(bind=database.engine)
 
@@ -44,14 +45,18 @@ def read_root(request: Request, db: Session = Depends(get_db)):
     )
 
 # 2. Ендпоінт для прийому імені
+# Генеруємо ID сесії один раз при запуску сервера
+CURRENT_SESSION_ID = str(uuid.uuid4())
+
 @app.post("/roll-call")
 def mark_roll_call(student_name: str = Form(...), db: Session = Depends(get_db)):
-    new_entry = models.RollCall(student_name=student_name)
+    new_entry = models.RollCall(
+        student_name=student_name,
+        status="in_shelter",
+        session_id=CURRENT_SESSION_ID
+    )
     db.add(new_entry)
     db.commit()
-    db.refresh(new_entry)
-
-    # Перенаправляємо користувача назад на головну сторінку
     return RedirectResponse(url="/", status_code=303)
 
 @app.get("/health")
