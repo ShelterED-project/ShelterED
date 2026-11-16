@@ -13,8 +13,7 @@
             display: flex;
             flex-direction: column;
             align-items: center;
-            justify-content: center;
-            height: 100vh;
+            min-height: 100vh;
             margin: 0;
             padding: 20px;
             box-sizing: border-box;
@@ -23,7 +22,7 @@
         .logo {
             font-size: 24px;
             font-weight: bold;
-            margin-bottom: 40px;
+            margin: 20px 0 30px;
             color: #fbbf24;
         }
 
@@ -35,6 +34,7 @@
             max-width: 400px;
             text-align: center;
             border: 1px solid #333;
+            box-sizing: border-box;
         }
 
         h1 {
@@ -48,22 +48,12 @@
             margin-bottom: 24px;
         }
 
-        input[type="text"] {
-            width: 100%;
-            padding: 16px;
-            margin-bottom: 16px;
-            border-radius: 12px;
-            border: 1px solid #444;
-            background-color: #2a2a2a;
-            color: white;
-            font-size: 16px;
-            box-sizing: border-box;
-        }
-
         /* жовта кнопка */
-        button {
+        button, .btn {
+            display: block;
             width: 100%;
             padding: 16px;
+            margin-bottom: 12px;
             background-color: #fbbf24;
             color: #121212;
             border: none;
@@ -71,11 +61,54 @@
             font-size: 18px;
             font-weight: bold;
             cursor: pointer;
-            transition: background-color 0.3s;
+            text-decoration: none;
+            box-sizing: border-box;
         }
 
-        button:hover {
+        button:hover, .btn:hover {
             background-color: #f59e0b;
+        }
+
+        /* кнопки зі списком учнів */
+        .btn-name {
+            background-color: #2a2a2a;
+            color: #ffffff;
+            border: 1px solid #444;
+        }
+
+        .btn-name:hover {
+            background-color: #333;
+        }
+
+        .btn-safe {
+            background-color: #065f46;
+            color: #ffffff;
+        }
+
+        .btn-safe:hover {
+            background-color: #047857;
+        }
+
+        .link {
+            background: none;
+            color: #a0a0a0;
+            font-size: 14px;
+            font-weight: normal;
+            text-decoration: underline;
+            padding: 8px;
+        }
+
+        .link:hover {
+            background: none;
+        }
+
+        .current {
+            background-color: #065f46;
+            color: #34d399;
+            padding: 12px;
+            border-radius: 12px;
+            font-weight: bold;
+            margin-bottom: 20px;
         }
     </style>
 </head>
@@ -85,12 +118,39 @@
 
     <div class="card">
         <h1>Перекличка</h1>
-        <p>Будь ласка, підтвердіть, що ви в безпеці</p>
 
-        <form action="/roll-call" method="post">
-            <input type="text" name="student_name" placeholder="Твоє ім'я" required>
-            <button type="submit">Я в укритті</button>
-        </form>
+        {% if not roster %}
+            <p>Список класу ще не завантажено. Попроси вчителя один раз підключити сервер до ShelterED з інтернетом.</p>
+
+        {% elif not session %}
+            <p>Перекличка ще не почалась. Зачекай, коли вчитель її розпочне.</p>
+            <a class="btn" href="/">Оновити</a>
+
+        {% elif not me %}
+            <p>Натисни на своє ім'я</p>
+            {% for s in roster %}
+                <a class="btn btn-name" href="/?student={{ s.student_id }}">{{ s.full_name }}</a>
+            {% endfor %}
+
+        {% else %}
+            <p>{{ me.full_name }}, де ти зараз?</p>
+
+            {% if mark %}
+                <div class="current">
+                    Відмічено: {{ status_labels[mark.status] }} о {{ mark.occurred_at | kyiv('%H:%M') }}
+                </div>
+            {% endif %}
+
+            <form action="/mark" method="post">
+                <input type="hidden" name="student_id" value="{{ me.student_id }}">
+                <button type="submit" name="status" value="in_shelter">Я в укритті</button>
+                <button type="submit" name="status" value="safe" class="btn-safe">Я в безпеці вдома</button>
+            </form>
+
+            <form action="/forget-me" method="post">
+                <button type="submit" class="link">Це не я</button>
+            </form>
+        {% endif %}
     </div>
 
 </body>

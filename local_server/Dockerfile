@@ -9,7 +9,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-EXPOSE 8000
+# Хмарний бекенд локально займає 8000, тому локальний сервер — 8080
+ENV LOCAL_PORT=8080 \
+    LOCAL_DB_PATH=/app/data/shelter.db
+RUN mkdir -p /app/data
+EXPOSE 8080
 
-# Запускаємо сервер
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Запускаємо сервер (фонова синхронізація стартує разом із ним)
+CMD ["python", "run.py"]

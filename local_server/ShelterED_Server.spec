@@ -1,11 +1,13 @@
 # -*- mode: python ; coding: utf-8 -*-
+from PyInstaller.utils.hooks import collect_data_files
 
 
 a = Analysis(
     ['run.py'],
     pathex=[],
     binaries=[],
-    datas=[('templates', 'templates')],
+    # tzdata потрібна zoneinfo на Windows (Europe/Kyiv)
+    datas=[('templates', 'templates')] + collect_data_files('tzdata'),
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
