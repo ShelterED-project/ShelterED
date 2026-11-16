@@ -19,7 +19,8 @@ AUTH = {
     403: {"model": ErrorResponse, "description": "Недостатньо прав"},
 }
 
-# Вчитель — для QR-подій учнів своїх класів (B10).
+# Вчитель — ретрансляція відміток переклички учнів своїх класів (локальний сервер укриття);
+# інші ролі — 403.
 EventSender = Annotated[User, Depends(require_roles("student", "teacher"))]
 Student = Annotated[User, Depends(require_roles("student"))]
 
@@ -33,17 +34,13 @@ Student = Annotated[User, Depends(require_roles("student"))]
         422: {"model": ErrorResponse, "description": "Невалідний конверт або понад 100 подій"},
         429: {
             "model": ErrorResponse,
-            "description": "RATE_LIMITED: ліміт QR-ретрансляції вчителя; повторити після "
+            "description": "RATE_LIMITED: ліміт ретрансляції вчителя; повторити після "
             "`Retry-After` с",
             "headers": {"Retry-After": {"schema": {"type": "integer"}}},
         },
         500: {
             "model": ErrorResponse,
             "description": "INTERNAL_ERROR: частину подій не оброблено — повторити пакет",
-        },
-        501: {
-            "model": ErrorResponse,
-            "description": "NOT_IMPLEMENTED: QR-ретрансляція вчителем (B10) ще не реалізована",
         },
     },
 )
@@ -59,8 +56,10 @@ async def post_events(
     дублюється. Погана подія отримує `rejected` і не блокує решту пакета. Події обробляються
     в порядку `occurred_at`, кожна у своїй транзакції; результати — у порядку запиту.
     Статус 200, якщо конверт пакета валідний; 500 — частину подій не записано (повторити
-    пакет: записані дадуть `duplicate`). Вчитель (QR, B10) поки отримує 501; його запити
-    обмежені `RATE_LIMIT_QR_RELAY` за `RATE_LIMIT_QR_RELAY_WINDOW_S` (429 з `Retry-After`)."""
+    пакет: записані дадуть `duplicate`). Вчитель (локальний сервер укриття) пересилає
+    відмітки переклички учнів своїх класів: `student_id` у кожній події, лише
+    `rollcall_status` (інші типи — `relay_not_supported`, B10). Його запити обмежені
+    `RATE_LIMIT_QR_RELAY` за `RATE_LIMIT_QR_RELAY_WINDOW_S` (429 з `Retry-After`)."""
     if user.role == "teacher":
         await enforce(
             limiter,

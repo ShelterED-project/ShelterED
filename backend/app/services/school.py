@@ -5,7 +5,7 @@ import time
 import uuid
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from sqlalchemy import delete, select, union_all, update
+from sqlalchemy import and_, delete, select, union_all, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
@@ -24,6 +24,7 @@ from app.models.school import (
 from app.schemas.school import (
     ClassCreate,
     ClassOut,
+    ClassStudentOut,
     ClassUpdate,
     ExtraLessonCreate,
     OverrideCreate,
@@ -744,3 +745,23 @@ def scheduled_lessons():
             ScheduleOverride.lesson_id.label("lesson_id"),
         ).where(ScheduleOverride.lesson_id.is_not(None), ScheduleOverride.deleted_at.is_(None)),
     ).subquery("scheduled_lesson")
+
+
+async def class_students(session: AsyncSession, klass: SchoolClass) -> list[ClassStudentOut]:
+    """Учні класу за прізвищем та ім'ям."""
+    rows = await session.execute(
+        select(User.id, User.display_name, User.last_name)
+        .join(
+            ClassMembership,
+            and_(
+                ClassMembership.user_id == User.id,
+                ClassMembership.class_id == klass.id,
+                ClassMembership.member_role == "student",
+            ),
+        )
+        .order_by(User.last_name, User.display_name, User.id)
+    )
+    return [
+        ClassStudentOut(student_id=sid, display_name=name, last_name=last)
+        for sid, name, last in rows
+    ]

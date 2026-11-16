@@ -422,3 +422,11 @@ def _check_times(starts_at: dt.time, ends_at: dt.time) -> None:
         raise ValueError("schedule times are local school time without timezone")
     if ends_at <= starts_at:
         raise ValueError("ends_at must be after starts_at")
+
+
+class ClassStudentOut(BaseModel):
+    """Учень класу: список для вчителя (локальний сервер укриття вибирає учня зі списку)."""
+
+    student_id: uuid.UUID
+    display_name: str
+    last_name: str | None

@@ -28,7 +28,13 @@ QUESTION_ID = "0192f0a0-0000-7000-8000-000000000341"
 
 SyncEventType = Literal["module_progress", "test_attempt", "rollcall_status", "survey_answer"]
 RejectReason = Literal[
-    "invalid_payload", "unknown_type", "unknown_entity", "forbidden", "session_closed"
+    "invalid_payload",
+    "unknown_type",
+    "unknown_entity",
+    "forbidden",
+    "session_closed",
+    "student_id_required",
+    "relay_not_supported",
 ]
 RollCallStatusValue = Literal["safe", "in_shelter"]
 CreditStatus = Literal["credited", "not_credited_late", "not_credited_repeat"]
@@ -138,10 +144,16 @@ class SyncEventIn(BaseModel):
     device_id: uuid.UUID = Field(description="Id пристрою, створюється клієнтом один раз")
     occurred_at: AwareDatetime = Field(description="Час події за годинником пристрою")
     payload: Annotated[dict[str, Any], WithJsonSchema(_PAYLOAD_SCHEMA)]
+    student_id: uuid.UUID | None = Field(
+        default=None,
+        description="Лише для ретрансляції вчителем (локальний сервер укриття): учень, чию "
+        "подію пересилають. Учень поле не надсилає (або лише свій id)",
+    )
 
 
 class SyncEventsRequest(BaseModel):
-    """Пакет від 1 до 100 подій. Користувач — з JWT; учень надсилає лише свої події."""
+    """Пакет від 1 до 100 подій. Користувач — з JWT; учень надсилає лише свої події, вчитель —
+    відмітки переклички учнів своїх класів (`student_id` у кожній події)."""
 
     sent_at: AwareDatetime = Field(
         description="Час пристрою в момент відправки; сервер рахує зсув годинника"
