@@ -16,10 +16,12 @@ export default function SiteHeader({ links }: { links: NavLink[] }) {
           ))}
         </nav>
         <div className="flex shrink-0 items-center gap-2 md:gap-3">
-          <Button to="/login" variant="outline" className="h-11 px-4 text-[15px] md:px-5">
-            Увійти
+          {/* Два входи завжди видно: учні — за кодом класу, дорослі — з поштою. */}
+          <Button to="/login" variant="outline" className="h-11 px-3 text-[15px] md:px-5">
+            <span className="md:hidden">Дорослі</span>
+            <span className="hidden md:inline">Вхід для дорослих</span>
           </Button>
-          <Button to="/register" variant="primary" className="hidden h-11 px-5 text-[15px] md:inline-flex">
+          <Button to="/register" variant="primary" className="h-11 px-3 text-[15px] md:px-5">
             Я учень
           </Button>
         </div>

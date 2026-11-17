@@ -2,6 +2,7 @@ import checkIcon from '@/assets/landing/icon-check.svg'
 import heroIllustration from '@/assets/landing/hero-illustration.svg'
 import mole from '@/assets/landing/mole.svg'
 import Button from '@/shared/ui/Button'
+import { signIn } from '../content'
 
 type MapPointProps = { label: string; left: string; top: string; state: 'done' | 'unknown' | 'here' }
 
@@ -44,14 +45,20 @@ export default function Hero() {
           ShelterED перетворює час в укритті на тихе й безпечне навчання. Урок продовжується навіть тоді, коли зникли
           світло і зв’язок, — а Кріт із ліхтариком веде маршрутом тем.
         </p>
-        <div className="mt-8 flex flex-wrap gap-3">
-          <Button to="/login" variant="primary" className="h-14 px-7">
-            Увійти в систему
+        <div className="mt-8 flex w-full flex-col gap-3 sm:w-auto sm:flex-row sm:flex-wrap">
+          <Button to={signIn.student.to} variant="primary" className="min-h-14 px-7 py-3 text-center whitespace-normal">
+            {signIn.student.label}
           </Button>
-          <Button href="#how" variant="outline" className="h-14 px-7">
-            Як це працює
+          <Button to={signIn.adult.to} variant="outline" className="min-h-14 px-7 py-3 text-center whitespace-normal">
+            {signIn.adult.label}
           </Button>
         </div>
+        <p className="mt-4 text-sm text-dim">
+          {signIn.hint}{' '}
+          <a href="#roles" className="rounded font-semibold text-muted underline-offset-4 hover:text-parchment hover:underline">
+            {signIn.howLink} →
+          </a>
+        </p>
       </div>
 
       <div className="relative aspect-[520/540] w-full max-w-[520px] self-center overflow-hidden rounded-[28px] border border-line bg-surface lg:shrink-0 lg:basis-[520px]">
