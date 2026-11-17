@@ -1,3 +1,4 @@
+import ClassStudents from '@/features/school/ClassStudents'
 import { useClassResults } from '@/features/teacher/useClassResults'
 import type { ClassGaps, ClassProgress, ClassTests, TestResultStatus } from '@/features/teacher/teacherApi'
 import { classMap, testStatus } from './content'
@@ -172,7 +173,7 @@ function GapsSection({ gaps }: { gaps: ClassGaps | null }) {
 }
 
 export default function ClassMapPage() {
-  const { progress, tests, gaps, isLoading, isOffline } = useClassResults()
+  const { teacherClass, progress, tests, gaps, isLoading, isOffline } = useClassResults()
 
   return (
     <div className="flex min-h-screen">
@@ -196,8 +197,17 @@ export default function ClassMapPage() {
               <TestsSection tests={tests} />
               <ProgressSection progress={progress} />
             </div>
-            <div className="xl:w-[420px] xl:shrink-0">
+            <div className="flex flex-col gap-5 xl:w-[420px] xl:shrink-0 xl:gap-6">
               <GapsSection gaps={gaps} />
+              {teacherClass && (
+                <section className={card}>
+                  <div>
+                    <h2 className={heading}>{classMap.students.title}</h2>
+                    <p className="mt-1 text-sm leading-5 text-dim">{classMap.students.text}</p>
+                  </div>
+                  <ClassStudents classId={teacherClass.id} />
+                </section>
+              )}
             </div>
           </div>
         </main>

@@ -108,6 +108,10 @@ export const gaps = {
 
 export const classMap = {
   title: 'Мапа класу',
+  students: {
+    title: 'Учні класу',
+    text: 'Код для батьків привʼязує їх до дитини (діє 7 днів). Скидання PIN — якщо учень його забув.',
+  },
   updated: (time: string) => `Оновлено о ${time}`,
   notComputed: 'Сервер ще не порахував результати класу.',
   loading: 'Завантаження…',
