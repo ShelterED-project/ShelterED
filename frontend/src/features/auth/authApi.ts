@@ -30,9 +30,11 @@ export const authApi = baseApi.injectEndpoints({
     }),
     createUser: build.mutation<User, AdminCreateUserRequest>({
       query: (body) => ({ url: '/admin/users', method: 'POST', body }),
+      invalidatesTags: ['Users'],
     }),
     parentLink: build.mutation<ParentLinkResponse, { code: string }>({
       query: (body) => ({ url: '/parent/link', method: 'POST', body }),
+      invalidatesTags: ['Children'],
     }),
     studentJoin: build.mutation<TokenResponse, StudentJoinRequest>({
       query: (body) => ({ url: '/auth/student/join', method: 'POST', body }),

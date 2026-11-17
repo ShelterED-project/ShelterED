@@ -12,3 +12,5 @@ export const packsApi = baseApi.injectEndpoints({
     }),
   }),
 })
+
+export const { usePackManifestQuery } = packsApi

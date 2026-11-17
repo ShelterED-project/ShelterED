@@ -6,7 +6,7 @@ import iconServers from '@/assets/admin/nav-servers.svg'
 import iconUsers from '@/assets/admin/nav-users.svg'
 import { useCurrentUser } from '@/features/auth/useCurrentUser'
 import AppSidebar from '@/shared/ui/AppSidebar'
-import { adminRole, sidebarNav } from '../content'
+import { adminRole, navRoutes, sidebarNav } from '../content'
 import type { NavId } from '../content'
 
 const icons: Record<NavId, string> = {
@@ -18,14 +18,14 @@ const icons: Record<NavId, string> = {
   settings: iconSettings,
 }
 
-const items = sidebarNav.map((item) => ({ ...item, icon: icons[item.id] }))
+const items = sidebarNav.map((item) => ({ ...item, icon: icons[item.id], to: navRoutes[item.id] }))
 
-export default function AdminSidebar() {
+export default function AdminSidebar({ activeId = 'overview' }: { activeId?: NavId }) {
   const user = useCurrentUser()
   return (
     <AppSidebar
       items={items}
-      activeId="overview"
+      activeId={activeId}
       user={{ initials: user?.initials ?? '', name: user?.fullName ?? '', role: adminRole }}
     />
   )

@@ -223,3 +223,27 @@ class ParentLinkResponse(BaseModel):
             "examples": [{"child_id": CHILD_ID, "display_name": "Іван", "last_name": "Петренко"}]
         }
     )
+
+
+class ParentChildOut(BaseModel):
+    """Прив'язана дитина: кабінет батьків вибирає, чиї дані показати."""
+
+    child_id: uuid.UUID
+    display_name: str
+    last_name: str | None
+    class_id: uuid.UUID | None
+    class_name: str | None
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {
+                    "child_id": CHILD_ID,
+                    "display_name": "Іван",
+                    "last_name": "Петренко",
+                    "class_id": "0192f0a0-0000-7000-8000-0000000000c1",
+                    "class_name": "5-А",
+                }
+            ]
+        }
+    )

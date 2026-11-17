@@ -1,6 +1,7 @@
 import { store } from '@/app/store'
 import { getPendingEvents, markAttempted, OUTBOX_ADDED, removeEvents } from '@/shared/db/outbox'
 import { markContact } from './contact'
+import { pullChanges } from './syncChanges'
 import type { OutboxEvent, WireEvent } from '@/shared/db/types'
 import { syncApi } from './syncApi'
 
@@ -24,16 +25,17 @@ function scheduleRetry() {
   retryTimer = setTimeout(() => void requestSync(), Math.min(RETRY_BASE_MS * 2 ** (failures - 1), RETRY_MAX_MS))
 }
 
-async function drain() {
+/** Відправляє чергу. true — черга порожня (сервер усе підтвердив), false — є що повторити. */
+async function drain(): Promise<boolean> {
   // Подію відправляємо лише з токеном її автора: сервер бере користувача з JWT, а не з тіла.
   const userId = store.getState().auth.session?.user.id
-  if (!userId) return
+  if (!userId) return false
 
   for (;;) {
     const batch = await getPendingEvents(userId, BATCH_SIZE)
     if (batch.length === 0) {
       failures = 0
-      return
+      return true
     }
 
     const response = await store.dispatch(
@@ -49,7 +51,7 @@ async function drain() {
       await markContact('events', false)
       await markAttempted(ids)
       scheduleRetry()
-      return
+      return false
     }
 
     await markContact('events', true)
@@ -61,15 +63,19 @@ async function drain() {
     if (done.length === 0) {
       await markAttempted(ids)
       scheduleRetry()
-      return
+      return false
     }
     await removeEvents(done)
   }
 }
 
-/** Відправляє чергу пакетами. Паралельні виклики ділять один запуск. */
+/**
+ * Відправляє чергу пакетами, а коли вона порожня, підтягує зі стрічки змін результати сервера
+ * (оцінки тестів): спершу свої події, потім їхні наслідки. Паралельні виклики ділять один запуск.
+ */
 export function requestSync(): Promise<void> {
   running ??= drain()
+    .then((empty) => (empty ? pullChanges() : undefined))
     .catch(() => scheduleRetry())
     .finally(() => {
       running = null

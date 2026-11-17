@@ -1,20 +1,28 @@
 import { createBrowserRouter } from 'react-router'
 import AlertWatcher from '@/features/alerts/AlertWatcher'
 import RequireRole from '@/features/auth/RequireRole'
+import AdminAlarmsPage from '@/pages/admin/AdminAlarmsPage'
+import AdminClassesPage from '@/pages/admin/AdminClassesPage'
 import AdminPage from '@/pages/admin/AdminPage'
+import AdminUsersPage from '@/pages/admin/AdminUsersPage'
 import LandingPage from '@/pages/landing/LandingPage'
 import LoginPage from '@/pages/login/LoginPage'
 import NotFoundPage from '@/pages/not-found/NotFoundPage'
 import ParentPage from '@/pages/parent/ParentPage'
+import ParentProgressPage from '@/pages/parent/ParentProgressPage'
 import RegisterPage from '@/pages/register/RegisterPage'
 import ShelterModePage from '@/pages/shelter/ShelterModePage'
+import CalmPage from '@/pages/student/CalmPage'
+import LessonPage from '@/pages/student/LessonPage'
 import LessonsPage from '@/pages/student/LessonsPage'
+import MePage from '@/pages/student/MePage'
 import StudentPage from '@/pages/student/StudentPage'
 import ClassMapPage from '@/pages/teacher/ClassMapPage'
 import LessonEditorPage from '@/pages/teacher/lessons/LessonEditorPage'
 import LessonsListPage from '@/pages/teacher/lessons/LessonsListPage'
 import RollCallPage from '@/pages/teacher/RollCallPage'
 import SchedulePage from '@/pages/teacher/SchedulePage'
+import SyncPage from '@/pages/teacher/SyncPage'
 import TeacherPage from '@/pages/teacher/TeacherPage'
 import RootLayout from './RootLayout'
 
@@ -34,6 +42,9 @@ export const router = createBrowserRouter([
             children: [
               { path: '/student', element: <StudentPage /> },
               { path: '/student/lessons', element: <LessonsPage /> },
+              { path: '/student/lesson', element: <LessonPage /> },
+              { path: '/student/me', element: <MePage /> },
+              { path: '/student/calm', element: <CalmPage /> },
               { path: '/shelter', element: <ShelterModePage /> },
             ],
           },
@@ -48,15 +59,24 @@ export const router = createBrowserRouter([
           { path: '/teacher/rollcall', element: <RollCallPage /> },
           { path: '/teacher/schedule', element: <SchedulePage /> },
           { path: '/teacher/map', element: <ClassMapPage /> },
+          { path: '/teacher/sync', element: <SyncPage /> },
         ],
       },
       {
         element: <RequireRole roles={['parent']} />,
-        children: [{ path: '/parent', element: <ParentPage /> }],
+        children: [
+          { path: '/parent', element: <ParentPage /> },
+          { path: '/parent/progress', element: <ParentProgressPage /> },
+        ],
       },
       {
         element: <RequireRole roles={['admin']} />,
-        children: [{ path: '/admin', element: <AdminPage /> }],
+        children: [
+          { path: '/admin', element: <AdminPage /> },
+          { path: '/admin/classes', element: <AdminClassesPage /> },
+          { path: '/admin/users', element: <AdminUsersPage /> },
+          { path: '/admin/alarms', element: <AdminAlarmsPage /> },
+        ],
       },
       { path: '*', element: <NotFoundPage /> },
     ],

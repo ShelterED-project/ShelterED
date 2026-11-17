@@ -4,6 +4,7 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { pickCurrentLesson, useTodayPack } from '@/features/packs/usePacks'
 import type { TodayLesson } from '@/features/packs/usePacks'
 import { db } from '@/shared/db/db'
+import type { LessonProgressRecord } from '@/shared/db/types'
 import { buildSteps } from './lessonSteps'
 import type { LessonStep } from './lessonSteps'
 
@@ -19,6 +20,8 @@ export interface ShelterLesson {
   currentStep: LessonStep | null
   /** Частка пройдених кроків, 0..1 */
   progress: number
+  /** Локальний прогрес обраного уроку: зокрема результати тестів від сервера */
+  records: LessonProgressRecord[]
   select: (lessonId: string) => void
 }
 
@@ -50,6 +53,7 @@ export function useShelterLesson(): ShelterLesson {
     steps,
     currentStep,
     progress: steps.length === 0 ? 0 : doneCount / steps.length,
+    records: records ?? [],
     select: (id) => setParams({ lesson: id }, { replace: true }),
   }
 }

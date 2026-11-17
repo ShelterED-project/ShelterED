@@ -54,7 +54,7 @@ export default function LessonBanner() {
         <button
           type="button"
           onClick={() =>
-            current ? navigate(`/shelter?lesson=${current.lesson.id}`) : allDone && navigate('/student/lessons')
+            current ? navigate(`/student/lesson?lesson=${current.lesson.id}`) : allDone && navigate('/student/lessons')
           }
           disabled={!current && !allDone}
           className="h-12 flex-1 rounded-[10px] bg-accent px-6 disabled:opacity-50 text-[15px] font-semibold whitespace-nowrap text-oil focus-visible:ring-2 focus-visible:ring-parchment/60 focus-visible:outline-none md:flex-none"

@@ -44,6 +44,18 @@ export const task = {
   allDone: 'Усі кроки уроку пройдено. Молодець!',
 }
 
+export const results = {
+  title: 'Результати тестів',
+  local: (points: number, max: number) => `${points} з ${max}`,
+  server: (score: number) => `${Math.round(score)}%`,
+  credited: 'зараховано',
+  late: 'не зараховано: після дедлайну',
+  repeat: 'не зараховано: зараховано першу спробу',
+  pending: 'результат зʼявиться після синхронізації',
+  checking: 'перевіряється',
+  notTaken: 'ще не пройдено',
+}
+
 export const next = {
   title: 'Інші уроки на сьогодні',
   hint: 'усе доступно без мережі',

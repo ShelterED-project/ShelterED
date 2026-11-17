@@ -1,5 +1,6 @@
 import lanternIcon from '@/assets/landing/icon-lantern.svg'
 import Button from '@/shared/ui/Button'
+import { signIn } from '../content'
 
 export default function Cta() {
   return (
@@ -16,9 +17,14 @@ export default function Cta() {
             Підключення займає кілька хвилин: вчитель створює клас, учні входять за кодом.
           </p>
         </div>
-        <Button to="/login" variant="primary" className="h-14 px-7">
-          Увійти в систему
-        </Button>
+        <div className="flex w-full flex-col gap-3 sm:w-auto">
+          <Button to={signIn.student.to} variant="primary" className="min-h-14 px-7 py-3 text-center whitespace-normal">
+            {signIn.student.label}
+          </Button>
+          <Button to={signIn.adult.to} variant="outline" className="min-h-14 px-7 py-3 text-center whitespace-normal">
+            {signIn.adult.label}
+          </Button>
+        </div>
       </div>
     </section>
   )

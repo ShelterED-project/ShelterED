@@ -2,9 +2,9 @@ import iconCheck from '@/assets/parent/check.svg'
 import iconCross from '@/assets/parent/cross.svg'
 import { visibility } from '../content'
 
-export default function Visibility() {
+export default function Visibility({ className = '' }: { className?: string }) {
   return (
-    <section className="flex flex-col gap-4 rounded-[22px] border border-line bg-surface p-5 md:p-6">
+    <section className={`flex flex-col gap-4 self-start rounded-[22px] border border-line bg-surface p-5 md:p-6 ${className}`}>
       <h2 className="font-heading text-xl leading-7 tracking-[-0.2px] text-parchment md:text-[22px] md:tracking-[-0.22px]">
         {visibility.title}
       </h2>

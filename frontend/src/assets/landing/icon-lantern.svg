@@ -1,8 +1,9 @@
-<svg preserveAspectRatio="none" overflow="visible" style="display: block;" width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
-<g id="Component 2">
-<path id="Vector" d="M12 4H20" stroke-width="2.13333" stroke-linecap="round" stroke-linejoin="round" stroke="#F2B25C"/>
-<path id="Vector_2" d="M16 4V6.66667" stroke-width="2.13333" stroke-linecap="round" stroke-linejoin="round" stroke="#F2B25C"/>
-<path id="Vector_3" d="M10.6667 6.66667H21.3333L22.6667 12V22.6667C22.6667 23.7275 22.2452 24.7449 21.4951 25.4951C20.7449 26.2452 19.7275 26.6667 18.6667 26.6667H13.3333C12.2725 26.6667 11.2551 26.2452 10.5049 25.4951C9.75476 24.7449 9.33333 23.7275 9.33333 22.6667V12L10.6667 6.66667Z" stroke-width="2.13333" stroke-linecap="round" stroke-linejoin="round" stroke="#F2B25C"/>
-<path id="Vector_4" d="M16 14.6667C17.6 16.4 17.6 18.2667 16 20C14.4 18.2667 14.4 16.4 16 14.6667Z" stroke-width="2.13333" stroke-linecap="round" stroke-linejoin="round" stroke="#F2B25C"/>
-</g>
+<svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Ліхтар ShelterED (той самий малюнок, що й logo.svg) -->
+  <path d="M10.2 4.4C10.2 3.4 11 2.6 12 2.6C13 2.6 13.8 3.4 13.8 4.4" stroke="#F2B25C" stroke-width="1.6" stroke-linecap="round"/>
+  <path d="M8.4 4.4H15.6L17 6.6H7L8.4 4.4Z" fill="#F2B25C" stroke="#F2B25C" stroke-width="1.2" stroke-linejoin="round"/>
+  <rect x="7.6" y="6.6" width="8.8" height="11" rx="1.6" fill="#F2B25C" fill-opacity="0.18" stroke="#F2B25C" stroke-width="1.6"/>
+  <path d="M12 8.9C13.5 10.4 14.2 11.7 14.2 12.8C14.2 14 13.2 15 12 15C10.8 15 9.8 14 9.8 12.8C9.8 11.7 10.5 10.4 12 8.9Z" fill="#F2B25C"/>
+  <path d="M12 11.7C12.6 12.3 12.9 12.8 12.9 13.3C12.9 13.8 12.5 14.2 12 14.2C11.5 14.2 11.1 13.8 11.1 13.3C11.1 12.8 11.4 12.3 12 11.7Z" fill="#FFF1D6"/>
+  <rect x="6.6" y="17.6" width="10.8" height="2.4" rx="1.2" fill="#F2B25C"/>
 </svg>

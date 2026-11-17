@@ -8,6 +8,8 @@ export interface ClassOut {
   school_id: string
   academic_year: string
   join_code: string
+  /** Коли код класу перестає приймати нових учнів; null — без терміну */
+  join_code_expires_at: string | null
   teacher_ids: string[]
 }
 
@@ -170,6 +172,7 @@ export const teacherApi = baseApi.injectEndpoints({
   endpoints: (build) => ({
     classes: build.query<ClassOut[], void>({
       query: () => '/classes',
+      providesTags: ['Classes'],
     }),
     classRollCall: build.query<ClassRollCall, string>({
       query: (classId) => `/classes/${classId}/rollcall/current`,

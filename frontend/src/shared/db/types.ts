@@ -49,6 +49,20 @@ export interface LessonProgressRecord {
   completed_at: string
   /** Для тесту з ключем: набрані бали й максимум; для оцінюваного тесту без ключа null */
   score: { points: number; max: number } | null
+  /**
+   * Результат від сервера (GET /sync/changes): оцінка 0..100 і зарахування. Поки сервер
+   * не відповів — відсутнє. Поле без індексу, тож нова версія Dexie не потрібна.
+   */
+  server?: ServerAttemptResult
+}
+
+export type CreditStatus = 'credited' | 'not_credited_late' | 'not_credited_repeat'
+
+export interface ServerAttemptResult {
+  client_event_id: string
+  score: number | null
+  credit_status: CreditStatus
+  is_suspicious: boolean
 }
 
 /** Дрібні значення пристрою: device_id, остання відома сесія переклички. */

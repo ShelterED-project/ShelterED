@@ -4,6 +4,7 @@ import { useActiveAlert } from './useActiveAlert'
 
 const SEEN_KEY = 'shelter:seen-alerts'
 export const SHELTER_PATH = '/shelter'
+const LESSON_PATH = '/student/lesson'
 
 function readSeen(): string[] {
   try {
@@ -30,13 +31,15 @@ function markSeen(id: string) {
 export default function AlertWatcher() {
   const { alert } = useActiveAlert()
   const navigate = useNavigate()
-  const { pathname } = useLocation()
+  const { pathname, search } = useLocation()
 
   useEffect(() => {
     if (!alert || readSeen().includes(alert.id)) return
     markSeen(alert.id)
-    if (pathname !== SHELTER_PATH) navigate(SHELTER_PATH)
-  }, [alert, pathname, navigate])
+    // Учень посеред уроку: в режимі укриття відкриваємо той самий урок (?lesson=).
+    const lesson = pathname === LESSON_PATH ? new URLSearchParams(search).get('lesson') : null
+    if (pathname !== SHELTER_PATH) navigate(lesson ? `${SHELTER_PATH}?lesson=${lesson}` : SHELTER_PATH)
+  }, [alert, pathname, search, navigate])
 
   return <Outlet />
 }
