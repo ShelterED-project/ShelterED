@@ -3406,6 +3406,72 @@
         "title": "PackTest",
         "type": "object"
       },
+      "ParentChildOut": {
+        "description": "Прив'язана дитина: кабінет батьків вибирає, чиї дані показати.",
+        "examples": [
+          {
+            "child_id": "0192f0a0-0000-7000-8000-0000000000cc",
+            "class_id": "0192f0a0-0000-7000-8000-0000000000c1",
+            "class_name": "5-А",
+            "display_name": "Іван",
+            "last_name": "Петренко"
+          }
+        ],
+        "properties": {
+          "child_id": {
+            "format": "uuid",
+            "title": "Child Id",
+            "type": "string"
+          },
+          "class_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Class Id"
+          },
+          "class_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Class Name"
+          },
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "last_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Name"
+          }
+        },
+        "required": [
+          "child_id",
+          "display_name",
+          "last_name",
+          "class_id",
+          "class_name"
+        ],
+        "title": "ParentChildOut",
+        "type": "object"
+      },
       "ParentLinkCodeResponse": {
         "examples": [
           {
@@ -13287,6 +13353,77 @@
         "summary": "Get Pack",
         "tags": [
           "packs"
+        ]
+      }
+    },
+    "/parent/children": {
+      "get": {
+        "description": "Діти, прив'язані до батьків (у порядку прив'язки), з класом. Кабінет батьків бере\nзвідси id дитини для `/students/{id}/...`; порожній список — ще нікого не прив'язано.",
+        "operationId": "parent_children_parent_children_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ParentChildOut"
+                  },
+                  "title": "Response Parent Children Parent Children Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Не автентифіковано"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Недостатньо прав"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Parent Children",
+        "tags": [
+          "auth"
         ]
       }
     },

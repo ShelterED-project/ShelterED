@@ -27,6 +27,7 @@ from app.schemas.auth import (
     AuthorizeResponse,
     LogoutRequest,
     MeOut,
+    ParentChildOut,
     ParentLinkCodeResponse,
     ParentLinkRequest,
     ParentLinkResponse,
@@ -356,6 +357,23 @@ async def parent_link(
     return ParentLinkResponse(
         child_id=child.id, display_name=child.display_name, last_name=child.last_name
     )
+
+
+@router.get("/parent/children", response_model=list[ParentChildOut], responses={**R401, **R403})
+async def parent_children(parent: Parent, session: Session) -> list[ParentChildOut]:
+    """Діти, прив'язані до батьків (у порядку прив'язки), з класом. Кабінет батьків бере
+    звідси id дитини для `/students/{id}/...`; порожній список — ще нікого не прив'язано."""
+    rows = await service.list_parent_children(session, parent)
+    return [
+        ParentChildOut(
+            child_id=child.id,
+            display_name=child.display_name,
+            last_name=child.last_name,
+            class_id=klass.id if klass else None,
+            class_name=klass.name if klass else None,
+        )
+        for child, klass in rows
+    ]
 
 
 @router.post(

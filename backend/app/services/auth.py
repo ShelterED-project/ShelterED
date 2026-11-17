@@ -488,6 +488,24 @@ async def link_parent(session: AsyncSession, parent: User, raw_code: str) -> Use
     return child
 
 
+async def list_parent_children(
+    session: AsyncSession, parent: User
+) -> list[tuple[User, SchoolClass | None]]:
+    """Активні діти батьків з їхнім класом, у порядку прив'язки."""
+    rows = await session.execute(
+        select(User, SchoolClass)
+        .join(ParentChild, ParentChild.child_id == User.id)
+        .outerjoin(
+            ClassMembership,
+            (ClassMembership.user_id == User.id) & (ClassMembership.member_role == "student"),
+        )
+        .outerjoin(SchoolClass, SchoolClass.id == ClassMembership.class_id)
+        .where(ParentChild.parent_id == parent.id, User.is_active)
+        .order_by(ParentChild.linked_at, User.id)
+    )
+    return [(child, klass) for child, klass in rows]
+
+
 # ---------- перевірки доступу (за роллю та належністю) ----------
 
 

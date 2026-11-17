@@ -328,6 +328,30 @@ async def test_parent_link_code_creation_scope(client: AsyncClient, world) -> No
     assert await status_of(client, "POST", url, None) == 401
 
 
+async def test_parent_children_list(client: AsyncClient, world) -> None:
+    headers = auth_header(world.parent_free)
+    resp = await client.get("/parent/children", headers=headers)
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+    code = await make_code(client, world.teacher_a, world.student_a)
+    await client.post("/parent/link", json={"code": code}, headers=headers)
+    resp = await client.get("/parent/children", headers=headers)
+    assert resp.status_code == 200
+    [child] = resp.json()
+    assert child["child_id"] == str(world.student_a.id)
+    assert child["display_name"] == world.student_a.display_name
+    assert child["class_id"] == str(world.class_a.id)
+    assert child["class_name"] == world.class_a.name
+
+    # Чужих дітей у списку немає; інші ролі списку не мають.
+    resp = await client.get("/parent/children", headers=auth_header(world.parent_a))
+    assert [c["child_id"] for c in resp.json()] == [str(world.student_a.id)]
+    for user in (world.student_a, world.teacher_a, world.admin):
+        assert await status_of(client, "GET", "/parent/children", user) == 403
+    assert await status_of(client, "GET", "/parent/children", None) == 401
+
+
 async def test_only_parents_can_link(client: AsyncClient, world) -> None:
     code = await make_code(client, world.teacher_a, world.student_a)
     for user in (world.teacher_a, world.student_b, world.admin):
