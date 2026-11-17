@@ -6,6 +6,7 @@ import LandingPage from '@/pages/landing/LandingPage'
 import LoginPage from '@/pages/login/LoginPage'
 import NotFoundPage from '@/pages/not-found/NotFoundPage'
 import ParentPage from '@/pages/parent/ParentPage'
+import ParentProgressPage from '@/pages/parent/ParentProgressPage'
 import RegisterPage from '@/pages/register/RegisterPage'
 import ShelterModePage from '@/pages/shelter/ShelterModePage'
 import CalmPage from '@/pages/student/CalmPage'
@@ -60,7 +61,10 @@ export const router = createBrowserRouter([
       },
       {
         element: <RequireRole roles={['parent']} />,
-        children: [{ path: '/parent', element: <ParentPage /> }],
+        children: [
+          { path: '/parent', element: <ParentPage /> },
+          { path: '/parent/progress', element: <ParentProgressPage /> },
+        ],
       },
       {
         element: <RequireRole roles={['admin']} />,

@@ -1,7 +1,4 @@
-/**
- * Розділ, якого ще немає: чесна позначка «буде пізніше» замість кнопок без дії.
- * Локальний сервер укриття й QR-синхронізація чекають на local-server і B10 на бекенді.
- */
+/** Розділ, якого ще немає: чесна позначка «буде пізніше» замість кнопок без дії. */
 export default function ComingSoonCard({ title, soon, text, icon }: { title: string; soon: string; text: string; icon?: string }) {
   return (
     <section className="flex gap-4 rounded-[22px] border border-dashed border-line bg-surface p-5 md:p-6">

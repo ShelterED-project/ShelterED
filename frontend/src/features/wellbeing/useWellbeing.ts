@@ -1,9 +1,9 @@
-import { useEffect } from 'react'
 import { skipToken } from '@reduxjs/toolkit/query/react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { useAppSelector } from '@/app/hooks'
 import { db } from '@/shared/db/db'
 import { addEvent } from '@/shared/db/outbox'
+import { readMeta, useCached } from '@/shared/db/useCached'
 import { useWellbeingSelfQuery, useWellbeingTextsQuery } from './wellbeingApi'
 import type { WellbeingSelf, WellbeingTexts, WellbeingValue } from './wellbeingApi'
 
@@ -14,19 +14,6 @@ const answeredKey = (studentId: string) => `wellbeing_answered:${studentId}`
 
 function todayKey(): string {
   return new Date().toLocaleDateString('sv-SE')
-}
-
-async function readMeta<T>(key: string): Promise<T | null> {
-  const record = await db.meta.get(key)
-  return (record?.value as T | undefined) ?? null
-}
-
-function useCached<T>(key: string | null, fresh: T | undefined): T | null {
-  const cached = useLiveQuery(async () => (key ? readMeta<T>(key) : null), [key])
-  useEffect(() => {
-    if (key && fresh) void db.meta.put({ key, value: fresh }).catch(() => undefined)
-  }, [key, fresh])
-  return fresh ?? cached ?? null
 }
 
 /**

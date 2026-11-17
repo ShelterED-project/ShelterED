@@ -3,7 +3,7 @@ import iconMore from '@/assets/parent/tab-more.svg'
 import iconOverview from '@/assets/parent/tab-overview.svg'
 import iconProgress from '@/assets/parent/tab-progress.svg'
 import AppTabs from '@/shared/ui/AppTabs'
-import { mobileTabs } from '../content'
+import { mobileTabs, navRoutes } from '../content'
 import type { TabId } from '../content'
 
 const icons: Record<TabId, string> = {
@@ -13,8 +13,8 @@ const icons: Record<TabId, string> = {
   more: iconMore,
 }
 
-const items = mobileTabs.map((tab) => ({ ...tab, icon: icons[tab.id] }))
+const items = mobileTabs.map((tab) => ({ ...tab, icon: icons[tab.id], to: navRoutes[tab.id] }))
 
-export default function MobileTabs() {
-  return <AppTabs items={items} activeId="overview" />
+export default function MobileTabs({ activeId = 'overview' }: { activeId?: TabId }) {
+  return <AppTabs items={items} activeId={activeId} />
 }

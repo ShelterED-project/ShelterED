@@ -5,7 +5,7 @@ import type { DayReadiness, ReadinessDay } from '@/features/teacher/useClassRead
 import { pluralUk } from '@/shared/lib/plural'
 import Spinner from '@/shared/ui/Spinner'
 import { localServer, qrSync, syncPage } from './content'
-import ComingSoonCard from './sections/ComingSoonCard'
+import ComingSoonCard from '@/shared/ui/ComingSoonCard'
 import TeacherHeader from './sections/TeacherHeader'
 import TeacherSidebar from './sections/TeacherSidebar'
 import TeacherTabs from './sections/TeacherTabs'

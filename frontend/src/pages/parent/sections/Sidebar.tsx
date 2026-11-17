@@ -5,7 +5,7 @@ import iconProgress from '@/assets/parent/nav-progress.svg'
 import iconSettings from '@/assets/parent/nav-settings.svg'
 import { useCurrentUser } from '@/features/auth/useCurrentUser'
 import AppSidebar from '@/shared/ui/AppSidebar'
-import { parentRole, sidebarNav } from '../content'
+import { navRoutes, parentRole, sidebarNav } from '../content'
 import type { NavId } from '../content'
 
 const icons: Record<NavId, string> = {
@@ -16,14 +16,14 @@ const icons: Record<NavId, string> = {
   settings: iconSettings,
 }
 
-const items = sidebarNav.map((item) => ({ ...item, icon: icons[item.id] }))
+const items = sidebarNav.map((item) => ({ ...item, icon: icons[item.id], to: navRoutes[item.id] }))
 
-export default function Sidebar() {
+export default function Sidebar({ activeId = 'overview' }: { activeId?: NavId }) {
   const user = useCurrentUser()
   return (
     <AppSidebar
       items={items}
-      activeId="overview"
+      activeId={activeId}
       user={{ initials: user?.initials ?? '', name: user?.fullName ?? '', role: parentRole }}
     />
   )

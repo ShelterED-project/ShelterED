@@ -1,6 +1,21 @@
+import type { StudentProgress } from '@/features/student/studentApi'
 import { week } from '../content'
 
-export default function WeekChart({ className = '' }: { className?: string }) {
+/** Висота найвищого стовпчика, px. */
+const MAX_BAR = 150
+
+function weekday(day: string): string {
+  // day — дата «2026-11-17» без поясу: читаємо як місцеву, щоб не з'їхав день.
+  const [y, m, d] = day.split('-').map(Number)
+  const text = new Date(y, m - 1, d).toLocaleDateString('uk-UA', { weekday: 'short' })
+  return text.charAt(0).toUpperCase() + text.slice(1)
+}
+
+export default function WeekChart({ progress, className = '' }: { progress: StudentProgress | null; className?: string }) {
+  const days = progress?.study.days ?? []
+  const max = Math.max(1, ...days.map((d) => d.minutes))
+  const empty = days.every((d) => d.minutes === 0)
+
   return (
     <section className={`flex flex-col gap-4 rounded-[22px] border border-line bg-surface p-5 md:p-6 ${className}`}>
       <div className="flex items-center justify-between gap-3">
@@ -10,38 +25,24 @@ export default function WeekChart({ className = '' }: { className?: string }) {
         <p className="text-xs text-dim">{week.range}</p>
       </div>
 
-      <div className="flex items-end gap-3 px-1 md:gap-6">
-        {week.days.map((d) => (
-          <div key={d.day} className="flex min-w-0 flex-1 flex-col items-center gap-2">
-            <div
-              role="img"
-              aria-label={`${d.day}: ${week.legend.regular} ${d.regular} хв, ${week.legend.shelter} ${d.shelter} хв`}
-              className="flex h-[150px] w-11 max-w-full flex-col justify-end gap-1"
-            >
-              {d.shelter > 0 ? (
-                <>
-                  <div className="w-full rounded-t-md bg-accent" style={{ height: d.shelter }} />
-                  <div className="w-full rounded-b-md bg-line-strong" style={{ height: d.regular }} />
-                </>
-              ) : (
-                <div className="w-full rounded-md bg-line-strong" style={{ height: d.regular }} />
-              )}
+      {empty ? (
+        <p className="text-sm text-muted">{week.empty}</p>
+      ) : (
+        <div className="flex items-end gap-2 px-1 md:gap-5">
+          {days.map((d) => (
+            <div key={d.day} className="flex min-w-0 flex-1 flex-col items-center gap-2">
+              <span className="text-xs text-muted">{d.minutes > 0 ? d.minutes : ''}</span>
+              <div role="img" aria-label={week.minutes(weekday(d.day), d.minutes)} className="flex h-[150px] w-11 max-w-full flex-col justify-end">
+                <div
+                  className={`w-full rounded-md ${d.minutes > 0 ? 'bg-accent' : 'bg-line-strong'}`}
+                  style={{ height: Math.max(4, Math.round((d.minutes / max) * MAX_BAR)) }}
+                />
+              </div>
+              <span className="text-xs text-dim">{weekday(d.day)}</span>
             </div>
-            <span className="text-xs text-dim">{d.day}</span>
-          </div>
-        ))}
-      </div>
-
-      <ul className="flex flex-wrap gap-5 pt-1 text-xs text-muted">
-        <li className="flex items-center gap-2">
-          <span className="size-3 rounded-[2px] bg-line-strong" />
-          {week.legend.regular}
-        </li>
-        <li className="flex items-center gap-2">
-          <span className="size-3 rounded-[2px] bg-accent" />
-          {week.legend.shelter}
-        </li>
-      </ul>
+          ))}
+        </div>
+      )}
     </section>
   )
 }
