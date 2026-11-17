@@ -13,6 +13,8 @@ export interface Alert {
   started_at: string
   /** Відбій; null, поки тривога триває */
   ended_at: string | null
+  /** Для тривог з API: район, громада чи місто, якщо школа вказала точну локацію */
+  location_title?: string | null
 }
 
 export interface ActiveAlerts {

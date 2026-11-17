@@ -1,7 +1,10 @@
 import { createBrowserRouter } from 'react-router'
 import AlertWatcher from '@/features/alerts/AlertWatcher'
 import RequireRole from '@/features/auth/RequireRole'
+import AdminAlarmsPage from '@/pages/admin/AdminAlarmsPage'
+import AdminClassesPage from '@/pages/admin/AdminClassesPage'
 import AdminPage from '@/pages/admin/AdminPage'
+import AdminUsersPage from '@/pages/admin/AdminUsersPage'
 import LandingPage from '@/pages/landing/LandingPage'
 import LoginPage from '@/pages/login/LoginPage'
 import NotFoundPage from '@/pages/not-found/NotFoundPage'
@@ -68,7 +71,12 @@ export const router = createBrowserRouter([
       },
       {
         element: <RequireRole roles={['admin']} />,
-        children: [{ path: '/admin', element: <AdminPage /> }],
+        children: [
+          { path: '/admin', element: <AdminPage /> },
+          { path: '/admin/classes', element: <AdminClassesPage /> },
+          { path: '/admin/users', element: <AdminUsersPage /> },
+          { path: '/admin/alarms', element: <AdminAlarmsPage /> },
+        ],
       },
       { path: '*', element: <NotFoundPage /> },
     ],
