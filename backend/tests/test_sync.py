@@ -349,9 +349,10 @@ async def test_roles(client, world, c) -> None:
     for user in (world.admin, world.parent_a):
         r = await client.post("/sync/events", json=body, headers=auth_header(user))
         assert r.status_code == 403
-    # QR-ретрансляція вчителем — B10: поки 501, щоб події лишились в outbox вчителя.
+    # Вчитель — ретрансляція (tests/test_sync_relay.py): без `student_id` подія відхилена.
     r = await client.post("/sync/events", json=body, headers=auth_header(world.teacher_a))
-    assert r.status_code == 501 and r.json()["error"]["code"] == "NOT_IMPLEMENTED"
+    assert r.status_code == 200
+    assert r.json()["results"][0]["reason"] == "student_id_required"
     for user in (world.teacher_a, world.admin, world.parent_a):
         r = await client.get("/sync/changes", headers=auth_header(user))
         assert r.status_code == 403

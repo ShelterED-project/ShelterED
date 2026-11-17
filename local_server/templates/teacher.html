@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ShelterED - Панель вчителя</title>
+    <style>
+        body {
+            background-color: #121212;
+            color: #ffffff;
+            font-family: 'Inter', sans-serif;
+            margin: 0;
+            padding: 20px;
+        }
+        .header {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: space-between;
+            align-items: center;
+            gap: 15px;
+            margin-bottom: 30px;
+            border-bottom: 1px solid #333;
+            padding-bottom: 15px;
+        }
+        .logo { font-size: 20px; font-weight: bold; color: #fbbf24; }
+        h1 { font-size: 20px; color: #fbbf24; margin: 0; }
+        h2 { font-size: 18px; color: #fbbf24; margin: 0 0 12px; }
+        .panel {
+            background-color: #1e1e1e;
+            border: 1px solid #333;
+            border-radius: 12px;
+            padding: 16px;
+            margin-bottom: 20px;
+        }
+        .muted { color: #a0a0a0; font-size: 14px; }
+        .msg {
+            background-color: #2a2a2a;
+            border-left: 4px solid #fbbf24;
+            padding: 12px 16px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        .error { color: #f87171; }
+        .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+        input[type="email"], input[type="password"], select {
+            padding: 10px 12px;
+            border-radius: 8px;
+            border: 1px solid #444;
+            background-color: #2a2a2a;
+            color: white;
+            font-size: 16px;
+        }
+        form { margin: 0; }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background-color: #1e1e1e;
+            border-radius: 12px;
+            overflow: hidden;
+        }
+        th, td {
+            padding: 16px;
+            text-align: left;
+            border-bottom: 1px solid #333;
+        }
+        th { background-color: #2a2a2a; color: #fbbf24; font-weight: normal; }
+        tr:last-child td { border-bottom: none; }
+        .badge {
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: bold;
+            white-space: nowrap;
+        }
+        .status-in_shelter { background-color: #065f46; color: #34d399; }
+        .status-safe { background-color: #1e3a8a; color: #93c5fd; }
+        .status-none { background-color: #3f3f46; color: #a0a0a0; }
+        .sync-synced { color: #34d399; }
+        .sync-pending { color: #fbbf24; }
+        .sync-rejected { color: #f87171; }
+        .btn-refresh {
+            background-color: #fbbf24;
+            color: #121212;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-weight: bold;
+            font-size: 15px;
+            cursor: pointer;
+            text-decoration: none;
+            white-space: nowrap;
+        }
+        .btn-secondary {
+            background-color: #2a2a2a;
+            color: #ffffff;
+            border: 1px solid #444;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+
+        <!-- Логотип -->
+        <div class="logo" style="order: 1;">ShelterED</div>
+
+        <!-- Права частина: Заголовок і кнопка -->
+        <div style="display: flex; align-items: center; gap: 15px; order: 2;">
+            <h1>Перекличка класу{% if state.class_name %} {{ state.class_name }}{% endif %}</h1>
+            <a href="/teacher" class="btn-refresh">Оновити</a>
+        </div>
+
+        <!-- QR-код (на мобільному він перейде на новий рядок і буде по центру) -->
+        <div style="text-align: center; order: 3; width: 100%; margin-top: 10px; display: flex; flex-direction: column; align-items: center;">
+            <img src="/qr" alt="QR Code" style="width: 180px; height: 180px; border-radius: 12px; background: white; padding: 8px;">
+            <div style="font-size: 12px; color: #a0a0a0; margin-top: 5px;">Скануй для входу: {{ student_url }}</div>
+        </div>
+
+    </div>
+
+    {% if msg %}
+        <div class="msg">{{ msg }}</div>
+    {% endif %}
+
+    <!-- Підключення до хмари -->
+    <div class="panel">
+        {% if not state.connected %}
+            <h2>Підключитися до ShelterED</h2>
+            <p class="muted">Потрібен інтернет лише один раз: сервер завантажить список класу і далі працюватиме без мережі. Пароль не зберігається.</p>
+            <form action="/teacher/connect" method="post" class="row">
+                <input type="email" name="email" placeholder="Email вчителя" required>
+                <input type="password" name="password" placeholder="Пароль" required>
+                <button type="submit" class="btn-refresh">Підключитися</button>
+            </form>
+        {% else %}
+            <div class="row" style="justify-content: space-between;">
+                <div>
+                    Підключено: <b>{{ state.teacher_name }}</b>
+                    <span class="muted">({{ cloud_url }})</span>
+                </div>
+                <form action="/teacher/disconnect" method="post">
+                    <button type="submit" class="btn-refresh btn-secondary">Відключитися</button>
+                </form>
+            </div>
+            {% if classes|length > 1 %}
+                <form action="/teacher/class" method="post" class="row" style="margin-top: 12px;">
+                    <select name="class_id">
+                        {% for c in classes %}
+                            <option value="{{ c.id }}" {% if c.id == state.class_id %}selected{% endif %}>{{ c.name }}</option>
+                        {% endfor %}
+                    </select>
+                    <button type="submit" class="btn-refresh btn-secondary">Обрати клас</button>
+                </form>
+            {% elif not classes %}
+                <p class="muted">У вас немає класів у ShelterED.</p>
+            {% endif %}
+        {% endif %}
+
+        <div class="muted" style="margin-top: 12px;">
+            Учнів у списку: {{ roster_size }}{% if state.roster_updated_at %} (оновлено {{ state.roster_updated_at | kyiv('%d.%m %H:%M') }}){% endif %}.
+            Остання синхронізація: {% if state.last_sync_at %}{{ state.last_sync_at | kyiv('%d.%m %H:%M:%S') }}{% else %}ще не було{% endif %}.
+            Очікують відправки: {{ counts.pending }}{% if counts.rejected %}, відхилено: {{ counts.rejected }}{% endif %}.
+            {% if state.last_sync_error %}<div class="error">Помилка синхронізації: {{ state.last_sync_error }}</div>{% endif %}
+        </div>
+        {% if state.connected %}
+            <form action="/teacher/sync" method="post" style="margin-top: 12px;">
+                <button type="submit" class="btn-refresh btn-secondary">Синхронізувати зараз</button>
+            </form>
+        {% endif %}
+    </div>
+
+    <!-- Перекличка -->
+    <div class="panel row" style="justify-content: space-between;">
+        <div>
+            {% if session and not session.ended_at %}
+                Перекличка триває з {{ session.started_at | kyiv('%H:%M') }}
+            {% elif session %}
+                Перекличку завершено о {{ session.ended_at | kyiv('%H:%M') }}
+            {% else %}
+                Перекличку ще не розпочато
+            {% endif %}
+        </div>
+        {% if session and not session.ended_at %}
+            <form action="/teacher/finish" method="post">
+                <button type="submit" class="btn-refresh btn-secondary">Завершити</button>
+            </form>
+        {% else %}
+            <form action="/teacher/start" method="post">
+                <button type="submit" class="btn-refresh" {% if not state.class_id %}disabled{% endif %}>Почати перекличку</button>
+            </form>
+        {% endif %}
+    </div>
+
+    <table>
+        <thead>
+            <tr>
+                <th>Ім'я учня</th>
+                <th>Статус</th>
+                <th>Час</th>
+                <th>Синхронізація</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in rows %}
+            <tr>
+                <td>{{ row.name }}</td>
+                {% if row.mark %}
+                    <td><span class="badge status-{{ row.mark.status }}">{{ status_labels[row.mark.status] }}</span></td>
+                    <td>{{ row.mark.occurred_at | kyiv }}</td>
+                    <td class="sync-{{ row.mark.sync_state }}">
+                        {{ sync_labels[row.mark.sync_state] }}{% if row.mark.sync_state == 'rejected' %}: {{ row.mark.reject_reason }}{% endif %}
+                    </td>
+                {% else %}
+                    <td><span class="badge status-none">Немає відповіді</span></td>
+                    <td></td>
+                    <td></td>
+                {% endif %}
+            </tr>
+            {% else %}
+            <tr>
+                <td colspan="4" style="text-align: center; color: #a0a0a0;">
+                    {% if not session %}Почніть перекличку, щоб учні могли відмітитися{% else %}Список учнів порожній{% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</body>
+</html>

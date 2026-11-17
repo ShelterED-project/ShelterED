@@ -295,14 +295,14 @@ UNIQUE (`lesson_id`, `part`, `position`).
 |---|---|---|
 | client_event_id | uuid PK | створює клієнт; `INSERT ... ON CONFLICT DO NOTHING` |
 | type | text CHECK IN (`module_progress`, `test_attempt`, `rollcall_status`, `survey_answer`) | |
-| user_id | uuid FK → app_user | автор події (учень) |
+| user_id | uuid FK → app_user | автор події (учень; при ретрансляції — учень із `student_id`) |
 | device_id | uuid NULL | id пристрою, який створює клієнт ❓7; NULL — стерто за строком зберігання (180 днів) |
 | occurred_at | timestamptz NOT NULL | годинник пристрою |
 | received_at | timestamptz default now() | годинник сервера |
 | clock_skew_ms | bigint NULL | зсув годинника пристрою з пакета (B9.4); стирається разом із payload |
 | is_suspicious | boolean default false | час у майбутньому / великий зсув — позначка, не блокування; за строком не стирається |
-| source | text CHECK IN (`online`, `qr`) default `online` | QR — B10 |
-| relayed_by | uuid FK → app_user NULL | вчитель, який передав QR-події (B10.3) |
+| source | text CHECK IN (`online`, `qr`, `local`) default `online` | `local` — відмітки переклички з локального сервера укриття (міграція `430365394792`); QR — B10 |
+| relayed_by | uuid FK → app_user NULL | вчитель, який передав події учнів (`local`, QR — B10.3) |
 | payload | jsonb NOT NULL | |
 | status | text CHECK IN (`accepted`, `rejected`) | |
 | reject_reason | text NULL | |

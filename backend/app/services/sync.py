@@ -17,6 +17,14 @@
   `sync_event` — порожній payload. Дата з майбутнього чи поза строком зберігання —
   `accepted`, але відповідь не записується.
 
+Ретрансляція вчителем (локальний сервер укриття): пакет вчителя несе відмітки переклички
+учнів його класів, `student_id` у кожній події. Подія записується як подія учня
+(`user_id` = учень, `relayed_by` = вчитель, `source = 'local'`) з тими самими правилами
+конфліктів і ідемпотентністю; інші типи — `relay_not_supported` (потрібен підписаний запис
+учня, B10). Відхилена ретрансляція, де учня не перевірено (немає `student_id`, чужий клас,
+невідома сесія, невалідний payload), у журнал не пишеться: рядок у журналі — лише за
+перевіреним учнем; повтор однаково дає ту саму причину.
+
 Стрічка змін: `change_seq`/`change_xid` ставить тригер (міграція 827ed8465b1b). Курсор —
 пара (xid, seq): віддаються лише рядки транзакцій, старших за найстарішу ще активну
 (`xid < pg_snapshot_xmin(pg_current_snapshot())`). Будь-яка транзакція, що закомітиться
@@ -85,6 +93,7 @@ class Batch:
     """Спільне для всіх подій пакета: автор, час сервера, зсув годинника. Лише значення, не
     ORM-об'єкти: rollback після збою події робить їх простроченими."""
 
+    # Відправник пакета (з JWT): учень або вчитель-ретранслятор.
     user_id: uuid.UUID
     received_at: dt.datetime
     clock_skew_ms: int
@@ -92,16 +101,20 @@ class Batch:
     threshold: dt.timedelta
     # Допуск для `session_closed` (SYNC_ROLLCALL_CLOSE_GRACE_S).
     close_grace: dt.timedelta = dt.timedelta(0)
+    # Вчитель, якщо пакет — ретрансляція з локального сервера укриття; інакше None.
+    relayed_by: uuid.UUID | None = None
     # Пояс школи учня — один раз на пакет, лише якщо в ньому є `survey_answer`.
     tz: ZoneInfo | None = None
     # Зміна статусу переклички поточної події (до commit):
-    # (session_id, статус до події, новий статус, event_id).
-    staged_rollcall: tuple[uuid.UUID, str | None, str, uuid.UUID] | None = None
-    # Після commit: session_id -> (статус до пакета, останній статус, event_id). Push батькам —
-    # лише якщо останній статус відрізняється від статусу до пакета (A→B→A push не дає).
-    rollcall_changes: dict[uuid.UUID, tuple[str | None, str, uuid.UUID]] = field(
+    # (session_id, учень, статус до події, новий статус, event_id).
+    staged_rollcall: tuple[uuid.UUID, uuid.UUID, str | None, str, uuid.UUID] | None = None
+    # Після commit: (session_id, учень) -> (статус до пакета, останній статус, event_id). Push
+    # батькам — лише якщо останній статус відрізняється від статусу до пакета (A→B→A не дає).
+    rollcall_changes: dict[tuple[uuid.UUID, uuid.UUID], tuple[str | None, str, uuid.UUID]] = field(
         default_factory=dict
     )
+    # Учні з прийнятими подіями (крім `survey_answer`) — перерахунок агрегатів після пакета.
+    touched: set[uuid.UUID] = field(default_factory=set)
     # Події пакета, вже записані в журнал до його обробки (одним запитом, а не по запиту на
     # подію): id -> (автор, статус, причина). Записане паралельно пізніше ловить ON CONFLICT.
     stored: dict[uuid.UUID, tuple[uuid.UUID, str, str | None]] = field(default_factory=dict)
@@ -109,9 +122,18 @@ class Batch:
     # ("module" | "test", id) -> урок, урок -> чи доступний учню.
     lesson_of: dict[tuple[str, uuid.UUID], uuid.UUID | None] = field(default_factory=dict)
     lesson_access: dict[uuid.UUID, bool] = field(default_factory=dict)
-    # Клас переклички -> чи учень у ньому; тест -> питання для оцінювання (id, ключ, бали).
-    class_member: dict[uuid.UUID, bool] = field(default_factory=dict)
+    # (клас переклички, учень) -> чи учень у ньому; клас -> чи вчитель-ретранслятор його веде;
+    # тест -> питання для оцінювання (id, ключ, бали).
+    class_member: dict[tuple[uuid.UUID, uuid.UUID], bool] = field(default_factory=dict)
+    teaches: dict[uuid.UUID, bool] = field(default_factory=dict)
     questions: dict[uuid.UUID, list[tuple[uuid.UUID, Any, int]]] = field(default_factory=dict)
+
+
+def _owner(batch: Batch, event: SyncEventIn) -> uuid.UUID:
+    """Учень, чия це подія: при ретрансляції — `student_id`, інакше відправник."""
+    if batch.relayed_by is not None and event.student_id is not None:
+        return event.student_id
+    return batch.user_id
 
 
 def _result(event_id: uuid.UUID, status: str, reason: str | None = None) -> SyncEventResult:
@@ -437,24 +459,43 @@ async def _apply_test_attempt(
     await _recredit(session, student_id, test)
 
 
+async def _is_member(
+    session: AsyncSession, class_id: uuid.UUID, user_id: uuid.UUID, member_role: str
+) -> bool:
+    return (
+        await session.scalar(
+            select(ClassMembership.user_id).where(
+                ClassMembership.class_id == class_id,
+                ClassMembership.user_id == user_id,
+                ClassMembership.member_role == member_role,
+            )
+        )
+        is not None
+    )
+
+
 async def _check_rollcall(
-    session: AsyncSession, batch: Batch, occurred_at: dt.datetime, payload: RollCallStatusPayload
+    session: AsyncSession,
+    batch: Batch,
+    student_id: uuid.UUID,
+    occurred_at: dt.datetime,
+    payload: RollCallStatusPayload,
 ) -> None:
+    """Перекличка класу учня; при ретрансляції ще й клас, який веде вчитель-відправник."""
     rc = await session.get(RollCallSession, payload.session_id)
     if rc is None:
         raise Rejected("unknown_entity")
-    if rc.class_id not in batch.class_member:
-        batch.class_member[rc.class_id] = (
-            await session.scalar(
-                select(ClassMembership.user_id).where(
-                    ClassMembership.class_id == rc.class_id,
-                    ClassMembership.user_id == batch.user_id,
-                    ClassMembership.member_role == "student",
-                )
+    if batch.relayed_by is not None:
+        if rc.class_id not in batch.teaches:
+            batch.teaches[rc.class_id] = await _is_member(
+                session, rc.class_id, batch.relayed_by, "teacher"
             )
-            is not None
-        )
-    if not batch.class_member[rc.class_id]:
+        if not batch.teaches[rc.class_id]:
+            raise Rejected("forbidden")
+    key = (rc.class_id, student_id)
+    if key not in batch.class_member:
+        batch.class_member[key] = await _is_member(session, rc.class_id, student_id, "student")
+    if not batch.class_member[key]:
         raise Rejected("forbidden")
     if rc.closed_at is not None and _after_close(batch, occurred_at, rc.closed_at):
         raise Rejected("session_closed")
@@ -472,6 +513,7 @@ def _after_close(batch: Batch, occurred_at: dt.datetime, closed_at: dt.datetime)
 async def _apply_rollcall(
     session: AsyncSession,
     batch: Batch,
+    student_id: uuid.UUID,
     event_id: uuid.UUID,
     occurred_at: dt.datetime,
     payload: RollCallStatusPayload,
@@ -483,19 +525,19 @@ async def _apply_rollcall(
     await session.execute(
         select(
             func.pg_advisory_xact_lock(
-                func.hashtextextended(f"rollcall:{payload.session_id}:{batch.user_id}", 0)
+                func.hashtextextended(f"rollcall:{payload.session_id}:{student_id}", 0)
             )
         )
     )
     before = await session.scalar(
         select(RollCallStatus.status).where(
             RollCallStatus.session_id == payload.session_id,
-            RollCallStatus.student_id == batch.user_id,
+            RollCallStatus.student_id == student_id,
         )
     )
     stmt = pg_insert(RollCallStatus).values(
         session_id=payload.session_id,
-        student_id=batch.user_id,
+        student_id=student_id,
         status=payload.status,
         occurred_at=occurred_at,
         received_at=batch.received_at,
@@ -527,10 +569,11 @@ async def _apply_rollcall(
 
 
 async def _stored_result(
-    session: AsyncSession, batch: Batch, event_id: uuid.UUID
+    session: AsyncSession, owner: uuid.UUID, event_id: uuid.UUID
 ) -> SyncEventResult | None:
     """Результат для вже записаної події: прийнята → `duplicate`, відхилена → та сама причина.
-    Чужий id (інший автор) — `forbidden`, нічого не розкриваючи й не перезаписуючи."""
+    Чужий id (інший учень) — `forbidden`, нічого не розкриваючи й не перезаписуючи. Відмітка,
+    що прийшла і напряму від учня, і через локальний сервер, — `duplicate` в обох каналах."""
     row = (
         await session.execute(
             select(SyncEvent.user_id, SyncEvent.status, SyncEvent.reject_reason).where(
@@ -540,14 +583,14 @@ async def _stored_result(
     ).first()
     if row is None:
         return None
-    return _stored_row_result(batch, event_id, (row.user_id, row.status, row.reject_reason))
+    return _stored_row_result(owner, event_id, (row.user_id, row.status, row.reject_reason))
 
 
 def _stored_row_result(
-    batch: Batch, event_id: uuid.UUID, row: tuple[uuid.UUID, str, str | None]
+    owner: uuid.UUID, event_id: uuid.UUID, row: tuple[uuid.UUID, str, str | None]
 ) -> SyncEventResult:
     user_id, status, reject_reason = row
-    if user_id != batch.user_id:
+    if user_id != owner:
         return _result(event_id, "rejected", "forbidden")
     if status == "rejected":
         return _result(event_id, "rejected", reject_reason)
@@ -557,6 +600,7 @@ def _stored_row_result(
 async def _insert_event(
     session: AsyncSession,
     batch: Batch,
+    owner: uuid.UUID,
     event: SyncEventIn,
     occurred_at: dt.datetime,
     suspicious: bool,
@@ -570,14 +614,14 @@ async def _insert_event(
         .values(
             client_event_id=event.client_event_id,
             type=event.type,
-            user_id=batch.user_id,
+            user_id=owner,
             device_id=event.device_id,
             occurred_at=occurred_at,
             received_at=batch.received_at,
             clock_skew_ms=batch.clock_skew_ms,
             is_suspicious=suspicious,
-            source="online",
-            relayed_by=None,
+            source="online" if batch.relayed_by is None else "local",
+            relayed_by=batch.relayed_by,
             payload=payload,
             status="rejected" if reason else "accepted",
             reject_reason=reason,
@@ -587,7 +631,7 @@ async def _insert_event(
     )
     if inserted is not None:
         return None
-    stored = await _stored_result(session, batch, event.client_event_id)
+    stored = await _stored_result(session, owner, event.client_event_id)
     assert stored is not None
     return stored
 
@@ -596,14 +640,18 @@ async def _reject_after_data_error(
     session: AsyncSession, batch: Batch, event: SyncEventIn
 ) -> SyncEventResult:
     """Подія впала на детермінованій помилці даних (уже після rollback): записуємо `rejected`
-    / `invalid_payload` без payload, щоб повтор дав той самий результат, а не 500 назавжди."""
-    stored = await _stored_result(session, batch, event.client_event_id)
+    / `invalid_payload` без payload, щоб повтор дав той самий результат, а не 500 назавжди.
+    Ретрансляцію не записуємо (учня тут не перевірено): повтор упаде так само."""
+    owner = _owner(batch, event)
+    stored = await _stored_result(session, owner, event.client_event_id)
     if stored is not None:
         return stored
+    if batch.relayed_by is not None:
+        return _result(event.client_event_id, "rejected", "invalid_payload")
     occurred_at = event.occurred_at.astimezone(dt.UTC)
     suspicious = batch.suspicious_skew or occurred_at > batch.received_at + batch.threshold
     stored = await _insert_event(
-        session, batch, event, occurred_at, suspicious, {}, "invalid_payload"
+        session, batch, owner, event, occurred_at, suspicious, {}, "invalid_payload"
     )
     return stored or _result(event.client_event_id, "rejected", "invalid_payload")
 
@@ -611,13 +659,23 @@ async def _reject_after_data_error(
 async def _process_event(
     session: AsyncSession, batch: Batch, event: SyncEventIn
 ) -> SyncEventResult:
+    relay = batch.relayed_by is not None
+    if relay and event.student_id is None:
+        return _result(event.client_event_id, "rejected", "student_id_required")
+    if not relay and event.student_id not in (None, batch.user_id):
+        # Учень надсилає лише свої події; детерміновано й без запису.
+        return _result(event.client_event_id, "rejected", "forbidden")
+    owner = _owner(batch, event)
     row = batch.stored.get(event.client_event_id)
     if row is not None:
-        return _stored_row_result(batch, event.client_event_id, row)
+        return _stored_row_result(owner, event.client_event_id, row)
     model = PAYLOAD_MODELS.get(event.type)
     if model is None:
         # CHECK у БД не дає записати невідомий тип; результат детермінований і без запису.
         return _result(event.client_event_id, "rejected", "unknown_type")
+    if relay and model is not RollCallStatusPayload:
+        # Інші типи потребують підписаного запису учня (B10); без запису в журнал.
+        return _result(event.client_event_id, "rejected", "relay_not_supported")
 
     try:
         occurred_at = event.occurred_at.astimezone(dt.UTC)
@@ -647,12 +705,15 @@ async def _process_event(
         elif isinstance(payload, TestAttemptPayload):
             await _check_test_attempt(session, batch, payload)
         elif isinstance(payload, RollCallStatusPayload):
-            await _check_rollcall(session, batch, occurred_at, payload)
+            await _check_rollcall(session, batch, owner, occurred_at, payload)
     except Rejected as exc:
         reason = exc.reason
+    if relay and reason is not None and reason != "session_closed":
+        # Учня не перевірено (див. docstring модуля): відповідь без запису в журнал.
+        return _result(event.client_event_id, "rejected", reason)
 
     stored = await _insert_event(
-        session, batch, event, occurred_at, suspicious, stored_payload, reason
+        session, batch, owner, event, occurred_at, suspicious, stored_payload, reason
     )
     if stored is not None:
         return stored
@@ -666,10 +727,18 @@ async def _process_event(
     elif isinstance(payload, TestAttemptPayload):
         await _apply_test_attempt(session, batch, event.client_event_id, payload, suspicious)
     elif isinstance(payload, RollCallStatusPayload):
-        change = await _apply_rollcall(session, batch, event.client_event_id, occurred_at, payload)
+        change = await _apply_rollcall(
+            session, batch, owner, event.client_event_id, occurred_at, payload
+        )
         if change is not None:
             before, after = change
-            batch.staged_rollcall = (payload.session_id, before, after, event.client_event_id)
+            batch.staged_rollcall = (
+                payload.session_id,
+                owner,
+                before,
+                after,
+                event.client_event_id,
+            )
     elif isinstance(payload, SurveyAnswerPayload):
         # Дата відповіді — за часом, виправленим на зсув годинника пакета (як у `_after_close`):
         # пристрій із неправильною датою не «переносить» відповідь на інший день.
@@ -698,10 +767,9 @@ async def receive_events(
     now: dt.datetime | None = None,
 ) -> SyncEventsResponse:
     """`POST /sync/events`. Результати — у порядку подій у запиті; обробка — за `occurred_at`."""
-    if user.role != "student":
-        # QR-ретрансляція вчителем (B10): у конверті немає підписаного запису учня, тож
-        # автора події визначити не можна. 501, а не `rejected`: клієнт лишить події в outbox.
-        raise AppError("NOT_IMPLEMENTED", "QR relay of student events is not implemented yet", 501)
+    if user.role not in ("student", "teacher"):
+        # Роутер уже пускає лише учня й вчителя; тут — на випадок іншого виклику сервісу.
+        raise AppError("FORBIDDEN", "Insufficient permissions", status_code=403)
     received_at = now or _now()
     threshold = dt.timedelta(seconds=settings.sync_suspicious_skew_s)
     skew = received_at - body.sent_at
@@ -712,8 +780,9 @@ async def receive_events(
         suspicious_skew=abs(skew) > threshold,
         threshold=threshold,
         close_grace=dt.timedelta(seconds=settings.sync_rollcall_close_grace_s),
+        relayed_by=user.id if user.role == "teacher" else None,
     )
-    if any(e.type == "survey_answer" for e in body.events):
+    if batch.relayed_by is None and any(e.type == "survey_answer" for e in body.events):
         batch.tz = await school_service.school_tz(session, user.school_id)
 
     results: list[SyncEventResult | None] = [None] * len(body.events)
@@ -737,13 +806,16 @@ async def receive_events(
         event = body.events[i]
         batch.staged_rollcall = None
         try:
-            results[i] = await _process_event(session, batch, event)
+            result = results[i] = await _process_event(session, batch, event)
             await session.commit()
+            if result.status == "accepted" and event.type != "survey_answer":
+                batch.touched.add(_owner(batch, event))
             if batch.staged_rollcall is not None:
-                session_id, before, status, event_id = batch.staged_rollcall
+                session_id, student_id, before, status, event_id = batch.staged_rollcall
                 # Статус до пакета — від першої зміни в пакеті.
-                first_before = batch.rollcall_changes.get(session_id, (before,))[0]
-                batch.rollcall_changes[session_id] = (first_before, status, event_id)
+                key = (session_id, student_id)
+                first_before = batch.rollcall_changes.get(key, (before,))[0]
+                batch.rollcall_changes[key] = (first_before, status, event_id)
         except Exception as exc:
             await session.rollback()
             if _is_data_error(exc):
@@ -767,21 +839,18 @@ async def receive_events(
             # `duplicate` для вже записаних подій. Payload у лог не пишемо.
             failed += 1
             logger.exception("Sync event processing failed (type=%s)", event.type)
-    if any(
-        r is not None and r.status == "accepted" and e.type != "survey_answer"
-        for r, e in zip(results, body.events, strict=True)
-    ):
+    for student_id in sorted(batch.touched):
         # Агрегати кабінетів (B14) — після commit подій; помилка брокера не ламає прийом.
         # «Як ти зараз?» в агрегати не входить, тож пакет лише з ним перерахунку не ставить.
-        await enqueue_recompute_student(batch.user_id)
-    for session_id, (before, status, event_id) in batch.rollcall_changes.items():
+        await enqueue_recompute_student(student_id)
+    for (session_id, student_id), (before, status, event_id) in batch.rollcall_changes.items():
         if status == before:
             continue  # A→B→A в одному пакеті: для батьків нічого не змінилося
         # Батькам цієї дитини (B12.4): лише id і код статусу. Ключ — id події: повтор задачі
         # не надсилає вдруге, а наступна зміна статусу — окреме повідомлення.
         await enqueue_push(
             "rollcall_status",
-            student_id=batch.user_id,
+            student_id=student_id,
             session_id=session_id,
             status=status,
             key=f"rollcall_status:{event_id}",
