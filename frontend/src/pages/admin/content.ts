@@ -124,6 +124,25 @@ export const usersPage = {
   parentsNote: 'Батьків у списку немає: вони привʼязуються до дітей кодом від вчителя чи адміністрації.',
 }
 
+export const schoolSettings = {
+  title: 'Налаштування школи',
+  alerts: {
+    title: 'Тривоги для школи',
+    text: 'Тривога області вмикає тривогу школи завжди. Щоб реагувати й на тривоги ближче, вкажіть район, громаду чи місто школи.',
+    region: (code: string) => `Область (uid ${code}) задана під час підключення школи.`,
+    raion: 'Район',
+    hromada: 'Громада',
+    city: 'Місто',
+    hint: 'Номер (uid) локації з «Повного списку локацій» alerts.in.ua. Порожньо — не враховувати.',
+    listLink: 'Відкрити список локацій',
+    invalid: 'Лише цифри, до 9 знаків',
+    save: 'Зберегти',
+    saving: 'Зберігаємо…',
+    saved: 'Збережено. Діє з наступної перевірки тривог.',
+    offline: 'Налаштування школи видно лише з інтернетом.',
+  },
+}
+
 export type NavId = 'overview' | 'classes' | 'users' | 'alarms' | 'servers' | 'settings'
 export type TabId = 'overview' | 'classes' | 'alarms' | 'more'
 
@@ -132,6 +151,7 @@ export const navRoutes: Partial<Record<NavId | TabId, string>> = {
   classes: '/admin/classes',
   users: '/admin/users',
   alarms: '/admin/alarms',
+  settings: '/admin/settings',
   more: '/admin/users',
 }
 

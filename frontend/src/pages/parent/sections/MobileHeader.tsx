@@ -1,4 +1,3 @@
-import LogoutButton from '@/features/auth/LogoutButton'
 import Brand from '@/shared/ui/Brand'
 import BellButton from './BellButton'
 
@@ -8,7 +7,6 @@ export default function MobileHeader() {
       <Brand size="app" />
       <div className="flex items-center gap-2">
         <BellButton />
-        <LogoutButton compact className="size-11 shrink-0 rounded-xl border border-line" />
       </div>
     </header>
   )

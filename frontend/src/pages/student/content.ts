@@ -100,6 +100,7 @@ export const navRoutes: Partial<Record<NavId, string>> = {
   lessons: '/student/lessons',
   me: '/student/me',
   calm: '/student/calm',
+  settings: '/student/settings',
 }
 
 export const calmPage = {
@@ -156,6 +157,10 @@ export const mePage = {
     modules: (done: number, total: number) => `модулів ${done} з ${total}`,
     done: 'Пройдено',
   },
+}
+
+export const studentSettings = {
+  pinNote: 'Імʼя чи PIN змінює вчитель. Якщо забув PIN, попроси вчителя скинути його: при наступному вході придумаєш новий.',
 }
 
 export const sidebarNav: { id: NavId; label: string }[] = [

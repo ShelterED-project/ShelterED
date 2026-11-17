@@ -1,6 +1,5 @@
 import iconChevron from '@/assets/parent/chevron-down.svg'
 import iconShield from '@/assets/student/header-shield.svg'
-import LogoutButton from '@/features/auth/LogoutButton'
 import { useCurrentUser } from '@/features/auth/useCurrentUser'
 import Brand from '@/shared/ui/Brand'
 import { useTeacherRollCall } from '@/features/teacher/useTeacherRollCall'
@@ -50,7 +49,6 @@ export default function TeacherHeader() {
         >
           <img src={iconShield} alt="" width={20} height={20} />
         </button>
-        <LogoutButton compact className="size-11 shrink-0 rounded-xl border border-line md:hidden" />
       </div>
     </header>
   )

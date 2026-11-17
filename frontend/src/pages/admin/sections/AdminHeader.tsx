@@ -1,7 +1,7 @@
 import iconPlus from '@/assets/admin/plus-dark.svg'
 import iconSearch from '@/assets/admin/search.svg'
-import LogoutButton from '@/features/auth/LogoutButton'
 import Brand from '@/shared/ui/Brand'
+import SettingsLink from '@/shared/ui/SettingsLink'
 import { school } from '../content'
 
 type Props = {
@@ -55,7 +55,7 @@ export default function AdminHeader({ onAddUser, title = school.name, search }: 
           <img src={iconPlus} alt="" width={18} height={18} />
           <span className="hidden md:inline">Додати користувача</span>
         </button>
-        <LogoutButton compact className="size-11 shrink-0 rounded-xl border border-line md:hidden" />
+        <SettingsLink to="/admin/settings" className="md:hidden" />
       </div>
     </header>
   )

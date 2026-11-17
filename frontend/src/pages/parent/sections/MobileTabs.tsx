@@ -1,5 +1,6 @@
 import iconChat from '@/assets/parent/tab-chat.svg'
-import iconMore from '@/assets/parent/tab-more.svg'
+// «Ще» веде в налаштування, тож іконка — шестерня.
+import iconMore from '@/assets/parent/tab-settings.svg'
 import iconOverview from '@/assets/parent/tab-overview.svg'
 import iconProgress from '@/assets/parent/tab-progress.svg'
 import AppTabs from '@/shared/ui/AppTabs'
@@ -15,6 +16,7 @@ const icons: Record<TabId, string> = {
 
 const items = mobileTabs.map((tab) => ({ ...tab, icon: icons[tab.id], to: navRoutes[tab.id] }))
 
-export default function MobileTabs({ activeId = 'overview' }: { activeId?: TabId }) {
-  return <AppTabs items={items} activeId={activeId} />
+/** activeId null — сторінка поза вкладками (наприклад, налаштування). */
+export default function MobileTabs({ activeId = 'overview' }: { activeId?: TabId | null }) {
+  return <AppTabs items={items} activeId={activeId ?? ''} />
 }

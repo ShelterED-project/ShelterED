@@ -209,6 +209,14 @@ export const navRoutes: Partial<Record<NavId | TabId, string>> = {
   sync: '/teacher/sync',
   schedule: '/teacher/schedule',
   map: '/teacher/map',
+  settings: '/teacher/settings',
+  // На телефоні бічного меню немає: «Ще» веде в налаштування з посиланнями на решту розділів.
+  more: '/teacher/settings',
+}
+
+export const teacherSettings = {
+  classes: (names: string) => `Класи: ${names}`,
+  sectionsTitle: 'Інші розділи',
 }
 
 export const sidebarNav: { id: NavId; label: string }[] = [

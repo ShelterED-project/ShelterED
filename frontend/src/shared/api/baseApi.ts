@@ -99,6 +99,6 @@ export const baseApi = createApi({
   baseQuery: baseQueryWithReauth,
   // Теги кешу: після змін уроку у вчителя оновлюються список уроків, відкритий урок і розклад;
   // після привʼязки дитини — список дітей батьків; після змін адміна — класи й користувачі.
-  tagTypes: ['Lesson', 'LessonList', 'Schedule', 'Children', 'Classes', 'Users'],
+  tagTypes: ['Lesson', 'LessonList', 'Schedule', 'Children', 'Classes', 'Users', 'School'],
   endpoints: () => ({}),
 })
