@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import type { SubmitEvent } from 'react'
 import { Link } from 'react-router'
-import iconGoogle from '@/assets/auth/icon-google.svg'
 import iconKey from '@/assets/auth/icon-key.svg'
 import iconMail from '@/assets/auth/icon-mail.svg'
 import { useAdultLogin } from '@/features/auth/useAdultLogin'
@@ -98,10 +97,6 @@ export default function LoginPage() {
       </div>
 
       <div className="mt-4 flex flex-col gap-3">
-        <button type="button" className={altButton}>
-          <img src={iconGoogle} alt="" width={20} height={20} />
-          Увійти через Google
-        </button>
         <Link to="/register" className={altButton}>
           <img src={iconKey} alt="" width={18} height={18} />
           Я учень — увійти за кодом класу

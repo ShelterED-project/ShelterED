@@ -1,4 +1,5 @@
 import mole from '@/assets/landing/mole.svg'
+import BackButton from '@/shared/ui/BackButton'
 import Brand from '@/shared/ui/Brand'
 import Button from '@/shared/ui/Button'
 
@@ -6,8 +7,9 @@ export default function NotFoundPage() {
   return (
     <div className="flex min-h-screen flex-col bg-oil font-sans text-parchment">
       <header className="border-b border-line-soft">
-        <div className="mx-auto flex h-16 max-w-[1296px] items-center px-4 md:h-20 md:px-8 xl:px-[72px]">
+        <div className="mx-auto flex h-16 max-w-[1296px] items-center justify-between gap-3 px-4 md:h-20 md:px-8 xl:px-[72px]">
           <Brand size="header" />
+          <BackButton />
         </div>
       </header>
 

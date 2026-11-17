@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 import asideBgDesktop from '@/assets/auth/aside-bg-desktop.svg'
 import asideBgMobile from '@/assets/auth/aside-bg-mobile.svg'
 import mole from '@/assets/landing/mole.svg'
+import BackButton from './BackButton'
 import Brand from './Brand'
 
 type Props = {
@@ -36,7 +37,10 @@ export default function AuthLayout({ bubble, children }: Props) {
       </aside>
 
       <main className="flex flex-1 items-center justify-center px-5 py-8 md:px-8 lg:p-16">
-        <div className="w-full max-w-[460px]">{children}</div>
+        <div className="w-full max-w-[460px]">
+          <BackButton className="-ml-1 mb-4" />
+          {children}
+        </div>
       </main>
     </div>
   )
