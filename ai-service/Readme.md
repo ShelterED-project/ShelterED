@@ -2,6 +2,9 @@
 
 Stateless FastAPI-сервіс без бази даних. Ендпоінти: `POST /ai/v1/chat`, `GET /health`.
 
+- Контракт: [`contracts/openapi.yaml`](../contracts/openapi.yaml)
+- Інструкція для backend: [`docs/backend-quickstart.md`](../docs/backend-quickstart.md)
+
 ## Запуск
 
 ```
@@ -15,9 +18,9 @@ docker compose logs -f ai-service
 
 ```
 curl -X POST localhost:8000/ai/v1/chat \
-  -H "X-Internal-Key: change-me" \
+  -H "X-Internal-Key: <INTERNAL_KEY>" \
   -H "Content-Type: application/json" \
-  -d @contracts/explain.json
+  -d @contracts/examples/explain.json
 ```
 
 ## Змінні оточення (усі обов'язкові)
@@ -28,7 +31,31 @@ curl -X POST localhost:8000/ai/v1/chat \
 | `AI_KEY` | ключ API LLM |
 | `LLM_BASE_URL` | OpenAI-сумісна адреса LLM |
 | `MODELS` | назва моделі |
-| `MOCK_LLM` | `true` повертає заглушку без LLM |
+| `MOCK_LLM` | `true` повертає заглушку без LLM і OCR |
+| `MODEL_EXPLAIN`, `MODEL_FAST`, `MODEL_OCR` | необов'язкові, інакше `MODELS` (OCR — `rukopys-ocr`) |
+| `LLM_TIMEOUT` | таймаут одного виклику LLM, с (12) |
+
+## Запуск на своєму ПК і доступ для backend
+
+Backend працює не на цьому ПК, тому `localhost:8000` йому не видно. Відкриваємо тунель:
+
+```
+docker compose up --build -d                      # сервіс на 127.0.0.1:8000
+cloudflared tunnel --url http://localhost:8000    # видасть https://xxxx.trycloudflare.com
+```
+
+1. Адресу з тунелю передати backend-розробнику як `AI_SERVICE_URL`.
+2. `INTERNAL_KEY` у `.env` — довгий випадковий рядок (`python -c "import secrets; print(secrets.token_urlsafe(32))"`),
+   бо сервіс видно з інтернету. Те саме значення backend ставить у `AI_INTERNAL_KEY`.
+3. Адреса `trycloudflare.com` змінюється після кожного перезапуску `cloudflared` — щоразу повідомляти backend.
+   Постійна адреса: іменований тунель Cloudflare (потрібен домен) або статичний домен ngrok.
+4. Вимкнений ПК чи сон = backend отримує помилку з'єднання й показує запасний текст. Це очікувано.
+
+Перевірка ззовні:
+
+```
+curl https://xxxx.trycloudflare.com/health
+```
 
 ## Для DevOps
 

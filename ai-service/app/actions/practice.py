@@ -1,3 +1,4 @@
+import asyncio
 import uuid
 from typing import Any, Dict, Optional
 
@@ -50,7 +51,11 @@ def _finalize(data: Dict[str, Any]) -> None:
 def _new_task(req: ChatRequest) -> ChatResponse:
     difficulty = _difficulty(req)
     system = GEN_SYSTEM.format(
-        grade=req.grade, subject=req.subject or "загальний", topic=req.topic, difficulty=difficulty
+        grade=req.grade,
+        subject=req.subject or "загальний",
+        # topic може бути порожнім, якщо practice вибрав ML-роутер, а не backend
+        topic=req.topic or "на вибір, за шкільною програмою цього класу",
+        difficulty=difficulty,
     )
     user = (req.message or "").strip() or "Створи одне завдання."
     
@@ -143,8 +148,9 @@ def _hint(req: ChatRequest, task: Dict[str, Any]) -> ChatResponse:
 
 
 async def run(req: ChatRequest) -> ChatResponse:
+    # Виклики LLM синхронні: виконуємо в потоці, щоб не блокувати event loop
     if req.task is None:
-        return _new_task(req)
+        return await asyncio.to_thread(_new_task, req)
     if req.hints_used >= 3:
-        return _solution(req, req.task)
-    return _hint(req, req.task)
+        return await asyncio.to_thread(_solution, req, req.task)
+    return await asyncio.to_thread(_hint, req, req.task)

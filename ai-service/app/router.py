@@ -2,7 +2,6 @@ import asyncio
 import os
 
 import joblib
-from sentence_transformers import SentenceTransformer
 
 _BASE = os.path.dirname(os.path.abspath(__file__))
 CLF_PATH = os.path.join(_BASE, "..", "router_clf.joblib")
@@ -19,6 +18,9 @@ def _load():
       raise FileNotFoundError(
           f"Файл класифікатора не знайдено: {CLF_PATH}. Спочатку натренуйте модель."
       )
+    # Лінивий імпорт: torch потрібен лише коли action не передано
+    from sentence_transformers import SentenceTransformer
+
     _embedder = SentenceTransformer(EMBEDDER_NAME)
     _clf = joblib.load(CLF_PATH)
   return _embedder, _clf

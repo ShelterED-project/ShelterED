@@ -69,13 +69,20 @@ async def check_node(state: AgentState) -> dict:
     return {
         "output_text": "Спочатку попроси завдання, а потім надсилай свою відповідь.",
         "current_action": "practice",
+        "suggestions": ["✍️ До практики"],
     }
 
   response: ChatResponse = await run_check(
-      _base_request(state, task=state.current_task, hints_used=state.hints_used)
+      _base_request(
+          state,
+          task=state.current_task,
+          hints_used=state.hints_used,
+          image_base64=state.image_base64,
+      )
   )
   return {
       "output_text": response.reply,
+      "check_result": response.check_result,
       "suggestions": ["🔄 Пройти ще раз", "🚀 Наступна тема"],
   }
 

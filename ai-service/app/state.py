@@ -2,7 +2,7 @@ from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
-from app.schemas import UserProfile
+from app.schemas import CheckResult, UserProfile
 
 
 class AgentState(BaseModel):
@@ -14,6 +14,7 @@ class AgentState(BaseModel):
   topic_id: Optional[str] = None
 
   user_input: str = ""
+  image_base64: Optional[str] = None
   history: List[dict] = Field(default_factory=list)
   profile: Optional[UserProfile] = None
 
@@ -22,4 +23,5 @@ class AgentState(BaseModel):
   hints_used: int = 0
 
   output_text: str = ""
+  check_result: Optional[CheckResult] = None
   suggestions: List[str] = Field(default_factory=list)

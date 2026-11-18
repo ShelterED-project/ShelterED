@@ -1,3 +1,6 @@
+import asyncio
+from functools import partial
+
 from app.llm import complete
 from app.schemas import ChatRequest, ChatResponse, IntentEnum
 
@@ -49,7 +52,9 @@ async def run(req: ChatRequest) -> ChatResponse:
 
   user_prompt = message or f"Поясни тему «{req.topic}»."
 
-  reply = complete(
+  # complete() синхронний: виконуємо в потоці, щоб не блокувати event loop (і /health)
+  reply = await asyncio.to_thread(partial(
+      complete,
       system_prompt,
       user_prompt,
       kind="explain",
@@ -57,7 +62,7 @@ async def run(req: ChatRequest) -> ChatResponse:
       temperature=0.4,
       max_tokens=400,
       mock="[MOCK] Стандартизоване пояснення.",
-  )
+  ))
 
   return ChatResponse(
       reply=reply, intent=IntentEnum.explain, topic_id=req.topic_id

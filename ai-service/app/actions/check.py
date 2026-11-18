@@ -1,15 +1,11 @@
 # app/actions/check.py
-import json
+import asyncio
+from functools import partial
 from typing import Any, Dict
-from openai import AsyncOpenAI
-from app.ocr import call_rukopys_ocr
-from app.config import settings
-from app.schemas import CheckResult, ChatRequest, ChatResponse, IntentEnum
 
-client = AsyncOpenAI(
-    base_url=settings.LLM_BASE_URL,
-    api_key=settings.AI_KEY
-)
+from app.llm import complete_json
+from app.ocr import call_rukopys_ocr
+from app.schemas import CheckResult, ChatRequest, ChatResponse, IntentEnum
 
 RUBRIC = """Ти — Mamay — мудрий, підтримуючий та справедливий український вчитель.
 Проаналізуй розв'язання учня {grade} класу (предмет «{subject}», тема «{topic}»), яке було розпізнане з його зошита.
@@ -26,8 +22,25 @@ RUBRIC = """Ти — Mamay — мудрий, підтримуючий та сп�
   "comment": "1–2 розгорнутих, доброзичливих речення українською від Mamay: що зроблено добре і де варто перевірити себе."
 }}"""
 
+def _expected(task: Dict[str, Any] | None) -> str:
+    task = task or {}
+    return str(task.get("answer") or task.get("expected_answer") or "").strip()
+
+
+def _mock_result(req: ChatRequest, student_answer: str) -> Dict[str, Any]:
+    """MOCK_LLM: детерміновано порівнює відповідь з еталоном (для тестів і заглушок)."""
+    expected = _expected(req.task)
+    norm = lambda v: v.lower().replace(" ", "").replace(",", ".")
+    ok = bool(expected) and norm(expected) in norm(student_answer)
+    return {
+        "score": 1.0 if ok else 0.0,
+        "error_type": None if ok else "wrong_answer",
+        "comment": "[MOCK] Правильно!" if ok else "[MOCK] Є помилка, перевір обчислення.",
+    }
+
+
 def _finalize(data: Dict[str, Any]) -> None:
-    score = float(data.get("score", 0.0))  
+    score = float(data.get("score", 0.0))
     data["score"] = max(0.0, min(1.0, score))
     data.setdefault("error_type", None)
     data["comment"] = str(data.get("comment") or "").strip() or "Mamay перевірив роботу. Продовжуй у тому ж дусі!"
@@ -35,7 +48,7 @@ def _finalize(data: Dict[str, Any]) -> None:
 async def run(req: ChatRequest) -> ChatResponse:
     # 1. Розпізнаємо текст із фотографії зошита через Rukopys OCR
     student_answer = ""
-    if hasattr(req, "image_base64") and req.image_base64:
+    if req.image_base64:
         student_answer = await call_rukopys_ocr(req.image_base64)
     elif req.message:
         student_answer = req.message
@@ -44,6 +57,9 @@ async def run(req: ChatRequest) -> ChatResponse:
         return ChatResponse(
             reply="Не вдалося розпізнати текст на фото. Спробуй зробити чіткіший знімок зошита!",
             intent=IntentEnum.check,
+            topic_id=req.topic_id,
+            task=req.task,
+            hints_used=req.hints_used,
             check_result=CheckResult(correct=False, score=0.0, error_type="no_answer", method="llm")
         )
 
@@ -54,40 +70,26 @@ async def run(req: ChatRequest) -> ChatResponse:
         topic=req.topic or "Обчислення та завдання з зошита"
     )
 
+    question = str((req.task or {}).get("question") or "").strip()
     user_prompt = (
-        f"Розпізнаний рукописний текст із зошита учня:\n"
+        (f"Умова завдання:\n{question}\n\n" if question else "")
+        + f"Розпізнаний рукописний текст із зошита учня:\n"
         f"\"\"\"\n{student_answer}\n\"\"\"\n\n"
         f"Проаналізуй цей текст та оціни правильність виконуваних завдань."
     )
 
-    # 3. Викликаємо MamayLM для автономного аналізу
-    response = await client.chat.completions.create(
-        model="MamayLM-Gemma-3-27B-IT-v2.0",
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt}
-        ],
+    # 3. Модель — MODEL_EXPLAIN (у .env можна вказати MamayLM-Gemma-3-27B-IT-v2.0).
+    #    complete_json: таймаут, один повтор, LLMError → 503, MOCK_LLM.
+    data = await asyncio.to_thread(partial(
+        complete_json,
+        system_prompt,
+        user_prompt,
+        kind="explain",
         temperature=0.0,
-        max_tokens=300
-    )
-    
-    raw_content = response.choices[0].message.content or "{}"
-    
-    try:
-        cleaned = raw_content.strip()
-        if cleaned.startswith("```json"):
-            cleaned = cleaned[7:]
-        if cleaned.startswith("```"):
-            cleaned = cleaned[3:]
-        if cleaned.endswith("```"):
-            cleaned = cleaned[:-3]
-        data = json.loads(cleaned.strip())
-    except json.JSONDecodeError:
-        data = {
-            "score": 0.5,
-            "error_type": "parsing_error",
-            "comment": "Mamay перевірив твою роботу! Продовжуй навчатися та вдосконалювати свої знання."
-        }
+        max_tokens=300,
+        mock=_mock_result(req, student_answer),
+        finalize=_finalize,
+    ))
 
     _finalize(data)
     score = data["score"]

@@ -1,0 +1,14 @@
+{
+  "grade": 6,
+  "subject": "math",
+  "topic": "Пропорції та відсотки",
+  "topic_id": "math_6_proportions_03",
+  "message": "Дай мені задачу на відсотки",
+  "hints_used": 0,
+  "history": [
+    {
+      "role": "assistant",
+      "text": "Відсоток — це сота частина числа. Спробуємо задачу?"
+    }
+  ]
+}

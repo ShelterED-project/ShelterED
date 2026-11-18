@@ -1,246 +1,469 @@
 openapi: 3.1.0
 info:
-  title: FastAPI
-  version: 0.1.0
+  title: ShelterED AI Service
+  version: 1.0.0
+  summary: Внутрішній API AI-репетитора. Клієнт — лише backend.
+  description: |
+    Stateless-сервіс: усе потрібне приходить у запиті, усе змінене повертається у відповіді.
+    Бази даних і пам'яті між запитами немає — `task`, `hints_used`, `history` зберігає backend.
+
+    **Правила сумісності v1**
+    - У межах `/ai/v1` зміни лише додають поля. Видалення чи перейменування поля = `/ai/v2`.
+    - Backend ігнорує невідомі поля відповіді, AI-сервіс ігнорує невідомі поля запиту.
+    - Значення enum можуть додаватися (наприклад, новий `intent`). Невідоме значення backend
+      обробляє як `explain` (просто показує `reply`).
+
+    **Приватність**: у запит не передаються ім'я, email, школа. `user_id` — лише псевдонім
+    (HMAC від id користувача з секретом backend).
+
+    Коротка інструкція для backend: `docs/backend-quickstart.md`.
+servers:
+  - url: https://{tunnel}
+    description: Сервіс на ПК AI-розробника через тунель (адресу дає AI-розробник)
+    variables:
+      tunnel:
+        default: example.trycloudflare.com
+  - url: http://localhost:8000
+    description: Локально
+
+tags:
+  - name: chat
+  - name: system
+
 paths:
   /health:
     get:
-      summary: Health
-      operationId: health_health_get
+      tags: [system]
+      operationId: health
+      summary: Liveness-перевірка (без автентифікації, без виклику LLM)
+      security: []
       responses:
         '200':
-          description: Successful Response
+          description: Сервіс живий
           content:
             application/json:
-              schema: {}
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    type: string
+                    const: ok
+              example: { status: ok }
+
   /ai/v1/chat:
     post:
-      summary: Chat
-      operationId: chat_ai_v1_chat_post
+      tags: [chat]
+      operationId: chat
+      summary: Один крок діалогу з учнем
+      description: |
+        Режим задає поле `action`:
+        - `explain` — пояснення теми або відповідь на питання;
+        - `practice` без `task` — нове завдання (потрібен `topic`);
+        - `practice` з `task` — наступна підказка (`hints_used` 0–2) або розв'язок (`hints_used` = 3);
+        - `check` з `task` — перевірка відповіді учня (`message` або `image_base64`).
+
+        `action` необов'язковий. Якщо його немає, режим визначає ML-роутер (класифікатор
+        на ембедингах `message`); якщо роутер недоступний — `explain`. Що саме зроблено,
+        повертає поле `intent` — backend орієнтується на нього.
+
+        Передавати `action` варто, коли режим уже відомий (кнопка «Підказка», «Перевірити»):
+        роутер пропускається, відповідь швидша й без помилок класифікації.
+
+        Незалежно від `action` відповідь може мати `intent: safety` — тоді урок не продовжується
+        (див. `IntentEnum`).
       parameters:
-      - name: x-internal-key
-        in: header
-        required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: X-Internal-Key
+        - $ref: '#/components/parameters/RequestId'
+      security:
+        - InternalKey: []
       requestBody:
         required: true
         content:
           application/json:
             schema:
               $ref: '#/components/schemas/ChatRequest'
+            examples:
+              explain:
+                summary: Пояснити тему
+                value:
+                  user_id: s_7f3c9a
+                  action: explain
+                  grade: 5
+                  subject: math
+                  topic: Додавання дробів з різними знаменниками
+                  topic_id: math_5_fractions_01
+                  message: Поясни простими словами, як додавати дроби з різними знаменниками.
+                  history: []
+                  profile:
+                    mastery: [{ topic_id: math_5_fractions_01, mastery: 0.4 }]
+              practice_new_task:
+                summary: Нове завдання (без task)
+                value:
+                  action: practice
+                  grade: 6
+                  subject: math
+                  topic: Пропорції та відсотки
+                  topic_id: math_6_proportions_03
+                  message: Дай задачу на відсотки від числа.
+                  profile:
+                    mastery: [{ topic_id: math_6_proportions_03, mastery: 0.55 }]
+                    traits: { pace: normal, needs_detailed_steps: false }
+              auto_router:
+                summary: Без action — режим вибирає ML-роутер
+                value:
+                  grade: 6
+                  subject: math
+                  topic: Пропорції та відсотки
+                  topic_id: math_6_proportions_03
+                  message: Дай мені задачу на відсотки
+                  hints_used: 0
+                  history:
+                    - { role: assistant, text: 'Відсоток — це сота частина числа. Спробуємо задачу?' }
+              practice_hint:
+                summary: Наступна підказка (task + hints_used)
+                value:
+                  action: practice
+                  grade: 6
+                  topic: Пропорції та відсотки
+                  topic_id: math_6_proportions_03
+                  hints_used: 0
+                  task: &task_percent
+                    task_id: g-3f9a1c
+                    question: Знайди 20% від числа 150.
+                    answer_type: number
+                    answer: '30'
+                    difficulty: 2
+                    hints:
+                      - Що означає 20%? Яку частину числа це становить?
+                      - 20% — це 0,2. Помнож число на 0,2.
+                      - 150 · 0,2 = 15 · 2 = ...
+                    common_mistakes:
+                      - { wrong: '3000', error_type: percent_as_integer, feedback: 'Ти помножив на 20, а треба на 0,2.' }
+              check_text:
+                summary: Перевірити текстову відповідь
+                value:
+                  action: check
+                  grade: 6
+                  topic: Пропорції та відсотки
+                  topic_id: math_6_proportions_03
+                  message: '30'
+                  hints_used: 1
+                  task: *task_percent
+              check_photo:
+                summary: Перевірити фото зошита
+                value:
+                  action: check
+                  grade: 6
+                  topic_id: math_6_proportions_03
+                  image_base64: data:image/jpeg;base64,/9j/4AAQSkZJRgABAQ...
+                  task: *task_percent
       responses:
         '200':
-          description: Successful Response
+          description: Відповідь для учня
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/RequestId'
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ChatResponse'
-        '422':
-          description: Validation Error
+              examples:
+                explain:
+                  summary: action=explain
+                  value:
+                    reply: "Щоб додати дроби з різними знаменниками, спершу зведи їх до спільного знаменника.\nНаприклад: 1/2 + 1/4 = 2/4 + 1/4 = 3/4.\nА як ти зведеш до спільного знаменника 1/3 і 1/6?"
+                    intent: explain
+                    topic_id: math_5_fractions_01
+                    task: null
+                    hints_used: 0
+                    check_result: null
+                    suggestions: ['⛏️ Копати глибше', '✍️ До практики']
+                practice_new_task:
+                  summary: action=practice без task → нове завдання
+                  value:
+                    reply: 'Завдання: Знайди 20% від числа 150.'
+                    intent: practice
+                    topic_id: math_6_proportions_03
+                    task: *task_percent
+                    hints_used: 0
+                    check_result: null
+                    suggestions: ['💡 Дай підказку', '✅ Відповісти', "📖 Показати розв'язок"]
+                practice_hint:
+                  summary: action=practice з task, hints_used=0 → підказка 1
+                  value:
+                    reply: 'Підказка 1: Що означає 20%? Яку частину числа це становить?'
+                    intent: practice
+                    topic_id: math_6_proportions_03
+                    task: *task_percent
+                    hints_used: 1
+                    check_result: null
+                    suggestions: ['💡 Дай підказку', '✅ Відповісти', "📖 Показати розв'язок"]
+                practice_solution:
+                  summary: action=practice з task, hints_used=3 → розв'язок
+                  value:
+                    reply: "Розв'язок:\n20% = 0,2. 150 · 0,2 = 30. Відповідь: 30."
+                    intent: practice
+                    topic_id: math_6_proportions_03
+                    task: *task_percent
+                    hints_used: 3
+                    check_result: null
+                    suggestions: ['💡 Дай підказку', '✅ Відповісти', "📖 Показати розв'язок"]
+                check_correct:
+                  summary: action=check → правильно
+                  value:
+                    reply: Чудово! 20% від 150 — це справді 30.
+                    intent: check
+                    topic_id: math_6_proportions_03
+                    task: *task_percent
+                    hints_used: 1
+                    check_result: { correct: true, score: 1.0, error_type: null, method: llm }
+                    suggestions: ['🔄 Пройти ще раз', '🚀 Наступна тема']
+                check_wrong:
+                  summary: action=check → помилка
+                  value:
+                    reply: Ти помножив на 20, а треба на 0,2. Спробуй ще раз!
+                    intent: check
+                    topic_id: math_6_proportions_03
+                    task: *task_percent
+                    hints_used: 1
+                    check_result: { correct: false, score: 0.0, error_type: percent_as_integer, method: llm }
+                    suggestions: ['🔄 Пройти ще раз', '🚀 Наступна тема']
+                safety:
+                  summary: Спрацював захист (будь-який action)
+                  value:
+                    reply: "Дякую, що сказав. Зараз головне — ти. Підійди до дорослого поруч. Дитяча лінія: 116 111, екстрена: 112."
+                    intent: safety
+                    topic_id: math_6_proportions_03
+                    task: null
+                    hints_used: 0
+                    check_result: null
+                    suggestions: []
+        '401':
+          description: Відсутній або невірний `X-Internal-Key`
           content:
             application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { code: unauthorized, message: Invalid or missing X-Internal-Key, details: null }
+        '422':
+          description: |
+            Запит не пройшов перевірку. `code`:
+            - `validation_error` — тіло не відповідає схемі (`details` — список полів);
+            - `task_required` — `check` без `task`;
+            - `topic_required` — `practice` без `task` і без `topic`;
+            - `invalid_image` — `image_base64` не вдалося декодувати як зображення.
+
+            Повторювати такий запит без змін немає сенсу.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              examples:
+                task_required:
+                  value: { code: task_required, message: action=check requires task, details: null }
+                topic_required:
+                  value: { code: topic_required, message: action=practice without task requires topic, details: null }
+                validation_error:
+                  value:
+                    code: validation_error
+                    message: Request validation failed
+                    details: [{ loc: [body, grade], msg: Input should be less than or equal to 11, type: less_than_equal }]
+        '500':
+          description: Непередбачена помилка сервісу
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { code: internal_error, message: Internal server error, details: null }
+        '503':
+          description: |
+            LLM/OCR недоступна, таймаут або непридатна відповідь моделі після повтору.
+            Запасного тексту сервіс не повертає — його показує backend (кешоване пояснення з пакета).
+            Можна повторити один раз.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { code: model_unavailable, message: LLM request failed, details: null }
+
 components:
+  securitySchemes:
+    InternalKey:
+      type: apiKey
+      in: header
+      name: X-Internal-Key
+      description: Спільний секрет backend ↔ AI (`INTERNAL_KEY` в AI, `AI_INTERNAL_KEY` у backend).
+
+  parameters:
+    RequestId:
+      name: X-Request-ID
+      in: header
+      required: false
+      description: Id запиту backend для наскрізних логів. Повертається у відповіді без змін.
+      schema: { type: string, maxLength: 128 }
+
+  headers:
+    RequestId:
+      description: Той самий `X-Request-ID`, що прийшов у запиті
+      schema: { type: string }
+
   schemas:
-    ChatRequest:
-      properties:
-        action:
-          type: string
-          title: Action
-          default: explain
-        grade:
-          type: integer
-          maximum: 11.0
-          minimum: 1.0
-          title: Grade
-          default: 5
-        subject:
-          type: string
-          title: Subject
-          default: math
-        topic:
-          type: string
-          title: Topic
-          default: Fractions
-        topic_id:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Topic Id
-        message:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Message
-          default: Поясни як рахувати дроби
-        style:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Style
-          default: 'detailed '
-        level:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Level
-          default: '1'
-        task:
-          anyOf:
-          - additionalProperties: true
-            type: object
-          - type: 'null'
-          title: Task
-        hints_used:
-          anyOf:
-          - type: integer
-            maximum: 3.0
-            minimum: 0.0
-          - type: 'null'
-          title: Hints Used
-          default: 0
-        history:
-          anyOf:
-          - items:
-              additionalProperties:
-                type: string
-              type: object
-            type: array
-          - type: 'null'
-          title: History
-        profile:
-          anyOf:
-          - $ref: '#/components/schemas/UserProfile'
-          - type: 'null'
-      type: object
-      title: ChatRequest
-    ChatResponse:
-      properties:
-        reply:
-          type: string
-          title: Reply
-        intent:
-          $ref: '#/components/schemas/IntentEnum'
-        topic_id:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Topic Id
-        task:
-          anyOf:
-          - additionalProperties: true
-            type: object
-          - type: 'null'
-          title: Task
-        hints_used:
-          anyOf:
-          - type: integer
-          - type: 'null'
-          title: Hints Used
-        check_result:
-          anyOf:
-          - $ref: '#/components/schemas/CheckResult'
-          - type: 'null'
-      type: object
-      required:
-      - reply
-      - intent
-      title: ChatResponse
-    CheckResult:
-      properties:
-        correct:
-          type: boolean
-          title: Correct
-        score:
-          type: number
-          maximum: 1.0
-          minimum: 0.0
-          title: Score
-        error_type:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Error Type
-        method:
-          type: string
-          title: Method
-      type: object
-      required:
-      - correct
-      - score
-      - method
-      title: CheckResult
-    HTTPValidationError:
-      properties:
-        detail:
-          items:
-            $ref: '#/components/schemas/ValidationError'
-          type: array
-          title: Detail
-      type: object
-      title: HTTPValidationError
+    ActionEnum:
+      type: string
+      enum: [explain, practice, check]
+
     IntentEnum:
       type: string
-      enum:
-      - explain
-      - practice
-      - check
-      title: IntentEnum
+      enum: [explain, practice, check, safety]
+      description: |
+        Що сервіс фактично зробив. Може відрізнятися від `action`:
+        - `safety` — у повідомленні ознаки тривоги/розпачу. Показати `reply` як є, сховати кнопки уроку,
+          не змінювати `task`/`hints_used`. (Зарезервовано: модуль safety ще підключається.)
+        - для запиту без `action` — режим, який вибрав роутер. Якщо роутер вибрав `check`,
+          а `task` немає, повертається `practice` з проханням спершу взяти завдання.
+
+    HistoryItem:
+      type: object
+      required: [role, text]
+      properties:
+        role: { type: string, enum: [user, assistant] }
+        text: { type: string, maxLength: 4000 }
+
     MasteryItem:
-      properties:
-        topic_id:
-          type: string
-          title: Topic Id
-        mastery:
-          type: number
-          maximum: 1.0
-          minimum: 0.0
-          title: Mastery
       type: object
-      required:
-      - topic_id
-      - mastery
-      title: MasteryItem
+      required: [topic_id, mastery]
+      properties:
+        topic_id: { type: string }
+        mastery: { type: number, minimum: 0, maximum: 1 }
+
+    Traits:
+      type: object
+      properties:
+        pace: { type: string, enum: [slow, normal, fast], default: normal }
+        needs_detailed_steps: { type: boolean, default: false }
+
     UserProfile:
+      type: object
       properties:
         mastery:
+          type: [array, 'null']
+          maxItems: 10
+          items: { $ref: '#/components/schemas/MasteryItem' }
+        traits:
           anyOf:
-          - items:
-              $ref: '#/components/schemas/MasteryItem'
-            type: array
-            maxItems: 10
-          - type: 'null'
-          title: Mastery
+            - $ref: '#/components/schemas/Traits'
+            - type: 'null'
+
+    CommonMistake:
       type: object
-      title: UserProfile
-    ValidationError:
       properties:
-        loc:
-          items:
-            anyOf:
-            - type: string
-            - type: integer
-          type: array
-          title: Location
-        msg:
-          type: string
-          title: Message
-        type:
-          type: string
-          title: Error Type
-        input:
-          title: Input
-        ctx:
-          type: object
-          title: Context
+        wrong: { type: string }
+        error_type: { type: string }
+        feedback: { type: string }
+
+    Task:
       type: object
-      required:
-      - loc
-      - msg
-      - type
-      title: ValidationError
+      additionalProperties: true
+      description: |
+        Завдання, з яким працює учень. Сервіс його не зберігає: backend зберігає `task` з відповіді
+        `practice` і повертає **той самий об'єкт без змін** у наступних `practice`/`check`.
+
+        ⚠️ `answer`, `expected_answer`, `hints`, `common_mistakes` містять відповідь.
+        Їх **не можна** віддавати фронтенду — лише `task_id` і `question`.
+      required: [question]
+      properties:
+        task_id: { type: string }
+        question: { type: string }
+        answer_type: { type: string, enum: [choice, number, fraction, text] }
+        answer: { type: string, description: Еталонна відповідь }
+        expected_answer: { type: string, description: Синонім `answer` (застаріле ім'я) }
+        difficulty: { type: integer, minimum: 1, maximum: 3 }
+        hints:
+          type: array
+          maxItems: 3
+          items: { type: string }
+        common_mistakes:
+          type: array
+          items: { $ref: '#/components/schemas/CommonMistake' }
+
+    ChatRequest:
+      type: object
+      required: [grade]
+      properties:
+        user_id:
+          type: [string, 'null']
+          maxLength: 128
+          description: Псевдонім учня (HMAC). Не id з БД, не ім'я.
+        action:
+          description: Необов'язковий. Немає або null — режим вибирає ML-роутер.
+          anyOf:
+            - $ref: '#/components/schemas/ActionEnum'
+            - type: 'null'
+        grade: { type: integer, minimum: 1, maximum: 11 }
+        subject: { type: [string, 'null'] }
+        topic: { type: [string, 'null'], description: 'Назва теми. Обов''язкова для practice без task' }
+        topic_id: { type: [string, 'null'], description: Повертається у відповіді без змін }
+        message:
+          type: [string, 'null']
+          default: ''
+          description: Питання учня, прохання або відповідь на завдання (для check)
+        image_base64:
+          type: [string, 'null']
+          description: Фото відповіді (base64 або data URL). Лише для check. Рекомендовано ≤ 1 МБ.
+        task:
+          anyOf:
+            - $ref: '#/components/schemas/Task'
+            - type: 'null'
+        hints_used: { type: integer, minimum: 0, maximum: 3, default: 0 }
+        history:
+          type: [array, 'null']
+          maxItems: 8
+          items: { $ref: '#/components/schemas/HistoryItem' }
+          description: До 8 останніх реплік діалогу, від старих до нових
+        profile:
+          anyOf:
+            - $ref: '#/components/schemas/UserProfile'
+            - type: 'null'
+
+    CheckResult:
+      type: object
+      required: [correct, score, method]
+      properties:
+        correct: { type: boolean, description: 'score ≥ 0.7' }
+        score: { type: number, minimum: 0, maximum: 1 }
+        error_type: { type: [string, 'null'] }
+        method: { type: string, enum: [code, llm] }
+
+    ChatResponse:
+      type: object
+      required: [reply, intent, suggestions]
+      properties:
+        reply: { type: string, description: Текст для учня (може містити переноси рядків) }
+        intent: { $ref: '#/components/schemas/IntentEnum' }
+        topic_id: { type: [string, 'null'] }
+        task:
+          anyOf:
+            - $ref: '#/components/schemas/Task'
+            - type: 'null'
+          description: Актуальне завдання. Backend зберігає його замість попереднього.
+        hints_used:
+          type: [integer, 'null']
+          minimum: 0
+          maximum: 3
+          description: Актуальна кількість показаних підказок. Backend зберігає.
+        check_result:
+          anyOf:
+            - $ref: '#/components/schemas/CheckResult'
+            - type: 'null'
+          description: Лише для intent=check
+        suggestions:
+          type: array
+          items: { type: string }
+          description: Підписи кнопок швидких дій (необов'язково показувати)
+
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          description: Машиночитний код. Нові коди можуть з'являтися.
+          examples: [unauthorized, validation_error, task_required, topic_required, invalid_image, model_unavailable, internal_error]
+        message: { type: string, description: Для логів, не для учня }
+        details: { description: Додаткові дані (для validation_error — список полів) }

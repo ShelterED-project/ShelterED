@@ -60,7 +60,7 @@ ShelterED це AI-репетитор для школярів. AI-сервіс є
 
 | Поле | Тип | Обов'язкове | Опис |
 | --- | --- | --- | --- |
-| `action` | enum | так | `explain`, `practice`, `check` |
+| `action` | enum | ні | `explain`, `practice`, `check`. Немає — режим вибирає ML-роутер (`router.py`), фактичний режим у `intent` відповіді |
 | `grade` | int | так | клас, 1–11 |
 | `subject` | string | ні | предмет |
 | `topic` | string | ні | назва теми. Для `practice` без `task` обов'язкова |
@@ -100,15 +100,19 @@ ShelterED це AI-репетитор для школярів. AI-сервіс є
 
 ### Помилки
 
-| HTTP | Коли | Формат |
-| --- | --- | --- |
-| 401 | невірний `X-Internal-Key` | `{"detail": {"code": "unauthorized"}}` |
-| 422 | `check` без `task` | `{"detail": {"code": "task_required"}}` |
-| 422 | `practice` без `task` і без `topic` | `{"detail": {"code": "topic_required"}}` |
-| 422 | невалідне тіло запиту | стандартна відповідь FastAPI |
-| 503 | LLM недоступна або повернула непридатний JSON після одного повтору | `{"code": "model_unavailable", "message": "..."}` |
+Усі помилки мають одне тіло: `{"code": "...", "message": "...", "details": ...}`.
 
-При `503` сервіс не повертає запасної відповіді: її має показати бекенд.
+| HTTP | `code` | Коли |
+| --- | --- | --- |
+| 401 | `unauthorized` | невірний `X-Internal-Key` |
+| 422 | `validation_error` | невалідне тіло (`details` — список полів) |
+| 422 | `task_required` | `check` без `task` |
+| 422 | `topic_required` | `practice` без `task` і без `topic` |
+| 422 | `invalid_image` | `image_base64` не декодується як зображення |
+| 500 | `internal_error` | непередбачена помилка |
+| 503 | `model_unavailable` | LLM/OCR недоступна або повернула непридатний JSON після одного повтору |
+
+При `503` сервіс не повертає запасної відповіді: її має показати бекенд. Повна схема: `contracts/openapi.yaml`.
 
 ### Приклад
 
@@ -131,7 +135,7 @@ curl -X POST localhost:8000/ai/v1/chat \
 
 **Задумана схема для `check`:** `image_base64` → `call_rukopys_ocr` → розпізнаний текст стає відповіддю учня → звичайна перевірка. Рекомендовано одне фото на одне завдання з підписаним номером.
 
-**Стан:** модуль готовий, але `main.py` його не викликає. Підключення має бути в `actions/check.py` (його в завантажених файлах немає, тож перевірте).
+**Стан:** підключено: `main.py` → граф → `actions/check.py` → `call_rukopys_ocr`. Модель — `MODEL_OCR` (за замовчуванням `rukopys-ocr`). Битий base64 → `422 invalid_image`.
 
 ## 6. Структура проєкту
 
@@ -160,7 +164,7 @@ curl -X POST localhost:8000/ai/v1/chat \
 | `MODELS` | так | модель за замовчуванням |
 | `MODEL_EXPLAIN` | ні | модель для `explain` і текстової перевірки (інакше `MODELS`) |
 | `MODEL_FAST` | ні | модель для завдань і підказок (інакше `MODELS`) |
-| `MODEL_OCR` | ні | модель розпізнавання. Зараз використовується лише в `llm.py`, а `ocr.py` бере захардкоджену `rukopys-ocr` |
+| `MODEL_OCR` | ні | модель розпізнавання (за замовчуванням `rukopys-ocr`) |
 | `LLM_TIMEOUT` | ні | таймаут виклику LLM, секунди (за замовчуванням 12) |
 | `MOCK_LLM` | ні | `true` вмикає заглушки без виклику LLM (за замовчуванням `false`) |
 
@@ -185,11 +189,7 @@ docker compose up --build -d
 curl localhost:8000/health
 ```
 
-Тести (з папки `ai-service`, без мережі, з `MOCK_LLM=true`):
-
-```
-PYTHONPATH=. python -m pytest ../tests -q
-```
+Перевірка без LLM: поставити `MOCK_LLM=true` у `.env` і надіслати приклади з `contracts/examples/`.
 
 
 ## 10. Словник

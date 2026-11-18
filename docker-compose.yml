@@ -7,5 +7,8 @@ services:
     env_file: .env
     ports:
       - "127.0.0.1:8000:8000"
+    # щоб LLM_BASE_URL=http://host.docker.internal:11434/v1 (Ollama на ПК) працював і на Linux
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     restart: unless-stopped
     mem_limit: 2g

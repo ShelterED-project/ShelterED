@@ -1,0 +1,27 @@
+{
+  "action": "check",
+  "grade": 6,
+  "topic": "Пропорції та відсотки",
+  "topic_id": "math_6_proportions_03",
+  "message": "30",
+  "hints_used": 1,
+  "task": {
+    "task_id": "g-3f9a1c",
+    "question": "Знайди 20% від числа 150.",
+    "answer_type": "number",
+    "answer": "30",
+    "difficulty": 2,
+    "hints": [
+      "Що означає 20%? Яку частину числа це становить?",
+      "20% — це 0,2. Помнож число на 0,2.",
+      "150 · 0,2 = 15 · 2 = ..."
+    ],
+    "common_mistakes": [
+      {
+        "wrong": "3000",
+        "error_type": "percent_as_integer",
+        "feedback": "Ти помножив на 20, а треба на 0,2."
+      }
+    ]
+  }
+}

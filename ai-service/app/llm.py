@@ -50,6 +50,8 @@ def complete(
 
     messages: List[Dict[str, str]] = [{"role": "system", "content": system}]
     for m in (history or [])[-8:]:
+        if hasattr(m, "model_dump"):  # HistoryItem
+            m = m.model_dump()
         role = m.get("role")
         text = m.get("text") or m.get("content")
         if role in ("user", "assistant") and text:
