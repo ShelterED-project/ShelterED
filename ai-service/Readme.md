@@ -37,25 +37,37 @@ curl -X POST localhost:8000/ai/v1/chat \
 
 ## Запуск на своєму ПК і доступ для backend
 
-Backend працює не на цьому ПК, тому `localhost:8000` йому не видно. Відкриваємо тунель:
+Backend працює не на цьому ПК, тому `localhost:8000` йому не видно. Сервіс відкривається в інтернет
+через ngrok за **постійною** адресою (безкоштовний dev-домен акаунта ngrok: dashboard → Domains).
+
+Один раз:
 
 ```
-docker compose up --build -d                      # сервіс на 127.0.0.1:8000
-cloudflared tunnel --url http://localhost:8000    # видасть https://xxxx.trycloudflare.com
+winget install ngrok.ngrok
+ngrok config add-authtoken <токен з dashboard → Your Authtoken>
 ```
 
-1. Адресу з тунелю передати backend-розробнику як `AI_SERVICE_URL`.
-2. `INTERNAL_KEY` у `.env` — довгий випадковий рядок (`python -c "import secrets; print(secrets.token_urlsafe(32))"`),
-   бо сервіс видно з інтернету. Те саме значення backend ставить у `AI_INTERNAL_KEY`.
-3. Адреса `trycloudflare.com` змінюється після кожного перезапуску `cloudflared` — щоразу повідомляти backend.
-   Постійна адреса: іменований тунель Cloudflare (потрібен домен) або статичний домен ngrok.
-4. Вимкнений ПК чи сон = backend отримує помилку з'єднання й показує запасний текст. Це очікувано.
+Щоразу:
+
+```
+# 1. Docker Desktop запущений
+docker compose up -d                                   # сервіс на 127.0.0.1:8000
+ngrok http --domain=<домен>.ngrok-free.dev 8000        # у ngrok ≥ 3.16 також --url=
+```
 
 Перевірка ззовні:
 
 ```
-curl https://xxxx.trycloudflare.com/health
+curl https://<домен>.ngrok-free.dev/health             # {"status":"ok"}
 ```
+
+- Адресу `https://<домен>.ngrok-free.dev` backend ставить у `AI_SERVICE_URL` **один раз** — вона не змінюється.
+- `INTERNAL_KEY` у `.env` — довгий випадковий рядок (`python -c "import secrets; print(secrets.token_urlsafe(32))"`),
+  бо сервіс видно з інтернету. Те саме значення backend ставить у `AI_INTERNAL_KEY`.
+- Authtoken ngrok, `AI_KEY` і `INTERNAL_KEY` не комітити й не показувати на скріншотах.
+- Поки сервіс потрібен backend: ноут увімкнений і не спить, Docker і термінал з `ngrok` працюють.
+  Інакше backend отримує помилку і показує запасний текст — це очікувано.
+- Зупинка: `Ctrl+C` у терміналі ngrok, `docker compose down`.
 
 ## Для DevOps
 
