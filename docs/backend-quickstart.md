@@ -1,6 +1,7 @@
 # AI-сервіс: як підключити до backend
 
-AI-сервіс — окремий FastAPI на ПК AI-розробника. Backend звертається до нього одним HTTP-запитом.
+AI-сервіс — окремий FastAPI на ПК AI-розробника, доступний з інтернету через ngrok за **постійною адресою**.
+Backend звертається до нього одним HTTP-запитом.
 Повна схема: [`contracts/openapi.yaml`](../contracts/openapi.yaml), або Swagger: `<AI_SERVICE_URL>/docs`.
 
 ## 1. Налаштування
@@ -8,9 +9,11 @@ AI-сервіс — окремий FastAPI на ПК AI-розробника. Ba
 `.env` backend:
 
 ```dotenv
-AI_SERVICE_URL=https://xxxx.trycloudflare.com   # дає AI-розробник; може змінюватися
+AI_SERVICE_URL=https://<домен>.ngrok-free.dev   # постійна адреса, дає AI-розробник (в особисті)
 AI_INTERNAL_KEY=<секрет від AI-розробника>
 ```
+
+Адреса не змінюється: налаштувати один раз. Без слеша в кінці.
 
 `app/core/config.py`:
 
@@ -121,7 +124,7 @@ return TutorAnswerOut(
 
 | Код | Причина | Що робити |
 | --- | --- | --- |
-| з'єднання / таймаут | ПК AI-розробника вимкнений або тунель перезапущено | 503, фронтенд показує запасний текст |
+| з'єднання / таймаут, `502`/`503`/`404` від ngrok | ПК AI-розробника вимкнений, сервіс або ngrok не запущені | 503, фронтенд показує запасний текст |
 | 401 | невірний `AI_INTERNAL_KEY` | перевірити ключ |
 | 422 | запит не за схемою (`code` у тілі каже, що саме) | виправити запит |
 | 503 | LLM недоступна | 503, можна повторити пізніше |
@@ -131,12 +134,15 @@ return TutorAnswerOut(
 ## 7. Перевірка
 
 ```bash
-curl https://xxxx.trycloudflare.com/health
+curl https://<домен>.ngrok-free.dev/health
 # {"status":"ok"}
 
-curl -X POST https://xxxx.trycloudflare.com/ai/v1/chat \
+curl -X POST https://<домен>.ngrok-free.dev/ai/v1/chat \
   -H "X-Internal-Key: <ключ>" -H "Content-Type: application/json" \
   -d @contracts/examples/explain.json
 ```
 
 Якщо `/health` не відповідає — AI-сервіс зараз вимкнений, напишіть AI-розробнику.
+
+У браузері (наприклад, Swagger `<AI_SERVICE_URL>/docs`) безкоштовний ngrok спершу показує сторінку-попередження —
+натисніть **Visit Site**. На запити з коду (httpx) це не впливає.
