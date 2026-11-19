@@ -28,6 +28,7 @@ export default function TeacherSidebar({ activeId = 'overview' }: { activeId?: N
     <AppSidebar
       items={items}
       activeId={activeId}
+      userInHeader
       user={{ initials: user?.initials ?? '', name: user?.fullName ?? '', role: teacherRole }}
     />
   )

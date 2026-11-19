@@ -1,5 +1,4 @@
 import { useState } from 'react'
-import type { ReactNode } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import mole from '@/assets/landing/mole.svg'
 import iconLogout from '@/assets/student/settings-logout.svg'
@@ -11,42 +10,12 @@ import { useDeviceStorage } from '@/features/settings/useDeviceStorage'
 import { requestSync } from '@/features/sync/syncOutbox'
 import { useConnection } from '@/features/sync/useConnection'
 import { bytesLabel } from '@/pages/settings/content'
+import { Row, Section, smallButton, Status } from '@/pages/settings/sections/rows'
 import { db } from '@/shared/db/db'
 import { useOutboxCount } from '@/shared/db/useOutboxCount'
 import { dateTimeLabel } from '@/shared/lib/date'
 import Spinner from '@/shared/ui/Spinner'
 import { studentSettings as t } from '../content'
-
-const smallButton =
-  'flex h-10 shrink-0 items-center justify-center gap-2 rounded-[10px] border border-line-strong px-3 text-sm leading-5 font-semibold text-parchment hover:bg-surface-2 focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:outline-none disabled:opacity-60'
-
-/** Секція налаштувань: заголовок і рядки, розділені лінією. */
-function Section({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <section className="flex flex-col rounded-[22px] border border-line bg-surface px-5 py-2 md:px-6">
-      <h2 className="pt-4 pb-1 font-heading text-[22px] leading-7 tracking-[-0.22px] text-parchment">{title}</h2>
-      <ul className="flex flex-col [&>li+li]:border-t [&>li+li]:border-line-soft">{children}</ul>
-    </section>
-  )
-}
-
-/** Рядок: назва й пояснення ліворуч, стан чи дія праворуч. */
-function Row({ title, note, children }: { title: string; note?: string; children?: ReactNode }) {
-  return (
-    <li className="flex items-center justify-between gap-4 py-4">
-      <div className="flex min-w-0 flex-col gap-px">
-        <p className="text-[15px] leading-[22.5px] font-semibold text-parchment">{title}</p>
-        {note && <p className="text-xs leading-[16.5px] text-dim">{note}</p>}
-      </div>
-      {children}
-    </li>
-  )
-}
-
-/** Стан праворуч у рядку: «✓ готово» бірюзовим або «ще ні» приглушено. */
-function Status({ ok, children }: { ok: boolean; children: ReactNode }) {
-  return <span className={`shrink-0 text-xs leading-4 font-semibold ${ok ? 'text-safe' : 'text-dim'}`}>{children}</span>
-}
 
 export function ProfileSection() {
   const user = useCurrentUser()
