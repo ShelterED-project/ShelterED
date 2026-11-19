@@ -1,16 +1,17 @@
 import { useLocation } from 'react-router'
-import { useConnection } from '@/features/sync/useConnection'
+import { useCurrentUser } from '@/features/auth/useCurrentUser'
 import Brand from '@/shared/ui/Brand'
 import SettingsLink from '@/shared/ui/SettingsLink'
-import { lessonPage as texts, navRoutes } from '../content'
+import { navRoutes, studentRole } from '../content'
 
 /**
  * Шапка сторінок учня з назвою: на планшеті й десктопі заголовок і підпис, на телефоні бренд
- * (там заголовок у тілі сторінки). Праворуч стан мережі й (на телефоні) налаштування.
+ * (там заголовок у тілі сторінки) і шестерня налаштувань; на планшеті праворуч ім'я учня. Стан мережі в шапці не показуємо:
+ * він є в налаштуваннях і на сторінці уроку (черга відправки).
  */
 export default function PageHeader({ title, subtitle }: { title: string; subtitle?: string }) {
-  const { online } = useConnection()
   const { pathname } = useLocation()
+  const user = useCurrentUser()
   const settings = navRoutes.settings ?? '/student/settings'
 
   return (
@@ -25,13 +26,18 @@ export default function PageHeader({ title, subtitle }: { title: string; subtitl
         {subtitle && <p className="truncate text-sm leading-5 text-dim">{subtitle}</p>}
       </div>
       <div className="flex shrink-0 items-center gap-2 md:gap-3">
-        <span
-          role="status"
-          className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs leading-4 font-bold ${online ? 'bg-safe/15 text-safe' : 'bg-line-soft text-accent'}`}
-        >
-          <span className={`size-1.5 rounded-full ${online ? 'bg-safe' : 'bg-accent'}`} />
-          {online ? texts.online : texts.offline}
-        </span>
+        {/* Планшет: меню вузьке й без імені, тож хто увійшов — тут. На десктопі ім'я є в меню. */}
+        {user && (
+          <div className="hidden items-center gap-3 md:flex xl:hidden">
+            <div className="text-right">
+              <p className="text-sm leading-5 font-semibold text-parchment">{user.fullName}</p>
+              <p className="text-xs leading-4 text-dim">{studentRole}</p>
+            </div>
+            <span className="flex size-10 shrink-0 items-center justify-center rounded-full border border-line bg-surface-2 text-sm font-bold text-parchment">
+              {user.initials}
+            </span>
+          </div>
+        )}
         {/* На телефоні бічного меню немає: налаштування (і вихід) — через шестерню. */}
         {pathname !== settings && <SettingsLink to={settings} className="md:hidden" />}
       </div>

@@ -263,8 +263,6 @@ export const mobileTabs: { id: TabId; label: string }[] = [
 
 export const lessonPage = {
   backpack: 'Рюкзак ✓',
-  online: 'Онлайн',
-  offline: 'Офлайн',
   progress: (module: number, card: number, total: number) => `Модуль ${module} · картка ${card} з ${total}`,
   minutes: (n: number) => `≈ ${n} хв`,
   cardEyebrow: (card: number, kind: string) => `Картка ${card} · ${kind}`,

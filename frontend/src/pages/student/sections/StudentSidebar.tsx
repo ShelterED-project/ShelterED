@@ -24,6 +24,7 @@ export default function StudentSidebar({ activeId = 'route' }: { activeId?: NavI
     <AppSidebar
       items={items}
       activeId={activeId}
+      userInHeader
       user={{ initials: user?.initials ?? '', name: user?.fullName ?? '', role: studentRole }}
     />
   )

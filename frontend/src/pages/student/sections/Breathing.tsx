@@ -1,5 +1,5 @@
 import { forwardRef, useEffect, useImperativeHandle, useState } from 'react'
-import iconLantern from '@/assets/student/calm-lantern.svg'
+import iconLantern from '@/assets/student/banner-lantern.svg'
 import iconPause from '@/assets/student/calm-pause.svg'
 import { calmPage } from '../content'
 
