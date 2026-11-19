@@ -9,10 +9,11 @@ const MAX_PAGES = 10
 
 /**
  * Курсор стрічки окремий для кожного учня: на одному пристрої може бути кілька.
- * v2: перша версія пропускала зміни уроків, пакети яких приходили пізніше за стрічку;
- * новий ключ змушує вже збережені пристрої один раз перечитати стрічку з початку.
+ * v2: перша версія пропускала зміни уроків, пакети яких приходили пізніше за стрічку.
+ * v3: прогрес став окремим для кожного учня (db.version 6); записи, яких міграція не змогла
+ * привʼязати до учня, повертаємо зі стрічки. Новий ключ змушує один раз перечитати її з початку.
  */
-const cursorKey = (userId: string) => `changes_cursor:v2:${userId}`
+const cursorKey = (userId: string) => `changes_cursor:v3:${userId}`
 
 /** До якого уроку належать тест чи модуль: беремо з пакетів «Рюкзака» на пристрої. */
 async function lessonIndex(): Promise<Map<string, string>> {
@@ -36,22 +37,23 @@ function preferred(current: ServerAttemptResult | undefined, next: ServerAttempt
   return current.credit_status !== 'credited'
 }
 
-async function applyAttempt(change: AttemptResultChange, lessons: Map<string, string>) {
+async function applyAttempt(userId: string, change: AttemptResultChange, lessons: Map<string, string>) {
   const server: ServerAttemptResult = {
     client_event_id: change.client_event_id,
     score: change.score,
     credit_status: change.credit_status,
     is_suspicious: change.is_suspicious,
   }
-  const record = await db.progress.get(change.test_id)
+  const record = await db.userProgress.get([userId, change.test_id])
   if (record) {
-    if (preferred(record.server, server)) await db.progress.update(change.test_id, { server })
+    if (preferred(record.server, server)) await db.userProgress.update([userId, change.test_id], { server })
     return
   }
   // Тест пройдено на іншому пристрої: без уроку з пакета показати його ніде, тож пропускаємо.
   const lessonId = lessons.get(change.test_id)
   if (!lessonId) return
   const created: LessonProgressRecord = {
+    user_id: userId,
     id: change.test_id,
     kind: 'test',
     lesson_id: lessonId,
@@ -59,14 +61,15 @@ async function applyAttempt(change: AttemptResultChange, lessons: Map<string, st
     score: null,
     server,
   }
-  await db.progress.put(created)
+  await db.userProgress.put(created)
 }
 
-async function applyModule(change: ModuleProgressChange, lessons: Map<string, string>) {
-  if (change.progress_pct < 100 || (await db.progress.get(change.module_id))) return
+async function applyModule(userId: string, change: ModuleProgressChange, lessons: Map<string, string>) {
+  if (change.progress_pct < 100 || (await db.userProgress.get([userId, change.module_id]))) return
   const lessonId = lessons.get(change.module_id)
   if (!lessonId) return
-  await db.progress.put({
+  await db.userProgress.put({
+    user_id: userId,
     id: change.module_id,
     kind: 'module',
     lesson_id: lessonId,
@@ -78,10 +81,10 @@ async function applyModule(change: ModuleProgressChange, lessons: Map<string, st
 async function apply(userId: string, changes: SyncChange[], nextCursor: string) {
   const lessons = await lessonIndex()
   // Зміни й курсор — однією транзакцією: обрив посередині не загубить і не задвоїть зміни.
-  await db.transaction('rw', db.progress, db.meta, async () => {
+  await db.transaction('rw', db.userProgress, db.meta, async () => {
     for (const change of changes) {
-      if (change.kind === 'attempt_result') await applyAttempt(change, lessons)
-      else if (change.kind === 'module_progress') await applyModule(change, lessons)
+      if (change.kind === 'attempt_result') await applyAttempt(userId, change, lessons)
+      else if (change.kind === 'module_progress') await applyModule(userId, change, lessons)
       // rollcall_status не зберігаємо: екран переклички читає актуальну сесію з сервера.
     }
     await db.meta.put({ key: cursorKey(userId), value: nextCursor })

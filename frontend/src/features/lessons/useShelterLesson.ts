@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import { useSearchParams } from 'react-router'
 import { useLiveQuery } from 'dexie-react-hooks'
+import { useAppSelector } from '@/app/hooks'
 import { pickCurrentLesson, useTodayPack } from '@/features/packs/usePacks'
 import type { TodayLesson } from '@/features/packs/usePacks'
 import { db } from '@/shared/db/db'
@@ -40,7 +41,12 @@ export function useShelterLesson(): ShelterLesson {
   )
 
   const lessonId = lesson?.lesson.id
-  const records = useLiveQuery(() => (lessonId ? db.progress.where('lesson_id').equals(lessonId).toArray() : []), [lessonId])
+  const userId = useAppSelector((s) => s.auth.session?.user.id)
+  // Лише свій прогрес: на спільному пристрої інші учні могли проходити той самий урок.
+  const records = useLiveQuery(
+    () => (lessonId && userId ? db.userProgress.where('[user_id+lesson_id]').equals([userId, lessonId]).toArray() : []),
+    [lessonId, userId],
+  )
 
   const steps = useMemo(() => (lesson ? buildSteps(lesson.lesson, records ?? []) : []), [lesson, records])
   const currentStep = steps.find((step) => !step.done) ?? null

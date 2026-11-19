@@ -41,6 +41,8 @@ export interface CardAnswer {
  * бо події з outbox зникають після підтвердження сервером.
  */
 export interface LessonProgressRecord {
+  /** Чий прогрес: на одному пристрої можуть по черзі вчитися кілька учнів */
+  user_id: string
   /** id модуля або тесту */
   id: string
   kind: 'module' | 'test'

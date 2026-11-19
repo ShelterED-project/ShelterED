@@ -9,9 +9,9 @@ import type { LessonProgressRecord } from '@/shared/db/types'
  * Таблиця meta потрібна addEvent для device_id.
  */
 async function recordStep(write: () => Promise<unknown>, record: LessonProgressRecord) {
-  await db.transaction('rw', db.events, db.progress, db.meta, async () => {
+  await db.transaction('rw', db.events, db.userProgress, db.meta, async () => {
     await write()
-    await db.progress.put(record)
+    await db.userProgress.put(record)
   })
 }
 
@@ -19,7 +19,7 @@ export function completeModule(userId: string, lessonId: string, moduleId: strin
   const completedAt = new Date().toISOString()
   return recordStep(
     () => addEvent('module_progress', userId, { module_id: moduleId, progress_pct: 100, completed_at: completedAt }),
-    { id: moduleId, kind: 'module', lesson_id: lessonId, completed_at: completedAt, score: null },
+    { user_id: userId, id: moduleId, kind: 'module', lesson_id: lessonId, completed_at: completedAt, score: null },
   )
 }
 
@@ -42,6 +42,13 @@ export function completeTest(userId: string, lessonId: string, test: PackTest, a
   const completedAt = new Date().toISOString()
   return recordStep(
     () => addEvent('test_attempt', userId, { test_id: test.id, answers, completed_at: completedAt }),
-    { id: test.id, kind: 'test', lesson_id: lessonId, completed_at: completedAt, score: scoreTest(test, answers) },
+    {
+      user_id: userId,
+      id: test.id,
+      kind: 'test',
+      lesson_id: lessonId,
+      completed_at: completedAt,
+      score: scoreTest(test, answers),
+    },
   )
 }

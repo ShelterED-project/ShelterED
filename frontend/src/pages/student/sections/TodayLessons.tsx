@@ -297,7 +297,11 @@ const chipBase =
 export default function TodayLessons() {
   const today = useTodayPack()
   const next = useNextPackDay()
-  const records = useLiveQuery(() => db.progress.toArray(), [])
+  const userId = useAppSelector((s) => s.auth.session?.user.id)
+  const records = useLiveQuery(
+    () => (userId ? db.userProgress.where('user_id').equals(userId).toArray() : []),
+    [userId],
+  )
   const { progress } = useStudentProgress()
   const [subject, setSubject] = useState<string | null>(null)
   const [view, setView] = useState<View>('days')
