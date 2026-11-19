@@ -141,12 +141,19 @@ export const progressPage = {
   },
 }
 
+export const parentSettings = {
+  childrenTitle: 'Мої діти',
+  noChildren: 'Дітей ще не додано.',
+}
+
 export type NavId = 'overview' | 'progress' | 'messages' | 'notifications' | 'settings'
 export type TabId = 'overview' | 'progress' | 'chat' | 'more'
 
 export const navRoutes: Partial<Record<NavId | TabId, string>> = {
   overview: '/parent',
   progress: '/parent/progress',
+  settings: '/parent/settings',
+  more: '/parent/settings',
 }
 
 export const sidebarNav: { id: NavId; label: string }[] = [
@@ -161,5 +168,5 @@ export const mobileTabs: { id: TabId; label: string }[] = [
   { id: 'overview', label: 'Огляд' },
   { id: 'progress', label: 'Прогрес' },
   { id: 'chat', label: 'Чат' },
-  { id: 'more', label: 'Ще' },
+  { id: 'more', label: 'Налаштування' },
 ]

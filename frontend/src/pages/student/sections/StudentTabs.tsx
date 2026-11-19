@@ -15,6 +15,7 @@ const icons: Record<TabId, string> = {
 
 const items = mobileTabs.map((tab) => ({ ...tab, icon: icons[tab.id], to: navRoutes[tab.id] }))
 
-export default function StudentTabs({ activeId = 'route' }: { activeId?: TabId }) {
-  return <AppTabs items={items} activeId={activeId} />
+/** activeId null — сторінка поза вкладками (наприклад, налаштування). */
+export default function StudentTabs({ activeId = 'route' }: { activeId?: TabId | null }) {
+  return <AppTabs items={items} activeId={activeId ?? ''} />
 }

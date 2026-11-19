@@ -7,9 +7,15 @@ import NavIcon from './NavIcon'
 export type NavItem = { id: string; label: string; icon: string; to?: string }
 export type SidebarUser = { initials: string; name: string; role: string }
 
-type Props = { items: NavItem[]; activeId: string; user: SidebarUser }
+type Props = {
+  items: NavItem[]
+  activeId: string
+  user: SidebarUser
+  /** Сторінка показує користувача в шапці на планшеті: у вузькому меню ініціали не дублюємо */
+  userInHeader?: boolean
+}
 
-export default function AppSidebar({ items, activeId, user }: Props) {
+export default function AppSidebar({ items, activeId, user, userInHeader = false }: Props) {
   return (
     <aside className="sticky top-0 hidden h-screen w-[84px] shrink-0 flex-col gap-6 border-r border-line-soft bg-sidebar px-3 py-6 md:flex xl:w-[260px] xl:px-4">
       <div className="flex justify-center px-2 xl:justify-start">
@@ -41,7 +47,7 @@ export default function AppSidebar({ items, activeId, user }: Props) {
       </nav>
 
       <div className="mt-auto flex flex-col gap-3">
-        <div className="flex items-center justify-center gap-3 px-2 xl:justify-start">
+        <div className={`items-center justify-center gap-3 px-2 xl:flex xl:justify-start ${userInHeader ? 'hidden' : 'flex'}`}>
           <div className="flex size-10 shrink-0 items-center justify-center rounded-full border border-line bg-surface-2 text-sm font-bold text-parchment">
             {user.initials}
           </div>

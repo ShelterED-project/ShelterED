@@ -79,7 +79,11 @@ export function useConnection(): ConnectionState {
   }, [])
 
   const packDays = useLiveQuery(
-    async () => (await db.packs.where('pack_date').aboveOrEqual(todayKey()).toArray()).map((p) => p.pack_date).sort(),
+    // Кілька версій пакета одного дня — це один день.
+    async () =>
+      [
+        ...new Set((await db.packs.where('pack_date').aboveOrEqual(todayKey()).toArray()).map((p) => p.pack_date)),
+      ].sort(),
     [],
   )
 

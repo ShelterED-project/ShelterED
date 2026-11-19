@@ -1,4 +1,5 @@
 import { todayLabel } from '@/shared/lib/date'
+import { pluralUk } from '@/shared/lib/plural'
 
 // Моків немає: там, де мають бути дані з API, стоїть заглушка «Сюди: …» з описом, що саме додати.
 // Коли зʼявиться API, замінити на RTK Query + локальне сховище
@@ -13,8 +14,6 @@ export const greeting = {
   date: todayLabel({ capitalize: true }),
   subtitle: todayLabel({ capitalize: true }),
 }
-
-export const shelterMode = 'Режим укриття'
 
 export const alertNotice = {
   title: 'Триває повітряна тривога',
@@ -57,7 +56,6 @@ export const checkIn = {
   shelter: 'Я в укритті',
   safe: 'Я в безпеці вдома',
   offlineNote: 'Без мережі — відправимо, щойно зʼявиться зв’язок',
-  saved: 'Відмітку збережено',
 }
 
 export const sync = {
@@ -68,28 +66,40 @@ export const sync = {
 export const calm = { title: 'Хвилинка спокою', text: 'Вдих 4 · пауза 4 · видих 6 · 2 хв' }
 
 export const todayLessons = {
-  title: 'Уроки на сьогодні',
-  hintSaved: 'усе збережено офлайн',
-  hintMissing: 'пакет ще не збережено',
+  title: 'Мої уроки',
+  backpackReady: 'Рюкзак на сьогодні зібрано',
+  backpackMissing: 'Рюкзак на сьогодні ще не зібрано',
+  backpackText: (lessons: number) =>
+    `${lessons} ${pluralUk(lessons, ['урок', 'уроки', 'уроків'])} · усе працює без інтернету`,
+  backpackMissingText: 'Підключись до мережі один раз, і уроки збережуться на пристрої.',
+  updated: (time: string) => `оновлено ${time}`,
+  allSubjects: 'Усі предмети',
+  otherSubject: 'Інше',
+  view: { days: 'Дні', subjects: 'Предмети' },
+  today: (weekday: string) => `Сьогодні · ${weekday}`,
+  tomorrow: (weekday: string) => `Завтра · ${weekday}`,
   empty: 'На сьогодні уроків немає.',
-  noPack: 'Пакет на сьогодні ще не збережено. Підключись до мережі один раз, і уроки зʼявляться тут.',
-  now: 'зараз',
-  modules: (done: number, total: number) => `${done} з ${total}`,
-  modulesLabel: 'Модулі',
+  modules: (n: number) => `${n} ${pluralUk(n, ['модуль', 'модулі', 'модулів'])}`,
   minutes: (n: number) => `${n} хв`,
-  test: {
-    label: 'Тест',
-    none: 'без тесту',
-    notTaken: 'не здано',
-    waiting: 'здано, чекає оцінки',
-    local: (points: number, max: number) => `${points} з ${max}`,
-    score: (score: number) => `${Math.round(score)}%`,
-    late: 'після дедлайну',
-    repeat: 'повторна спроба',
+  withTest: 'тест',
+  withWindow: (hours: number) => `тест з вікном ${hours} год`,
+  now: 'зараз',
+  done: 'Пройдено',
+  offline: 'офлайн ✓',
+  inBackpack: 'у Рюкзаку',
+  windowTests: {
+    title: 'Тести з вікном',
+    empty: 'Відкритих тестів немає.',
+    note: 'Тест можна пройти будь-коли у вікні, навіть в укритті.',
+    until: (when: string) => `до ${when}`,
+    hoursLeft: (n: number) => `ще ${n} год`,
+    daysLeft: (n: number) => `ще ${n} ${pluralUk(n, ['день', 'дні', 'днів'])}`,
   },
-  start: 'Почати',
-  continue: 'Продовжити',
-  review: 'Переглянути',
+  gaps: {
+    title: 'Пропущені теми',
+    lessons: (done: number, total: number) => `${done} з ${total} уроків пройдено`,
+    toMap: 'На мапу',
+  },
 }
 
 export type NavId = 'route' | 'lessons' | 'calm' | 'me' | 'settings'
@@ -100,11 +110,12 @@ export const navRoutes: Partial<Record<NavId, string>> = {
   lessons: '/student/lessons',
   me: '/student/me',
   calm: '/student/calm',
+  settings: '/student/settings',
 }
 
 export const calmPage = {
   title: 'Спокій',
-  subtitle: 'Хвилинка для себе. Тут нічого не оцінюють.',
+  subtitle: 'Тихо, без звуку, у своєму темпі',
   offlineNoTexts: 'Щоб відповісти «Як ти зараз?», підключись до мережі один раз. Подихати можна й зараз.',
   answeredToday: 'Сьогоднішня відповідь уже є. Якщо настрій змінився, можна обрати іншу картинку.',
   change: 'Змінити відповідь',
@@ -112,15 +123,32 @@ export const calmPage = {
   breathing: {
     title: 'Хвилинка спокою',
     text: 'Вдих 4 · пауза 4 · видих 6 · 2 хв',
-    hint: 'Сядь зручно. Дихай повільно разом з кругом. Можна з заплющеними очима.',
+    hint: 'Сядь зручно. Дихай повільно разом з колом. Можна з заплющеними очима.',
     start: 'Почати',
-    stop: 'Зупинити',
+    pause: 'Пауза',
+    resume: 'Далі',
     again: 'Ще раз',
     done: 'Молодець. Можна повторити, скільки захочеш.',
     phases: { inhale: 'Вдихни', hold: 'Затримай', exhale: 'Видихни' },
+    durations: [1, 2, 5],
+    duration: (minutes: number) => `${minutes} хв`,
+    durationLabel: 'Тривалість',
+    note: 'Без звуку · коло світиться в ритмі дихання',
     left: (seconds: number) => `ще ${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`,
   },
-  history: { empty: 'Тут зʼявляться твої картинки, коли ти відповіси кілька днів.' },
+  history: {
+    empty: 'Тут зʼявляться твої картинки, коли ти відповіси кілька днів.',
+    onlyYou: 'бачиш лише ти',
+    noAnswer: 'без відповіді',
+  },
+  // Хто що бачить — за docs/wellbeing-checkin.md (розділ «Хто що бачить»).
+  privacy:
+    'Можна відповідати раз на день або не відповідати зовсім. Батьки бачать лише коротке зведення за тиждень словами. Вчителі й школа відповідей не бачать.',
+  mole: 'Мені теж буває страшно. Подихаймо разом.',
+  exercises: {
+    title: 'Вправи',
+    breathing: { title: 'Дихання з вогником', text: 'Вдих 4, пауза 4, видих 6', meta: '1 · 2 · 5 хв' },
+  },
 }
 
 export const mePage = {
@@ -158,6 +186,63 @@ export const mePage = {
   },
 }
 
+export const studentSettings = {
+  subtitle: 'Профіль, Рюкзак і цей пристрій',
+  pinNote: 'Імʼя чи PIN змінює вчитель. Якщо забув PIN, попроси вчителя скинути його: при наступному вході придумаєш новий.',
+  profile: { title: 'Профіль', role: 'Учень' },
+  quiet: {
+    title: 'Тихий режим',
+    sound: 'Звук',
+    soundNote: 'Вимкнено — усе можна пройти без звуку',
+    subtitles: 'Субтитри до відео',
+    subtitlesNote: 'Завжди увімкнені',
+    always: '✓ завжди',
+  },
+  offline: {
+    title: 'Рюкзак і офлайн',
+    packs: 'Уроки на пристрої',
+    packsDays: (n: number) => `Рюкзак зібрано ${n} ${pluralUk(n, ['день', 'дні', 'днів'])} наперед`,
+    packsNone: 'Рюкзак ще не зібрано: підключись до мережі',
+    login: 'Офлайн-вхід',
+    loginOn: 'Збережено на цьому пристрої',
+    loginOff: 'Не збережено',
+    app: 'Без інтернету',
+    appOn: 'Застосунок відкриється й без мережі',
+    appOff: 'Відкрий застосунок раз з інтернетом',
+    persist: 'Захист даних',
+    persistOn: 'Браузер не стиратиме уроки й відповіді',
+    persistOff: 'Без захисту браузер може стерти уроки, коли бракує місця',
+    persistButton: 'Захистити',
+    persistDenied: 'Браузер не дозволив. Встанови застосунок на головний екран і спробуй ще раз.',
+    ready: '✓ готово',
+    notYet: 'ще ні',
+  },
+  sync: {
+    title: 'Синхронізація',
+    internet: 'Інтернет',
+    online: 'Є звʼязок',
+    offline: 'Немає звʼязку',
+    last: 'Остання синхронізація',
+    never: 'Ще не було',
+    queue: 'Черга',
+    queueValue: (n: number) =>
+      n === 0 ? 'Усе відправлено' : `${n} ${pluralUk(n, ['запис чекає', 'записи чекають', 'записів чекають'])} на звʼязок`,
+    button: 'Синхронізувати зараз',
+    busy: 'Синхронізуємо…',
+  },
+  device: {
+    title: 'Пристрій',
+    id: (id: string) => `ID ${id}`,
+    used: (used: string) => `Займає ${used}`,
+    installed: 'застосунок',
+    browser: 'у браузері',
+  },
+  mole: 'Рюкзак збирається сам — тобі нічого робити не треба!',
+  signOut: 'Вийти',
+  signOutPending: (n: number) =>
+    `${n} ${pluralUk(n, ['запис ще не відправлено', 'записи ще не відправлено', 'записів ще не відправлено'])}. Вони відправляться, коли ти знову увійдеш.`,
+}
+
 export const sidebarNav: { id: NavId; label: string }[] = [
   { id: 'route', label: 'Маршрут' },
   { id: 'lessons', label: 'Уроки' },
@@ -174,3 +259,27 @@ export const mobileTabs: { id: TabId; label: string }[] = [
   { id: 'calm', label: 'Спокій' },
   { id: 'me', label: 'Я' },
 ]
+
+export const lessonPage = {
+  backpack: 'Рюкзак ✓',
+  progress: (module: number, card: number, total: number) => `Модуль ${module} · картка ${card} з ${total}`,
+  minutes: (n: number) => `≈ ${n} хв`,
+  cardEyebrow: (card: number, kind: string) => `Картка ${card} · ${kind}`,
+  kinds: { text: 'Текст', image: 'Малюнок', video: 'Відео' } as Record<string, string>,
+  // Медіа «Рюкзака» на пристрій ще не завантажуються: показуємо підпис і пояснення.
+  mediaPending: 'Цей матеріал відкриється, коли медіа уроку збережеться на пристрої.',
+  nextCard: (card: number) => `Далі · картка ${card}`,
+  nextStep: 'Далі',
+  back: 'Назад',
+  next: 'Далі',
+  outline: { shelter: 'Укриттєва частина', main: 'Основна частина' },
+  module: (n: number, title: string) => `Модуль ${n} · ${title}`,
+  test: (questions: number) => `Тест · ${questions} ${pluralUk(questions, ['питання', 'питання', 'питань'])}`,
+  moduleMinutes: (n: number) => `${n} хв`,
+  testWindow: (hours: number) => `вікно ${hours} год`,
+  testPractice: 'тренувальний',
+  queue: (n: number) => (n === 0 ? 'Черга порожня' : `${n} ${pluralUk(n, ['запис', 'записи', 'записів'])} в черзі`),
+  queueSent: 'усе відправлено',
+  queueWaiting: 'відправимо, щойно зʼявиться звʼязок',
+  queueNote: 'Пройдені модулі збережено на пристрої.',
+}

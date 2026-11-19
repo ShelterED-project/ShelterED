@@ -1,10 +1,8 @@
 import iconChevron from '@/assets/parent/chevron-down.svg'
-import iconShield from '@/assets/student/header-shield.svg'
-import LogoutButton from '@/features/auth/LogoutButton'
 import { useCurrentUser } from '@/features/auth/useCurrentUser'
 import Brand from '@/shared/ui/Brand'
 import { useTeacherRollCall } from '@/features/teacher/useTeacherRollCall'
-import { greeting, greetingSubtitle } from '../content'
+import { greeting, greetingSubtitle, teacherRole } from '../content'
 import ManualAlarm from './ManualAlarm'
 
 export default function TeacherHeader() {
@@ -43,14 +41,18 @@ export default function TeacherHeader() {
           />
         </div>
         <ManualAlarm />
-        <button
-          type="button"
-          aria-label="Безпека"
-          className="flex size-11 shrink-0 items-center justify-center rounded-xl border border-line focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:outline-none"
-        >
-          <img src={iconShield} alt="" width={20} height={20} />
-        </button>
-        <LogoutButton compact className="size-11 shrink-0 rounded-xl border border-line md:hidden" />
+        {/* Планшет: меню вузьке й без імені, тож хто увійшов — тут. На десктопі ім'я є в меню. */}
+        {user && (
+          <div className="hidden items-center gap-3 md:flex xl:hidden">
+            <div className="text-right">
+              <p className="text-sm leading-5 font-semibold whitespace-nowrap text-parchment">{user.fullName}</p>
+              <p className="text-xs leading-4 text-dim">{teacherRole}</p>
+            </div>
+            <span className="flex size-10 shrink-0 items-center justify-center rounded-full border border-line bg-surface-2 text-sm font-bold text-parchment">
+              {user.initials}
+            </span>
+          </div>
+        )}
       </div>
     </header>
   )

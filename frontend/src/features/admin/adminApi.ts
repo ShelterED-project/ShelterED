@@ -21,6 +21,19 @@ export interface ClassFields {
   academic_year: string
 }
 
+/** Локації школи для тривог: uid району, громади й міста зі словника alerts.in.ua; null — не вказано. */
+export interface AlertLocations {
+  alert_raion_uid: string | null
+  alert_hromada_uid: string | null
+  alert_city_uid: string | null
+}
+
+export interface SchoolAlertLocations extends AlertLocations {
+  school_id: string
+  /** Область (uid регіону alerts.in.ua); тут не змінюється */
+  region_code: string
+}
+
 /** Найбільша сторінка /admin/users і /alerts на бекенді. */
 const PAGE_LIMIT = 200
 
@@ -29,6 +42,15 @@ export const adminApi = baseApi.injectEndpoints({
     schoolUsers: build.query<SchoolUser[], ListedRole | undefined>({
       query: (role) => ({ url: '/admin/users', params: { limit: PAGE_LIMIT, ...(role ? { role } : {}) } }),
       providesTags: ['Users'],
+    }),
+    alertLocations: build.query<SchoolAlertLocations, string>({
+      query: (schoolId) => `/schools/${schoolId}/alert-locations`,
+      providesTags: ['School'],
+    }),
+    // PUT замінює всі три поля (null — очистити), тож повтор нічого не ламає.
+    saveAlertLocations: build.mutation<SchoolAlertLocations, { schoolId: string } & AlertLocations>({
+      query: ({ schoolId, ...body }) => ({ url: `/schools/${schoolId}/alert-locations`, method: 'PUT', body }),
+      invalidatesTags: ['School'],
     }),
     // id класу створює клієнт (UUID): повторний запит не створить другий клас.
     createClass: build.mutation<ClassOut, ClassFields>({
@@ -81,6 +103,8 @@ export const adminApi = baseApi.injectEndpoints({
 
 export const {
   useSchoolUsersQuery,
+  useAlertLocationsQuery,
+  useSaveAlertLocationsMutation,
   useCreateClassMutation,
   useUpdateClassMutation,
   useDeleteClassMutation,

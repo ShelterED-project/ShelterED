@@ -53,6 +53,22 @@ async function sync() {
     }
   }
 
+  // Пакети, яких уже немає в маніфесті (стара версія дня після заміни уроку, день без уроків),
+  // прибираємо. Але стару версію дня — лише коли нова цього дня вже на пристрої: якщо докачати
+  // не вдалося, краще старий урок, ніж жодного (працюємо офлайн).
+  const listed = new Set(manifest.data.packs.map((item) => item.id))
+  const stored = await db.packs.toArray()
+  const storedIds = new Set(stored.map((pack) => pack.id))
+  const listedDates = new Map(manifest.data.packs.map((item) => [item.pack_date, item.id]))
+  const stale = stored
+    .filter((pack) => !listed.has(pack.id))
+    .filter((pack) => {
+      const replacement = listedDates.get(pack.pack_date)
+      return replacement === undefined || storedIds.has(replacement)
+    })
+    .map((pack) => pack.id)
+  if (stale.length > 0) await db.packs.bulkDelete(stale)
+
   // Нові уроки на пристрої: перечитуємо стрічку змін, щоб підхопити їхній прогрес і оцінки
   // (раніше їх пропустили, бо уроку ще не було в пакетах).
   if (saved > 0) {

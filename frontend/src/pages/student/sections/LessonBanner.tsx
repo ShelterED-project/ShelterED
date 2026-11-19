@@ -1,8 +1,8 @@
 import iconLantern from '@/assets/student/banner-lantern.svg'
-import { useNavigate } from 'react-router'
+import { Link, useNavigate } from 'react-router'
 import { pickCurrentLesson, useTodayPack } from '@/features/packs/usePacks'
 import { pluralUk } from '@/shared/lib/plural'
-import { lessonBanner } from '../content'
+import { lessonBanner, navRoutes } from '../content'
 
 export default function LessonBanner() {
   const { lessons } = useTodayPack()
@@ -49,7 +49,6 @@ export default function LessonBanner() {
         </h2>
         <p className="text-sm leading-5 text-muted">{text}</p>
       </div>
-      {/* TODO: вправа для дихання, коли зʼявиться відповідна сторінка */}
       <div className="flex gap-2 md:shrink-0">
         <button
           type="button"
@@ -61,12 +60,12 @@ export default function LessonBanner() {
         >
           {current || !allDone ? lessonBanner.open : lessonBanner.toLessons}
         </button>
-        <button
-          type="button"
-          className="h-12 shrink-0 rounded-[10px] border border-line-strong px-5 text-[15px] font-semibold whitespace-nowrap text-parchment hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:outline-none"
+        <Link
+          to={`${navRoutes.calm ?? '/student/calm'}#breathing`}
+          className="flex h-12 shrink-0 items-center rounded-[10px] border border-line-strong px-5 text-[15px] font-semibold whitespace-nowrap text-parchment hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:outline-none"
         >
           {lessonBanner.breathe}
-        </button>
+        </Link>
       </div>
     </section>
   )

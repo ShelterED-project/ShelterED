@@ -1,6 +1,5 @@
 import checkIcon from '@/assets/landing/icon-check.svg'
 import heroIllustration from '@/assets/landing/hero-illustration.svg'
-import lanternIcon from '@/assets/landing/icon-lantern.svg'
 import mole from '@/assets/landing/mole.svg'
 import Button from '@/shared/ui/Button'
 import { signIn } from '../content'
@@ -35,12 +34,6 @@ export default function Hero() {
   return (
     <section className="mx-auto flex max-w-[1296px] flex-col items-stretch gap-12 px-5 pt-12 pb-16 md:px-8 lg:flex-row lg:items-center lg:gap-16 lg:pt-20 lg:pb-24 xl:px-[72px]">
       <div className="flex flex-1 flex-col items-start">
-        <p className="inline-flex items-center gap-2.5 text-sm font-semibold text-parchment">
-          <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-oil shadow-[0_0_12px_2px_rgba(242,178,92,0.35)]">
-            <img src={lanternIcon} alt="" width={16} height={16} />
-          </span>
-          Працює без інтернету та світла
-        </p>
         <h1 className="mt-6 font-heading text-[32px] leading-[1.2] tracking-[-0.5px] text-parchment md:text-[44px] xl:text-[48px]">
           Пропущена тема — не провал, а незвідана ділянка.
         </h1>

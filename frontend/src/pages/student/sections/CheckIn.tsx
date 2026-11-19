@@ -1,4 +1,5 @@
 import iconClock from '@/assets/parent/clock-sm.svg'
+import DeliveryNote from '@/features/roll-call/DeliveryNote'
 import { useRollCall } from '@/features/roll-call/useRollCall'
 import type { RollCallStatus } from '@/features/roll-call/types'
 import { checkIn } from '../content'
@@ -9,7 +10,7 @@ const STATUS_LABELS: Record<RollCallStatus, string> = {
 }
 
 export default function CheckIn() {
-  const { lastStatus, error, mark } = useRollCall()
+  const { lastStatus, delivery, error, mark } = useRollCall()
 
   return (
     <section className="flex flex-col gap-3 rounded-[22px] border border-line bg-surface p-5 xl:p-6">
@@ -37,11 +38,7 @@ export default function CheckIn() {
         </p>
       )}
 
-      {lastStatus && (
-        <p role="status" className="text-sm font-semibold text-safe">
-          {checkIn.saved}: {STATUS_LABELS[lastStatus]}
-        </p>
-      )}
+      <DeliveryNote status={lastStatus} delivery={delivery} labels={STATUS_LABELS} />
 
       <p className="flex items-start gap-2 text-xs text-dim">
         <img src={iconClock} alt="" width={16} height={16} className="mt-0 shrink-0" />

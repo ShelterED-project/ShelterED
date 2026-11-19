@@ -1,23 +1,26 @@
+import { useCurrentUser } from '@/features/auth/useCurrentUser'
 import { useOutboxCount } from '@/shared/db/useOutboxCount'
+import { greeting } from './content'
 import AlertNotice from './sections/AlertNotice'
 import CalmCard from './sections/CalmCard'
 import CheckIn from './sections/CheckIn'
 import LessonBanner from './sections/LessonBanner'
 import MobileGreeting from './sections/MobileGreeting'
+import PageHeader from './sections/PageHeader'
 import RouteSection from './sections/RouteSection'
-import StudentHeader from './sections/StudentHeader'
 import StudentSidebar from './sections/StudentSidebar'
 import StudentTabs from './sections/StudentTabs'
 import SyncStatus from './sections/SyncStatus'
 
 export default function StudentPage() {
   const pending = useOutboxCount()
+  const user = useCurrentUser()
 
   return (
     <div className="flex min-h-screen">
       <StudentSidebar />
       <div className="flex min-w-0 flex-1 flex-col">
-        <StudentHeader pending={pending} />
+        <PageHeader title={`${greeting.hello}, ${user?.display_name ?? ''}!`} subtitle={greeting.subtitle} />
         <main className="flex flex-col gap-5 px-5 pt-6 pb-24 md:px-8 md:pb-8 xl:gap-6 xl:px-10 xl:py-8">
           <MobileGreeting />
           <AlertNotice />

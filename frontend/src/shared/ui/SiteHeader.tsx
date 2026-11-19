@@ -1,9 +1,13 @@
+import { homeByRole } from '@/features/auth/session'
+import { useCurrentUser } from '@/features/auth/useCurrentUser'
 import Brand from './Brand'
 import Button from './Button'
 
 export type NavLink = { href: string; label: string }
 
 export default function SiteHeader({ links }: { links: NavLink[] }) {
+  // Із сесією замість входів — перехід у кабінет: інакше здається, що вхід злетів.
+  const user = useCurrentUser()
   return (
     <header className="sticky top-0 z-10 border-b border-line-soft bg-oil/95 backdrop-blur-sm">
       <div className="mx-auto flex h-16 max-w-[1296px] items-center justify-between gap-3 px-4 md:h-20 md:px-8 xl:px-[72px]">
@@ -16,14 +20,22 @@ export default function SiteHeader({ links }: { links: NavLink[] }) {
           ))}
         </nav>
         <div className="flex shrink-0 items-center gap-2 md:gap-3">
-          {/* Два входи завжди видно: учні — за кодом класу, дорослі — з поштою. */}
-          <Button to="/login" variant="outline" className="h-11 px-3 text-[15px] md:px-5">
-            <span className="md:hidden">Дорослі</span>
-            <span className="hidden md:inline">Вхід для дорослих</span>
-          </Button>
-          <Button to="/register" variant="primary" className="h-11 px-3 text-[15px] md:px-5">
-            Я учень
-          </Button>
+          {user ? (
+            <Button to={homeByRole[user.role]} variant="primary" className="h-11 px-3 text-[15px] md:px-5">
+              До кабінету
+            </Button>
+          ) : (
+            <>
+              {/* Два входи: учні — за кодом класу, дорослі — з поштою. */}
+              <Button to="/login" variant="outline" className="h-11 px-3 text-[15px] md:px-5">
+                <span className="md:hidden">Дорослі</span>
+                <span className="hidden md:inline">Вхід для дорослих</span>
+              </Button>
+              <Button to="/register" variant="primary" className="h-11 px-3 text-[15px] md:px-5">
+                Я учень
+              </Button>
+            </>
+          )}
         </div>
       </div>
     </header>

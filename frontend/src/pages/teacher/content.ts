@@ -1,4 +1,5 @@
 import { todayLabel } from '@/shared/lib/date'
+import { pluralUk } from '@/shared/lib/plural'
 
 // Моків немає: там, де мають бути дані з API, стоїть заглушка «Сюди: …» з описом, що саме додати.
 // Коли зʼявиться API, замінити на RTK Query + локальне сховище
@@ -108,10 +109,6 @@ export const gaps = {
 
 export const classMap = {
   title: 'Мапа класу',
-  students: {
-    title: 'Учні класу',
-    text: 'Код для батьків привʼязує їх до дитини (діє 7 днів). Скидання PIN — якщо учень його забув.',
-  },
   updated: (time: string) => `Оновлено о ${time}`,
   notComputed: 'Сервер ще не порахував результати класу.',
   loading: 'Завантаження…',
@@ -209,6 +206,51 @@ export const navRoutes: Partial<Record<NavId | TabId, string>> = {
   sync: '/teacher/sync',
   schedule: '/teacher/schedule',
   map: '/teacher/map',
+  settings: '/teacher/settings',
+  // На телефоні бічного меню немає: «Ще» веде в налаштування з посиланнями на решту розділів.
+  more: '/teacher/settings',
+}
+
+export const teacherSettings = {
+  subtitle: 'Профіль, класи й коди доступу',
+  sectionsTitle: 'Інші розділи',
+  profile: { title: 'Профіль', note: 'Якщо в імені помилка, напишіть адміністрації школи.' },
+  classes: {
+    title: 'Мої класи',
+    students: (n: number) => `${n} ${pluralUk(n, ['учень', 'учні', 'учнів'])}`,
+    code: (code: string) => `код ${code}`,
+    active: 'обраний',
+    open: 'Відкрити',
+    copy: 'Копіювати код',
+    copied: 'Скопійовано',
+    hint: 'Учні вводять цей код на екрані «Я учень» разом з імʼям і PIN.',
+    expires: (date: string) => `Код приймає нових учнів до ${date}.`,
+    // Новий код класу генерує адміністрація школи (POST /classes/{id}/join-code — лише адмін).
+    newCode: 'Новий код видає адміністрація школи.',
+    empty: 'Класів поки немає. Попросіть адміністрацію школи додати вас до класу.',
+  },
+  students: {
+    title: (className: string) => `Учні класу · ${className}`,
+    text: 'Код для батьків одноразовий і діє 7 днів: батьки вводять його в «Налаштування → Додати дитину». Скинутий PIN учень задасть заново при наступному вході.',
+    parentCode: 'Код для батьків',
+    resetPin: 'Скинути PIN',
+    confirmReset: (name: string) => `Скинути PIN для ${name}? Учень задасть новий при наступному вході.`,
+    pinReset: 'PIN скинуто: учень задасть новий при вході',
+    copy: 'Копіювати',
+    copied: 'Скопійовано',
+    until: (code: string, date: string) => `${code} · діє до ${date}`,
+    // Створені коди сервер не повертає повторно: показуємо лише видані в цьому перегляді.
+    note: 'Код видно, поки відкрита сторінка. Можна створити новий: попередні діють до свого терміну.',
+    error: 'Не вдалося виконати дію. Перевірте зʼєднання й спробуйте ще раз.',
+    offline: 'Немає звʼязку: список учнів недоступний.',
+    empty: 'У класі ще немає учнів. Вони приєднуються самі за кодом класу.',
+  },
+  device: { online: 'Є звʼязок', offline: 'Немає звʼязку' },
+  alarm: {
+    title: 'Тривога й укриття',
+    manual: 'Ручна кнопка «Тривога»',
+    manualNote: 'Угорі сторінки: тренувальна або справжня, якщо API тривог недоступне',
+  },
 }
 
 export const sidebarNav: { id: NavId; label: string }[] = [
