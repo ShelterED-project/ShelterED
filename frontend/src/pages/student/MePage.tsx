@@ -1,9 +1,8 @@
 import { useCurrentUser } from '@/features/auth/useCurrentUser'
 import type { StudentProgress, StudentTest, StudentTestStatus } from '@/features/student/studentApi'
 import { useStudentProgress } from '@/features/student/useStudentProgress'
-import { useOutboxCount } from '@/shared/db/useOutboxCount'
 import { mePage } from './content'
-import StudentHeader from './sections/StudentHeader'
+import PageHeader, { MobileTitle } from './sections/PageHeader'
 import StudentSidebar from './sections/StudentSidebar'
 import StudentTabs from './sections/StudentTabs'
 
@@ -136,7 +135,6 @@ function LessonsCard({ lessons }: { lessons: StudentProgress['lessons'] }) {
 }
 
 export default function MePage() {
-  const pending = useOutboxCount()
   const user = useCurrentUser()
   const { progress, isLoading, isOffline } = useStudentProgress()
 
@@ -154,15 +152,10 @@ export default function MePage() {
     <div className="flex min-h-screen">
       <StudentSidebar activeId="me" />
       <div className="flex min-w-0 flex-1 flex-col">
-        <StudentHeader pending={pending} />
+        <PageHeader title={user?.fullName ?? mePage.title} subtitle={status} />
         <main className="flex flex-col gap-5 px-5 pt-6 pb-24 md:px-8 md:pb-8 xl:gap-6 xl:px-10 xl:py-8">
-          <div className="flex flex-col gap-1">
-            <h1 className="font-heading text-2xl leading-[30px] text-parchment">{user?.fullName ?? mePage.title}</h1>
-            <p role="status" className="text-sm text-dim">
-              {status}
-            </p>
-            {isOffline && progress && <p className="text-sm text-dim">{mePage.offline}</p>}
-          </div>
+          <MobileTitle title={user?.fullName ?? mePage.title} subtitle={status} />
+          {isOffline && progress && <p className="text-sm text-dim">{mePage.offline}</p>}
           {progress && (
             <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:gap-6">
               <div className="flex flex-col gap-5 xl:w-[400px] xl:shrink-0 xl:gap-6">

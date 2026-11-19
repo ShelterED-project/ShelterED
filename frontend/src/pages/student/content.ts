@@ -15,8 +15,6 @@ export const greeting = {
   subtitle: todayLabel({ capitalize: true }),
 }
 
-export const shelterMode = 'Режим укриття'
-
 export const alertNotice = {
   title: 'Триває повітряна тривога',
   drillTitle: 'Триває тренувальна тривога',
@@ -118,7 +116,7 @@ export const navRoutes: Partial<Record<NavId, string>> = {
 
 export const calmPage = {
   title: 'Спокій',
-  subtitle: 'Хвилинка для себе. Тут нічого не оцінюють.',
+  subtitle: 'Тихо, без звуку, у своєму темпі',
   offlineNoTexts: 'Щоб відповісти «Як ти зараз?», підключись до мережі один раз. Подихати можна й зараз.',
   answeredToday: 'Сьогоднішня відповідь уже є. Якщо настрій змінився, можна обрати іншу картинку.',
   change: 'Змінити відповідь',
@@ -126,15 +124,32 @@ export const calmPage = {
   breathing: {
     title: 'Хвилинка спокою',
     text: 'Вдих 4 · пауза 4 · видих 6 · 2 хв',
-    hint: 'Сядь зручно. Дихай повільно разом з кругом. Можна з заплющеними очима.',
+    hint: 'Сядь зручно. Дихай повільно разом з колом. Можна з заплющеними очима.',
     start: 'Почати',
-    stop: 'Зупинити',
+    pause: 'Пауза',
+    resume: 'Далі',
     again: 'Ще раз',
     done: 'Молодець. Можна повторити, скільки захочеш.',
     phases: { inhale: 'Вдихни', hold: 'Затримай', exhale: 'Видихни' },
+    durations: [1, 2, 5],
+    duration: (minutes: number) => `${minutes} хв`,
+    durationLabel: 'Тривалість',
+    note: 'Без звуку · коло світиться в ритмі дихання',
     left: (seconds: number) => `ще ${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`,
   },
-  history: { empty: 'Тут зʼявляться твої картинки, коли ти відповіси кілька днів.' },
+  history: {
+    empty: 'Тут зʼявляться твої картинки, коли ти відповіси кілька днів.',
+    onlyYou: 'бачиш лише ти',
+    noAnswer: 'без відповіді',
+  },
+  // Хто що бачить — за docs/wellbeing-checkin.md (розділ «Хто що бачить»).
+  privacy:
+    'Можна відповідати раз на день або не відповідати зовсім. Батьки бачать лише коротке зведення за тиждень словами. Вчителі й школа відповідей не бачать.',
+  mole: 'Мені теж буває страшно. Подихаймо разом.',
+  exercises: {
+    title: 'Вправи',
+    breathing: { title: 'Дихання з вогником', text: 'Вдих 4, пауза 4, видих 6', meta: '1 · 2 · 5 хв' },
+  },
 }
 
 export const mePage = {
@@ -173,7 +188,60 @@ export const mePage = {
 }
 
 export const studentSettings = {
+  subtitle: 'Профіль, Рюкзак і цей пристрій',
   pinNote: 'Імʼя чи PIN змінює вчитель. Якщо забув PIN, попроси вчителя скинути його: при наступному вході придумаєш новий.',
+  profile: { title: 'Профіль', role: 'Учень' },
+  quiet: {
+    title: 'Тихий режим',
+    sound: 'Звук',
+    soundNote: 'Вимкнено — усе можна пройти без звуку',
+    subtitles: 'Субтитри до відео',
+    subtitlesNote: 'Завжди увімкнені',
+    always: '✓ завжди',
+  },
+  offline: {
+    title: 'Рюкзак і офлайн',
+    packs: 'Уроки на пристрої',
+    packsDays: (n: number) => `Рюкзак зібрано ${n} ${pluralUk(n, ['день', 'дні', 'днів'])} наперед`,
+    packsNone: 'Рюкзак ще не зібрано: підключись до мережі',
+    login: 'Офлайн-вхід',
+    loginOn: 'Збережено на цьому пристрої',
+    loginOff: 'Не збережено',
+    app: 'Без інтернету',
+    appOn: 'Застосунок відкриється й без мережі',
+    appOff: 'Відкрий застосунок раз з інтернетом',
+    persist: 'Захист даних',
+    persistOn: 'Браузер не стиратиме уроки й відповіді',
+    persistOff: 'Без захисту браузер може стерти уроки, коли бракує місця',
+    persistButton: 'Захистити',
+    persistDenied: 'Браузер не дозволив. Встанови застосунок на головний екран і спробуй ще раз.',
+    ready: '✓ готово',
+    notYet: 'ще ні',
+  },
+  sync: {
+    title: 'Синхронізація',
+    internet: 'Інтернет',
+    online: 'Є звʼязок',
+    offline: 'Немає звʼязку',
+    last: 'Остання синхронізація',
+    never: 'Ще не було',
+    queue: 'Черга',
+    queueValue: (n: number) =>
+      n === 0 ? 'Усе відправлено' : `${n} ${pluralUk(n, ['запис чекає', 'записи чекають', 'записів чекають'])} на звʼязок`,
+    button: 'Синхронізувати зараз',
+    busy: 'Синхронізуємо…',
+  },
+  device: {
+    title: 'Пристрій',
+    id: (id: string) => `ID ${id}`,
+    used: (used: string) => `Займає ${used}`,
+    installed: 'застосунок',
+    browser: 'у браузері',
+  },
+  mole: 'Рюкзак збирається сам — тобі нічого робити не треба!',
+  signOut: 'Вийти',
+  signOutPending: (n: number) =>
+    `${n} ${pluralUk(n, ['запис ще не відправлено', 'записи ще не відправлено', 'записів ще не відправлено'])}. Вони відправляться, коли ти знову увійдеш.`,
 }
 
 export const sidebarNav: { id: NavId; label: string }[] = [
@@ -197,7 +265,6 @@ export const lessonPage = {
   backpack: 'Рюкзак ✓',
   online: 'Онлайн',
   offline: 'Офлайн',
-  help: 'Безпека',
   progress: (module: number, card: number, total: number) => `Модуль ${module} · картка ${card} з ${total}`,
   minutes: (n: number) => `≈ ${n} хв`,
   cardEyebrow: (card: number, kind: string) => `Картка ${card} · ${kind}`,
