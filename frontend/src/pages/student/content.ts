@@ -1,4 +1,5 @@
 import { todayLabel } from '@/shared/lib/date'
+import { pluralUk } from '@/shared/lib/plural'
 
 // Моків немає: там, де мають бути дані з API, стоїть заглушка «Сюди: …» з описом, що саме додати.
 // Коли зʼявиться API, замінити на RTK Query + локальне сховище
@@ -68,28 +69,40 @@ export const sync = {
 export const calm = { title: 'Хвилинка спокою', text: 'Вдих 4 · пауза 4 · видих 6 · 2 хв' }
 
 export const todayLessons = {
-  title: 'Уроки на сьогодні',
-  hintSaved: 'усе збережено офлайн',
-  hintMissing: 'пакет ще не збережено',
+  title: 'Мої уроки',
+  backpackReady: 'Рюкзак на сьогодні зібрано',
+  backpackMissing: 'Рюкзак на сьогодні ще не зібрано',
+  backpackText: (lessons: number) =>
+    `${lessons} ${pluralUk(lessons, ['урок', 'уроки', 'уроків'])} · усе працює без інтернету`,
+  backpackMissingText: 'Підключись до мережі один раз, і уроки збережуться на пристрої.',
+  updated: (time: string) => `оновлено ${time}`,
+  allSubjects: 'Усі предмети',
+  otherSubject: 'Інше',
+  view: { days: 'Дні', subjects: 'Предмети' },
+  today: (weekday: string) => `Сьогодні · ${weekday}`,
+  tomorrow: (weekday: string) => `Завтра · ${weekday}`,
   empty: 'На сьогодні уроків немає.',
-  noPack: 'Пакет на сьогодні ще не збережено. Підключись до мережі один раз, і уроки зʼявляться тут.',
-  now: 'зараз',
-  modules: (done: number, total: number) => `${done} з ${total}`,
-  modulesLabel: 'Модулі',
+  modules: (n: number) => `${n} ${pluralUk(n, ['модуль', 'модулі', 'модулів'])}`,
   minutes: (n: number) => `${n} хв`,
-  test: {
-    label: 'Тест',
-    none: 'без тесту',
-    notTaken: 'не здано',
-    waiting: 'здано, чекає оцінки',
-    local: (points: number, max: number) => `${points} з ${max}`,
-    score: (score: number) => `${Math.round(score)}%`,
-    late: 'після дедлайну',
-    repeat: 'повторна спроба',
+  withTest: 'тест',
+  withWindow: (hours: number) => `тест з вікном ${hours} год`,
+  now: 'зараз',
+  done: 'Пройдено',
+  offline: 'офлайн ✓',
+  inBackpack: 'у Рюкзаку',
+  windowTests: {
+    title: 'Тести з вікном',
+    empty: 'Відкритих тестів немає.',
+    note: 'Тест можна пройти будь-коли у вікні, навіть в укритті.',
+    until: (when: string) => `до ${when}`,
+    hoursLeft: (n: number) => `ще ${n} год`,
+    daysLeft: (n: number) => `ще ${n} ${pluralUk(n, ['день', 'дні', 'днів'])}`,
   },
-  start: 'Почати',
-  continue: 'Продовжити',
-  review: 'Переглянути',
+  gaps: {
+    title: 'Пропущені теми',
+    lessons: (done: number, total: number) => `${done} з ${total} уроків пройдено`,
+    toMap: 'На мапу',
+  },
 }
 
 export type NavId = 'route' | 'lessons' | 'calm' | 'me' | 'settings'
@@ -179,3 +192,30 @@ export const mobileTabs: { id: TabId; label: string }[] = [
   { id: 'calm', label: 'Спокій' },
   { id: 'me', label: 'Я' },
 ]
+
+export const lessonPage = {
+  backpack: 'Рюкзак ✓',
+  online: 'Онлайн',
+  offline: 'Офлайн',
+  help: 'Безпека',
+  progress: (module: number, card: number, total: number) => `Модуль ${module} · картка ${card} з ${total}`,
+  minutes: (n: number) => `≈ ${n} хв`,
+  cardEyebrow: (card: number, kind: string) => `Картка ${card} · ${kind}`,
+  kinds: { text: 'Текст', image: 'Малюнок', video: 'Відео' } as Record<string, string>,
+  // Медіа «Рюкзака» на пристрій ще не завантажуються: показуємо підпис і пояснення.
+  mediaPending: 'Цей матеріал відкриється, коли медіа уроку збережеться на пристрої.',
+  nextCard: (card: number) => `Далі · картка ${card}`,
+  nextStep: 'Далі',
+  back: 'Назад',
+  next: 'Далі',
+  outline: { shelter: 'Укриттєва частина', main: 'Основна частина' },
+  module: (n: number, title: string) => `Модуль ${n} · ${title}`,
+  test: (questions: number) => `Тест · ${questions} ${pluralUk(questions, ['питання', 'питання', 'питань'])}`,
+  moduleMinutes: (n: number) => `${n} хв`,
+  testWindow: (hours: number) => `вікно ${hours} год`,
+  testPractice: 'тренувальний',
+  queue: (n: number) => (n === 0 ? 'Черга порожня' : `${n} ${pluralUk(n, ['запис', 'записи', 'записів'])} в черзі`),
+  queueSent: 'усе відправлено',
+  queueWaiting: 'відправимо, щойно зʼявиться звʼязок',
+  queueNote: 'Пройдені модулі збережено на пристрої.',
+}

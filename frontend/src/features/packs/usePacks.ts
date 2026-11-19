@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '@/shared/db/db'
-import type { PackLesson, ScheduleItem } from '@/shared/db/packTypes'
+import type { Pack, PackLesson, ScheduleItem } from '@/shared/db/packTypes'
 
 export type LessonStatus = 'now' | 'next' | 'done'
 
@@ -56,24 +56,52 @@ export function useTodayPack(): TodayPack {
     return () => clearInterval(id)
   }, [])
 
-  return useMemo((): TodayPack => {
-    if (!pack) return { lessons: null, builtAt: null }
-    const lessons: TodayLesson[] = []
-    for (const item of pack.schedule) {
-      const lesson = pack.lessons.find((l) => l.id === item.lesson_id)
-      if (!lesson) continue
-      lessons.push({
-        key: `${item.slot_id ?? item.override_id ?? item.lesson_id}-${item.starts_at ?? ''}`,
-        item,
-        lesson,
-        status: statusAt(item, now),
-        minutes: lesson.modules.reduce((sum, m) => sum + m.duration_min, 0),
-        startsAt: hhmm(item.starts_at),
-        endsAt: hhmm(item.ends_at),
-      })
-    }
-    return { lessons, builtAt: pack.built_at }
-  }, [pack, now])
+  return useMemo(
+    (): TodayPack => (pack ? { lessons: packLessons(pack, now), builtAt: pack.built_at } : { lessons: null, builtAt: null }),
+    [pack, now],
+  )
+}
+
+function packLessons(pack: Pack, now: number): TodayLesson[] {
+  const lessons: TodayLesson[] = []
+  for (const item of pack.schedule) {
+    const lesson = pack.lessons.find((l) => l.id === item.lesson_id)
+    if (!lesson) continue
+    lessons.push({
+      key: `${item.slot_id ?? item.override_id ?? item.lesson_id}-${item.starts_at ?? ''}`,
+      item,
+      lesson,
+      status: statusAt(item, now),
+      minutes: lesson.modules.reduce((sum, m) => sum + m.duration_min, 0),
+      startsAt: hhmm(item.starts_at),
+      endsAt: hhmm(item.ends_at),
+    })
+  }
+  return lessons
+}
+
+export interface NextPackDay {
+  /** День пакета, YYYY-MM-DD */
+  date: string
+  lessons: TodayLesson[]
+}
+
+/**
+ * Найближчий наступний день з уроками в «Рюкзаку» (після сьогодні): для списку «Завтра».
+ * null, поки такого пакета на пристрої немає.
+ */
+export function useNextPackDay(): NextPackDay | null {
+  const pack = useLiveQuery(
+    () =>
+      db.packs
+        .where('pack_date')
+        .above(todayKey())
+        .filter((p) => p.schedule.some((item) => item.lesson_id !== null))
+        .first(),
+    [],
+  )
+  // День ще не настав, тож усі уроки «далі»: статус рахуємо від нульового часу.
+  return useMemo(() => (pack ? { date: pack.pack_date, lessons: packLessons(pack, 0) } : null), [pack])
 }
 
 /** Урок, що йде зараз, а якщо його немає, найближчий наступний. */
