@@ -1,5 +1,6 @@
 import { createBrowserRouter } from 'react-router'
 import AlertWatcher from '@/features/alerts/AlertWatcher'
+import RequireGuest from '@/features/auth/RequireGuest'
 import RequireRole from '@/features/auth/RequireRole'
 import AdminAlarmsPage from '@/pages/admin/AdminAlarmsPage'
 import AdminClassesPage from '@/pages/admin/AdminClassesPage'
@@ -35,8 +36,13 @@ export const router = createBrowserRouter([
     element: <RootLayout />,
     children: [
       { path: '/', element: <LandingPage /> },
-      { path: '/login', element: <LoginPage /> },
-      { path: '/register', element: <RegisterPage /> },
+      {
+        element: <RequireGuest />,
+        children: [
+          { path: '/login', element: <LoginPage /> },
+          { path: '/register', element: <RegisterPage /> },
+        ],
+      },
       {
         element: <RequireRole roles={['student']} />,
         children: [

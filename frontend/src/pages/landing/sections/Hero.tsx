@@ -1,6 +1,5 @@
 import checkIcon from '@/assets/landing/icon-check.svg'
 import heroIllustration from '@/assets/landing/hero-illustration.svg'
-import lanternIcon from '@/assets/landing/icon-lantern.svg'
 import mole from '@/assets/landing/mole.svg'
 import Button from '@/shared/ui/Button'
 import { signIn } from '../content'
