@@ -44,11 +44,36 @@ function statusAt(item: ScheduleItem, now: number): LessonStatus {
 }
 
 /**
+ * Найновіша версія пакета кожного дня. Після заміни уроку на день приходить новий пакет з іншим id;
+ * syncPacks прибирає старий, щойно новий збережено, а до того (чи на старих пристроях) читаємо
+ * лише новіший: за version, потім за built_at.
+ */
+export function latestPerDay(packs: Pack[]): Pack[] {
+  const byDate = new Map<string, Pack>()
+  for (const pack of packs) {
+    const current = byDate.get(pack.pack_date)
+    if (
+      !current ||
+      pack.version > current.version ||
+      (pack.version === current.version && pack.built_at > current.built_at)
+    ) {
+      byDate.set(pack.pack_date, pack)
+    }
+  }
+  return [...byDate.values()].sort((a, b) => a.pack_date.localeCompare(b.pack_date))
+}
+
+/** Пакет дня (YYYY-MM-DD) з пристрою, найновіша версія. */
+export async function packOn(date: string): Promise<Pack | undefined> {
+  return latestPerDay(await db.packs.where('pack_date').equals(date).toArray())[0]
+}
+
+/**
  * Уроки на сьогодні зі збереженого пакета «Рюкзака». Читає лише IndexedDB (принцип 1):
  * працює без мережі, оновлюється, коли syncPacks докачає новий пакет.
  */
 export function useTodayPack(): TodayPack {
-  const pack = useLiveQuery(() => db.packs.where('pack_date').equals(todayKey()).first(), [])
+  const pack = useLiveQuery(() => packOn(todayKey()), [])
   const [now, setNow] = useState(() => Date.now())
 
   useEffect(() => {
@@ -92,12 +117,10 @@ export interface NextPackDay {
  */
 export function useNextPackDay(): NextPackDay | null {
   const pack = useLiveQuery(
-    () =>
-      db.packs
-        .where('pack_date')
-        .above(todayKey())
-        .filter((p) => p.schedule.some((item) => item.lesson_id !== null))
-        .first(),
+    async () =>
+      latestPerDay(await db.packs.where('pack_date').above(todayKey()).toArray()).find((p) =>
+        p.schedule.some((item) => item.lesson_id !== null),
+      ),
     [],
   )
   // День ще не настав, тож усі уроки «далі»: статус рахуємо від нульового часу.

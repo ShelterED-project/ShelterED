@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { useAppSelector } from '@/app/hooks'
+import { packOn } from '@/features/packs/usePacks'
 import { db } from '@/shared/db/db'
 import { useStudentProgress } from './useStudentProgress'
 
@@ -31,7 +32,7 @@ export function useLessonRoute() {
   // Дату фіксуємо при відкритті: маршрут не перебудовується посеред перегляду.
   const [today] = useState(() => new Date().toLocaleDateString('sv-SE'))
   // undefined — ще читаємо IndexedDB, null — пакета на сьогодні немає.
-  const pack = useLiveQuery(async () => (await db.packs.where('pack_date').equals(today).first()) ?? null, [today])
+  const pack = useLiveQuery(async () => (await packOn(today)) ?? null, [today])
   const userId = useAppSelector((s) => s.auth.session?.user.id)
   const local = useLiveQuery(
     () => (userId ? db.userProgress.where('user_id').equals(userId).toArray() : []),
