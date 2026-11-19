@@ -69,7 +69,6 @@ export const checkIn = {
   shelter: 'Я в укритті',
   safe: 'Я в безпеці вдома',
   note: 'Зараз без мережі — відправимо автоматично',
-  saved: 'Відмітку збережено',
 }
 
 export const connection = {

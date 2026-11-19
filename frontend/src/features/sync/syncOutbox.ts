@@ -1,5 +1,5 @@
 import { store } from '@/app/store'
-import { getPendingEvents, markAttempted, OUTBOX_ADDED, removeEvents } from '@/shared/db/outbox'
+import { getPendingEvents, markAttempted, OUTBOX_ADDED, removeEvents, saveRejections } from '@/shared/db/outbox'
 import { markContact } from './contact'
 import { pullChanges } from './syncChanges'
 import type { OutboxEvent, WireEvent } from '@/shared/db/types'
@@ -65,6 +65,12 @@ async function drain(): Promise<boolean> {
       scheduleRetry()
       return false
     }
+    // Відмову запамʼятовуємо до видалення: інакше учень так і бачитиме «збережено».
+    await saveRejections(
+      response.data.results
+        .filter((result) => result.status === 'rejected')
+        .map((result) => ({ client_event_id: result.client_event_id, reason: result.reason ?? null })),
+    )
     await removeEvents(done)
   }
 }

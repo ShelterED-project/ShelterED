@@ -49,6 +49,20 @@ export async function removeEvents(ids: string[]): Promise<void> {
   await db.events.bulkDelete(ids)
 }
 
+/** Ключ у meta, де лежить причина відмови сервера для події (rejected). */
+export const rejectionKey = (clientEventId: string) => `rejected:${clientEventId}`
+
+/**
+ * Запамʼятовує відмови сервера, перш ніж події підуть із черги: інтерфейс має сказати учневі,
+ * що дію не враховано (наприклад, перекличку вже закрито), а не мовчки показувати «збережено».
+ */
+export async function saveRejections(rejections: { client_event_id: string; reason: string | null }[]): Promise<void> {
+  if (rejections.length === 0) return
+  await db.meta.bulkPut(
+    rejections.map((r) => ({ key: rejectionKey(r.client_event_id), value: r.reason ?? 'rejected' })),
+  )
+}
+
 export async function markAttempted(ids: string[]): Promise<void> {
   await db.events.where('client_event_id').anyOf(ids).modify((event) => {
     event.attempts += 1
