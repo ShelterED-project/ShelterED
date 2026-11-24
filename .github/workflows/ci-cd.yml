@@ -13,6 +13,11 @@ on:
         type: boolean
         default: false
 
+# Деплої з main по черзі: другий не підхопить образ першого.
+concurrency:
+  group: ${{ github.event_name == 'pull_request' && format('pr-{0}', github.ref) || 'deploy-main' }}
+  cancel-in-progress: false
+
 permissions:
   contents: read
   packages: write
@@ -58,6 +63,7 @@ jobs:
       - name: Запуск лінтера Ruff
         run: |
           ruff check backend/
+          ruff format --check backend/
 
       - name: Запуск лінтера Flake8
         run: |
@@ -95,16 +101,21 @@ jobs:
         with:
           context: ./backend
           file: ./backend/Dockerfile
-          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-          tags: ${{ env.IMAGE_PREFIX }}/backend:latest
+          push: ${{ github.ref == 'refs/heads/main' && github.event_name != 'pull_request' }}
+          build-args: GIT_SHA=${{ github.sha }}
+          tags: |
+            ${{ env.IMAGE_PREFIX }}/backend:latest
+            ${{ env.IMAGE_PREFIX }}/backend:${{ github.sha }}
 
       - name: Build and Push Frontend
         uses: docker/build-push-action@v5
         with:
           context: ./frontend
           file: ./frontend/Dockerfile
-          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-          tags: ${{ env.IMAGE_PREFIX }}/frontend:latest
+          push: ${{ github.ref == 'refs/heads/main' && github.event_name != 'pull_request' }}
+          tags: |
+            ${{ env.IMAGE_PREFIX }}/frontend:latest
+            ${{ env.IMAGE_PREFIX }}/frontend:${{ github.sha }}
   deploy:
     needs: docker-build-push
     if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
@@ -118,12 +129,13 @@ jobs:
           AI_SERVICE_URL: ${{ secrets.AI_SERVICE_URL }}
           AI_INTERNAL_KEY: ${{ secrets.AI_INTERNAL_KEY }}
           SEED_PASSWORD: ${{ secrets.SEED_PASSWORD }}
+          IMAGE_TAG: ${{ github.sha }}
           RUN_SEED: ${{ github.event_name == 'workflow_dispatch' && inputs.seed && 'true' || 'false' }}
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
-          envs: DATABASE_URL,DATABASE_URL_DIRECT,AI_SERVICE_URL,AI_INTERNAL_KEY,SEED_PASSWORD,RUN_SEED
+          envs: IMAGE_TAG,DATABASE_URL,DATABASE_URL_DIRECT,AI_SERVICE_URL,AI_INTERNAL_KEY,SEED_PASSWORD,RUN_SEED
           script_stop: true
           script: |
             set -e
@@ -144,6 +156,8 @@ jobs:
             upsert AI_SERVICE_URL "$AI_SERVICE_URL"
             upsert AI_INTERNAL_KEY "$AI_INTERNAL_KEY"
 
+            # Образи саме цього коміту (тег = sha), а не «останні»; можна відкотитись на будь-який sha.
+            export IMAGE_TAG
             docker compose -f docker-compose.prod.yml pull
 
             # Бекенд при старті сам застосовує міграції до Neon (backend/start.sh).

@@ -46,7 +46,8 @@ services:
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-shelter_db}
       REDIS_URL: redis://redis:6379/0
-      ENVIRONMENT: ${APP_ENV:-production}
+      ENVIRONMENT: ${APP_ENV:-dev}
+      JWT_SECRET: ${JWT_SECRET:-local-dev-secret-change-me-0123456789}
     volumes:
       - media_data:/app/media
     deploy:

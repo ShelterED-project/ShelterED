@@ -2,7 +2,10 @@
 # беруться з .env поруч (деплой заповнює їх із GitHub Secrets), як і JWT, VAPID, AI_*.
 x-app-env: &app-env
   REDIS_URL: redis://redis:6379/0
+  REDIS_RESULT_URL: redis://redis:6379/1
   RATE_LIMIT_REDIS_URL: redis://redis:6379/2
+  # Фронтенд і API на одному домені (/api) — CORS не потрібен; інші origin — https:// у .env.
+  CORS_ORIGINS: ${CORS_ORIGINS:-[]}
   ENVIRONMENT: ${APP_ENV:-prod}
   JWT_SECRET: ${JWT_SECRET}
 
@@ -29,7 +32,7 @@ services:
     logging: *logging
 
   backend:
-    image: ghcr.io/sheltered-project/sheltered/backend:latest
+    image: ghcr.io/sheltered-project/sheltered/backend:${IMAGE_TAG:-latest}
     container_name: shelter_backend
     restart: unless-stopped
     # Під час старту застосовує міграції до Neon (alembic upgrade head через DATABASE_URL_DIRECT),
@@ -39,7 +42,10 @@ services:
     depends_on:
       redis:
         condition: service_healthy
-    environment: *app-env
+    environment:
+      <<: *app-env
+      # Реальний IP клієнта (ліміти запитів) — лише з X-Forwarded-For від Nginx цієї мережі.
+      FORWARDED_ALLOW_IPS: 172.30.0.0/24
     ports:
       - "127.0.0.1:8000:8000"
     volumes:
@@ -51,7 +57,7 @@ services:
     logging: *logging
 
   celery_worker:
-    image: ghcr.io/sheltered-project/sheltered/backend:latest
+    image: ghcr.io/sheltered-project/sheltered/backend:${IMAGE_TAG:-latest}
     container_name: shelter_celery
     restart: unless-stopped
     command: ["celery", "-A", "app.workers.celery_app", "worker", "-Q", "default,push,sync", "--concurrency=1", "--loglevel=info"]
@@ -73,7 +79,7 @@ services:
 
   # Окремий воркер для стиснення відео (ffmpeg, до 25 хв): не блокує push, синхронізацію й тривоги.
   celery_media:
-    image: ghcr.io/sheltered-project/sheltered/backend:latest
+    image: ghcr.io/sheltered-project/sheltered/backend:${IMAGE_TAG:-latest}
     container_name: shelter_celery_media
     restart: unless-stopped
     command: ["celery", "-A", "app.workers.celery_app", "worker", "-Q", "media", "--concurrency=1", "--loglevel=info"]
@@ -96,7 +102,7 @@ services:
 
   # Розклад періодичних задач: тривоги, черга відправки, пакети, агрегати, пояснення ШІ.
   celery_beat:
-    image: ghcr.io/sheltered-project/sheltered/backend:latest
+    image: ghcr.io/sheltered-project/sheltered/backend:${IMAGE_TAG:-latest}
     container_name: shelter_celery_beat
     restart: unless-stopped
     command: ["celery", "-A", "app.workers.celery_app", "beat", "--loglevel=info", "--schedule=/tmp/celerybeat-schedule"]
@@ -113,7 +119,7 @@ services:
     logging: *logging
 
   frontend:
-    image: ghcr.io/sheltered-project/sheltered/frontend:latest
+    image: ghcr.io/sheltered-project/sheltered/frontend:${IMAGE_TAG:-latest}
     container_name: shelter_frontend
     restart: unless-stopped
     ports:
@@ -129,6 +135,13 @@ services:
         limits:
           memory: 64M
     logging: *logging
+
+# Фіксована підмережа: FORWARDED_ALLOW_IPS довіряє лише їй (Nginx і шлюз Docker).
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
 
 volumes:
   media_data:

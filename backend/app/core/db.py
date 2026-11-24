@@ -41,6 +41,8 @@ def connect_args(settings: Settings) -> dict[str, Any]:
     if _is_pooler(settings):
         # PgBouncer відкидає або ігнорує server_settings — без обмеження, з попередженням.
         _warn_pooler()
+        # PgBouncer у режимі транзакцій не тримає підготовлені запити між транзакціями.
+        args["statement_cache_size"] = 0
     else:
         args["server_settings"] = {
             # У мілісекундах; задається при підключенні, тож діє на кожне з'єднання пулу.

@@ -1,7 +1,7 @@
 from functools import lru_cache
 from importlib.metadata import version
 from typing import Literal
-from urllib.parse import urlsplit
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -258,7 +258,18 @@ class Settings(BaseSettings):
         if isinstance(raw, str):
             for prefix in ("postgresql://", "postgres://"):
                 if raw.startswith(prefix):
-                    return "postgresql+asyncpg://" + raw[len(prefix) :]
+                    raw = "postgresql+asyncpg://" + raw[len(prefix) :]
+            # Рядок з Neon Console містить ?sslmode=…&channel_binding=… — asyncpg їх не знає
+            # (TLS вмикаємо через connect_args), тож прибираємо.
+            parts = urlsplit(raw)
+            if parts.query:
+                query = [
+                    (k, v)
+                    for k, v in parse_qsl(parts.query)
+                    if k not in {"sslmode", "channel_binding"}
+                ]
+                raw = urlunsplit(parts._replace(query=urlencode(query)))
+            return raw
         return value
 
     @field_validator("database_ssl", mode="before")
