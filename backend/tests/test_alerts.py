@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 import pytest
+from celery.schedules import crontab
 from conftest import auth_header, pushes
 from fastapi import FastAPI
 from httpx import AsyncClient
@@ -1126,5 +1127,5 @@ def test_lesson_starts_is_scheduled() -> None:
 
     entry = celery_app.conf.beat_schedule["alerts-lesson-starts"]
     assert entry["task"] == "alerts.lesson_starts"
-    assert entry["schedule"] == 60.0
+    assert entry["schedule"] == crontab(minute="*", hour="5-16", day_of_week="mon-fri")
     assert "alerts.lesson_starts" in celery_app.tasks
