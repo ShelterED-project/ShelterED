@@ -312,3 +312,15 @@ def test_parse_title_and_license_rules() -> None:
         with pytest.raises(AppError):
             commons.check_fetch_url(url)
     assert commons.check_fetch_url("https://upload.wikimedia.org/a.png").host
+
+
+def test_author_footnote_falls_back_to_credit() -> None:
+    info = {
+        "extmetadata": {
+            "Artist": {"value": '<a href="https://www.flickr.com/people/x">[1]</a>'},
+            "Credit": {"value": '<a href="https://www.flickr.com/photos/x/1">Always Shooting</a>'},
+        }
+    }
+    assert commons.attribution(info, "CC BY 2.0") == (
+        "Автор: Always Shooting · CC BY 2.0 · Wikimedia Commons"
+    )

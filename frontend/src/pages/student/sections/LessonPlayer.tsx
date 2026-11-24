@@ -6,7 +6,7 @@ import iconArrowLeft from '@/assets/student/lesson-arrow-left.svg'
 import iconVideo from '@/assets/student/lesson-video.svg'
 import { useAppSelector } from '@/app/hooks'
 import { PackCardContent } from '@/features/lessons/CardContent'
-import { cardField } from '@/features/lessons/cardField'
+import { cardField, plainText } from '@/features/lessons/cardField'
 import { completeModule } from '@/features/lessons/completeStep'
 import LessonIntro from '@/features/lessons/LessonIntro'
 import type { LessonStep } from '@/features/lessons/lessonSteps'
@@ -132,7 +132,7 @@ function ModulePlayer({
         <NextPreview
           meta={texts.nextCard(index + 2)}
           // У картки немає заголовка: підпис медіа або початок тексту (обрізається в один рядок).
-          title={cardField(nextCard, 'caption') || cardField(nextCard, 'text') || (texts.kinds[nextCard.kind] ?? nextCard.kind)}
+          title={cardField(nextCard, 'caption') || plainText(cardField(nextCard, 'text')) || (texts.kinds[nextCard.kind] ?? nextCard.kind)}
           video={nextCard.kind === 'video'}
         />
       ) : (

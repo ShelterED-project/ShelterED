@@ -180,8 +180,21 @@ def license_name(info: dict[str, Any]) -> str:
     return short or machine
 
 
+# Виноски-посилання «[1]», якими Commons іноді підписує автора з Flickr тощо.
+_FOOTNOTE = re.compile(r"\[\d+\]")
+
+
+def _author(info: dict[str, Any]) -> str:
+    """Автор з `Artist`; якщо там лише виноска-посилання — з `Credit`."""
+    for field in ("Artist", "Credit"):
+        value = _FOOTNOTE.sub("", _meta(info, field)).strip(" ,;")
+        if value:
+            return value
+    return ""
+
+
 def attribution(info: dict[str, Any], license_short: str) -> str:
-    artist = _meta(info, "Artist")
+    artist = _author(info)
     if len(artist) > MAX_ARTIST_CHARS:
         artist = artist[: MAX_ARTIST_CHARS - 1].rstrip() + "…"
     parts = [f"Автор: {artist}"] if artist else []
