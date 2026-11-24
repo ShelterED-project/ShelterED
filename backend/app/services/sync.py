@@ -70,10 +70,14 @@ from app.schemas.sync import (
 )
 from app.services import school as school_service
 from app.services import wellbeing as wellbeing_service
+from app.services.grading import is_correct
 from app.workers.push import enqueue_push
 from app.workers.stats import enqueue_recompute_student
 
 logger = logging.getLogger(__name__)
+
+# Питання тесту для оцінки: id, kind, answer_key, points.
+QuestionRow = tuple[uuid.UUID, str, Any, int]
 
 
 def _now() -> dt.datetime:
@@ -123,10 +127,10 @@ class Batch:
     lesson_of: dict[tuple[str, uuid.UUID], uuid.UUID | None] = field(default_factory=dict)
     lesson_access: dict[uuid.UUID, bool] = field(default_factory=dict)
     # (клас переклички, учень) -> чи учень у ньому; клас -> чи вчитель-ретранслятор його веде;
-    # тест -> питання для оцінювання (id, ключ, бали).
+    # тест -> питання для оцінювання (id, тип, ключ, бали).
     class_member: dict[tuple[uuid.UUID, uuid.UUID], bool] = field(default_factory=dict)
     teaches: dict[uuid.UUID, bool] = field(default_factory=dict)
-    questions: dict[uuid.UUID, list[tuple[uuid.UUID, Any, int]]] = field(default_factory=dict)
+    questions: dict[uuid.UUID, list[QuestionRow]] = field(default_factory=dict)
 
 
 def _owner(batch: Batch, event: SyncEventIn) -> uuid.UUID:
@@ -273,9 +277,11 @@ async def _check_test_attempt(
     await _check_lesson_access(session, batch, Test, payload.test_id)
 
 
-async def _questions(session: AsyncSession, test_id: uuid.UUID) -> list[tuple[uuid.UUID, Any, int]]:
+async def _questions(session: AsyncSession, test_id: uuid.UUID) -> list[QuestionRow]:
     rows = await session.execute(
-        select(Question.id, Question.answer_key, Question.points).where(Question.test_id == test_id)
+        select(Question.id, Question.kind, Question.answer_key, Question.points).where(
+            Question.test_id == test_id
+        )
     )
     return [tuple(r) for r in rows]  # type: ignore[misc]
 
@@ -283,11 +289,12 @@ async def _questions(session: AsyncSession, test_id: uuid.UUID) -> list[tuple[uu
 async def grade(
     session: AsyncSession,
     test_id: uuid.UUID,
-    answers: dict[Any, list[str]],
-    cache: dict[uuid.UUID, list[tuple[uuid.UUID, Any, int]]] | None = None,
+    answers: dict[Any, Any],
+    cache: dict[uuid.UUID, list[QuestionRow]] | None = None,
 ) -> Decimal | None:
-    """Відсоток балів (0..100, 2 знаки): питання зараховане, якщо множина обраних варіантів
-    дорівнює ключу. Відповіді на питання не з цього тесту ігноруються. Тест без питань — None.
+    """Відсоток балів (0..100, 2 знаки): питання зараховане лише повністю правильною
+    відповіддю (`grading.is_correct`: множина варіантів, нормалізований текст, усі пари).
+    Відповіді на питання не з цього тесту ігноруються. Тест без питань — None.
     `cache` — питання вже прочитаних тестів (на час пакета)."""
     if cache is None:
         questions = await _questions(session, test_id)
@@ -296,9 +303,9 @@ async def grade(
             cache[test_id] = await _questions(session, test_id)
         questions = cache[test_id]
     total = earned = 0
-    for qid, key, points in questions:
+    for qid, kind, key, points in questions:
         total += points
-        if set(answers.get(qid, [])) == set(key or []) and key:
+        if is_correct(kind, key, answers.get(qid)):
             earned += points
     if total == 0:
         return None

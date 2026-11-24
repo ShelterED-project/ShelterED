@@ -151,6 +151,7 @@ CHECK: `role <> 'student' OR (email IS NULL AND password_hash IS NULL)`; `role =
 | version | integer NOT NULL default 1 | +1 при кожній зміні опублікованого уроку; пакет пам'ятає версію (B6.4) |
 | published_at | timestamptz NULL | |
 | grade | smallint NULL | для фільтрів |
+| copied_from_id | uuid FK → lesson NULL ON DELETE SET NULL | урок-джерело копії (`POST /lessons/{id}/copy`); за ним повтор копіювання з тим самим id ідемпотентний. Індекс `ix_lesson_copied_from_id` (міграція `5d1e7c2a9b40`) |
 
 Урок не прив'язаний до класу напряму: один урок можна провести в кількох класах через розклад ❓4.
 
@@ -174,7 +175,7 @@ UNIQUE (`lesson_id`, `part`, `position`).
 | module_id | uuid FK → module ON DELETE CASCADE | |
 | position | smallint NOT NULL | UNIQUE (module_id, position) |
 | kind | text CHECK IN (`text`, `image`, `video`) | |
-| body | jsonb NOT NULL | текст / розмітка картки |
+| body | jsonb NOT NULL | `{"text": "..."}` — проста розмітка Markdown (`**жирний**`, `*курсив*`, `## ` заголовок, списки `- ` і `1. `); `{"caption": "..."}` — підпис медіа |
 | media_asset_id | uuid FK → media_asset NULL | для image / video |
 
 ### `test`
@@ -192,11 +193,15 @@ UNIQUE (`lesson_id`, `part`, `position`).
 | id | uuid PK | |
 | test_id | uuid FK → test ON DELETE CASCADE | |
 | position | smallint NOT NULL | UNIQUE (test_id, position) |
-| kind | text CHECK IN (`single`, `multiple`) | |
+| kind | text CHECK IN (`single`, `multiple`, `text`, `match`) | `text` — коротка відповідь, `match` — відповідність |
 | prompt | text NOT NULL | |
-| options | jsonb NOT NULL | `[{"id": "a", "text": "..."}]` |
-| answer_key | jsonb NOT NULL | правильні `id`; у пакет — лише для тренувального тесту (`window_enabled = false`) |
+| options | jsonb NOT NULL | `[{"id": "a", "text": "..."}]`; `text` — `[]`; `match` — ліві елементи |
+| right_options | jsonb NULL | лише `match`: праві елементи; CHECK `(kind = 'match') = (right_options IS NOT NULL)` |
+| answer_key | jsonb NOT NULL | `single`/`multiple` — правильні `id`; `text` — прийнятні відповіді (1–20); `match` — `{"<лівий id>": "<правий id>"}`. У пакет — лише для тренувального тесту (`window_enabled = false`) |
 | points | smallint default 1 | |
+| explanation | text NULL | розбір помилки (≤ 2000 символів, перевіряє API); у пакет — лише разом із ключем (тренувальний тест) |
+
+Міграція `5d1e7c2a9b40`: типи `text`/`match`, `right_options`, `explanation`. Downgrade видаляє питання `text`/`match` (стара схема їх не описує). Оцінювання — `backend/app/services/grading.py`: питання зараховане лише повністю правильною відповіддю (`text` — без різниці регістру, пробілів і виду апострофа; `match` — усі пари).
 
 ### `media_asset`
 | Поле | Тип | Примітка |
@@ -317,7 +322,7 @@ UNIQUE (`lesson_id`, `part`, `position`).
 | client_event_id | uuid UNIQUE FK → sync_event | одна подія — одна спроба |
 | student_id | uuid FK → app_user | |
 | test_id | uuid FK → test | |
-| answers | jsonb NOT NULL | `{"<question_id>": ["a"]}` |
+| answers | jsonb NOT NULL | `{"<question_id>": ["a"]}`; `text` — `["введений текст"]`; `match` — `{"<question_id>": {"l1": "r2"}}` |
 | completed_at_client | timestamptz NOT NULL | для вікна тесту рахується саме він (B11.3) |
 | received_at | timestamptz default now() | |
 | score | numeric(5,2) NULL | рахує сервер за `answer_key` (B11.4) |
@@ -521,6 +526,7 @@ UNIQUE (`lesson_id`, `part`, `position`).
 Міграція `0edf076a683a`: `knowledge_pack.content_gzip` (bytea NOT NULL; наявні рядки без вмісту видаляються — пакети похідні й перезбираються). Нових полів про дітей немає.
 
 - **Вміст пакета** (клас + дата): розклад дня, опубліковані уроки дня (модулі — спершу укриттєва частина, картки, тести й питання; `answer_key` — лише в питаннях тренувального тесту (`window_enabled = false`) для миттєвої перевірки офлайн, у тесті з вікном (B11, оцінюваному) поля немає зовсім — оцінює сервер після синхронізації. Ключ тренувального тесту входить у хеш, тож його виправлення дає нову версію пакета. Інших оцінюваних вправ у моделі немає: картки (`text`/`image`/`video`) — лише контент, відповіді на них лишаються на пристрої), `explanations` (поки порожній список, сховища пояснень немає — B13.3). Урок, знятий з публікації, у пакет не йде, а в розкладі пакета його `lesson_id = null`. День без уроків у розкладі пакета не має.
+- **Нові типи питань і пояснення (24.11.2026, міграція `5d1e7c2a9b40`).** Питання `text` і `match` йдуть у пакет так само: `right_options` (праві елементи `match`) — завжди; `answer_key` і `explanation` (розбір помилки для офлайн-перевірки) — лише в тренувальному тесті. Поля, яких немає, у JSON відсутні (не `null`), тож пакети з питаннями старих типів без пояснень мають той самий хеш, що й раніше: нових версій через оновлення сервера не з'являється. Картки в пакеті без поля `media` (медіа — у маніфесті).
 - **Версія й хеш.** `content_hash` = sha256 канонічного JSON (сортовані ключі, без пробілів, UTF-8) вмісту без `id`, `version`, `built_at`. Той самий вміст → той самий хеш → нова версія не створюється (повтор і паралельна перезбірка нічого не дублюють; гонку версій ловить UNIQUE (class_id, pack_date, version) + `ON CONFLICT DO NOTHING`; програвша збірка перечитує дані й збирає пакет знову — до 3 спроб, тож виграють найсвіжіші дані). У хешований вміст входить `media` — id медіа уроків разом із субтитрами, тож заміна субтитрів дає нову версію. Готова відповідь зберігається в `content_gzip`, тому ETag завжди відповідає тілу.
 - **Перезбірка** — Celery (черга `default`): `packs.rebuild_for_lesson` після `publish`/`unpublish`; `packs.rebuild_class` після змін слотів, перевизначень і прив'язок уроків; `packs.refresh_all` — beat раз на `PACKS_REFRESH_INTERVAL_S` (3600 с): новий день у горизонті 7 днів і все, що могло не перезібратися (недоступний брокер). Нова версія хоч одного дня → **один** push `pack_updated` класу за перезбірку (`class_id`, `pack_id` і `pack_date` найранішого зміненого дня).
 - **Прогрес не губиться при зміні уроку.** Версія пакета незмінна, стара лишається доступною за id (`GET /packs/{old_id}`), пристрій тримає її, доки учень не закінчить. Id модулів, карток, тестів і питань стабільні між версіями уроку (правка — `unpublish` → зміни → `publish`, id ті самі), тож прогрес і спроби (B9) прив'язані до них, а не до версії пакета; `knowledge_pack_lesson.lesson_version` фіксує, з якою версією уроку зібрано пакет.

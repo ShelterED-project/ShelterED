@@ -6,7 +6,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.schemas.lessons import ModuleOut, Option
+from app.schemas.lessons import ModuleOut, Option, QuestionKind
 from app.schemas.school import ScheduleItem
 
 CLASS_ID = "0192f0a0-0000-7000-8000-000000000001"
@@ -89,17 +89,26 @@ class PackManifestOut(BaseModel):
 
 
 class PackQuestion(BaseModel):
-    """Питання тесту в пакеті. `answer_key` (id правильних варіантів) є лише в тренувальному
-    тесті (`window_enabled = false`) для миттєвої перевірки офлайн; в оцінюваному тесті з
-    вікном поля немає зовсім — оцінює сервер після синхронізації."""
+    """Питання тесту в пакеті (формат за `kind` — як у `QuestionCreate`). `answer_key` і
+    `explanation` (розбір помилки) є лише в тренувальному тесті (`window_enabled = false`) для
+    миттєвої перевірки й розбору офлайн; в оцінюваному тесті з вікном цих полів немає зовсім —
+    оцінює сервер після синхронізації. Поля, яких немає, у JSON відсутні (не `null`)."""
 
     id: uuid.UUID
     position: int
-    kind: Literal["single", "multiple"]
+    kind: QuestionKind
     prompt: str
-    options: list[Option]
+    options: list[Option] = Field(description="Варіанти; для `match` — ліві елементи")
+    right_options: list[Option] | None = Field(
+        default=None,
+        exclude_if=lambda v: v is None,
+        description="Лише `match`: праві елементи",
+    )
     points: int
-    answer_key: list[str] | None = Field(default=None, exclude_if=lambda v: v is None)
+    answer_key: list[str] | dict[str, str] | None = Field(
+        default=None, exclude_if=lambda v: v is None
+    )
+    explanation: str | None = Field(default=None, exclude_if=lambda v: v is None)
 
 
 class PackTest(BaseModel):

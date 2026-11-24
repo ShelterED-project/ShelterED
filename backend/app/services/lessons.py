@@ -4,7 +4,10 @@
 - писати урок і його вміст може лише автор (вчитель); адмін і інші вчителі школи лише читають;
 - опублікований урок незмінний: щоб змінити, вчитель знімає його з публікації (`unpublish`),
   редагує і публікує знову — повторна публікація збільшує `version` (B6.4);
-- публікація проходить серверні перевірки (укриттєва частина, субтитри до відео, розмір).
+- публікація проходить серверні перевірки (укриттєва частина, субтитри до відео, розмір);
+- порядок модулів, карток і питань змінюється пакетно (`reorder_*`): позиції стають 1..n;
+- копія уроку (`copy_lesson`) — нова чернетка того, хто копіює, з тими самими id-зв'язками,
+  але новими id (uuid5 від id копії), тож повтор копіювання нічого не дублює.
 """
 
 import datetime as dt
@@ -13,22 +16,28 @@ from collections.abc import Iterable
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import Select, Text, cast, delete, exists, func, or_, select
+from sqlalchemy import Select, Text, cast, delete, exists, func, insert, or_, select, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import Settings
+from app.core.config import Settings, get_settings
 from app.core.errors import AppError
+from app.core.storage import MediaStorage
 from app.models.lessons import Card, Lesson, MediaAsset, Module, Question, Subject, Test
 from app.models.school import ScheduleOverride, SchoolClass, User
 from app.models.sync import ModuleProgress
 from app.schemas.lessons import (
     CardCreate,
+    CardMediaOut,
     CardOut,
     CardUpdate,
+    ItemOrder,
+    LessonCopy,
     LessonCreate,
     LessonOut,
     LessonUpdate,
     ModuleCreate,
+    ModuleOrder,
     ModuleOut,
     ModuleUpdate,
     QuestionCreate,
@@ -40,6 +49,7 @@ from app.schemas.lessons import (
     TestUpdate,
 )
 from app.services.idempotency import insert_or_get, integrity_errors
+from app.services.media import media_out
 from app.services.schedule import DEFAULT_TZ
 
 
@@ -267,7 +277,43 @@ async def delete_lesson(session: AsyncSession, lesson: Lesson) -> None:
     await session.commit()
 
 
-async def lesson_out(session: AsyncSession, lesson: Lesson) -> LessonOut:
+async def card_outs(
+    session: AsyncSession, storage: MediaStorage, cards: list[Card]
+) -> list[CardOut]:
+    """Картки для редактора: з медіа (URL, тип, розмір) і субтитрами відео — одним запитом."""
+    media_ids = {c.media_asset_id for c in cards if c.media_asset_id is not None}
+    media: dict[uuid.UUID, MediaAsset] = {}
+    if media_ids:
+        subtitle_ids = select(MediaAsset.subtitles_id).where(MediaAsset.id.in_(media_ids))
+        media = {
+            m.id: m
+            for m in await session.scalars(
+                select(MediaAsset).where(
+                    or_(MediaAsset.id.in_(media_ids), MediaAsset.id.in_(subtitle_ids))
+                )
+            )
+        }
+    out = []
+    for c in cards:
+        card = CardOut.model_validate(c)
+        m = media.get(c.media_asset_id) if c.media_asset_id else None
+        if m is not None:
+            subtitles = media.get(m.subtitles_id) if m.subtitles_id else None
+            card.media = CardMediaOut(
+                **media_out(m, storage).model_dump(),
+                subtitles=media_out(subtitles, storage) if subtitles is not None else None,
+            )
+        out.append(card)
+    return out
+
+
+async def lesson_out(
+    session: AsyncSession,
+    lesson: Lesson,
+    storage: MediaStorage,
+    settings: Settings | None = None,
+) -> LessonOut:
+    """Урок повністю для редактора: картки з медіа, розмір уроку й ліміт."""
     # updated_at (onupdate) після зміни прострочений: перечитуємо рядок явно, не ліниво.
     await session.refresh(lesson)
     modules = list(
@@ -295,9 +341,10 @@ async def lesson_out(session: AsyncSession, lesson: Lesson) -> LessonOut:
         )
     )
     out = LessonOut.model_validate(lesson)
+    card_list = await card_outs(session, storage, cards)
     out.modules = [
         ModuleOut.model_validate(m).model_copy(
-            update={"cards": [CardOut.model_validate(c) for c in cards if c.module_id == m.id]}
+            update={"cards": [c for c in card_list if c.module_id == m.id]}
         )
         for m in modules
     ]
@@ -310,6 +357,7 @@ async def lesson_out(session: AsyncSession, lesson: Lesson) -> LessonOut:
         for t in tests
     ]
     out.size_bytes = await pack_size(session, {lesson.id})
+    out.limit_bytes = (settings or get_settings()).pack_max_day_bytes
     return out
 
 
@@ -422,8 +470,23 @@ async def update_question(
     session: AsyncSession, question: Question, body: QuestionUpdate
 ) -> Question:
     data = body.model_dump(exclude_unset=True)
-    fields = ("position", "kind", "prompt", "options", "answer_key", "points")
-    merged = {f: data.get(f, getattr(question, f)) for f in fields}
+    fields = (
+        "position",
+        "kind",
+        "prompt",
+        "options",
+        "right_options",
+        "answer_key",
+        "points",
+        "explanation",
+    )
+    merged = {f: data[f] if f in data else getattr(question, f) for f in fields}
+    for f in ("position", "kind", "prompt", "options", "answer_key", "points"):
+        if merged[f] is None:
+            raise _validation(f"{f} cannot be null")
+    # Питання перестало бути `match`: праві елементи без явного значення прибираються.
+    if merged["kind"] != "match" and "right_options" not in data:
+        merged["right_options"] = None
     try:
         checked = QuestionCreate(id=question.id, **merged)
     except ValueError as exc:
@@ -445,6 +508,222 @@ async def delete_child(session: AsyncSession, obj: Module | Card | Test | Questi
     await session.commit()
 
 
+# ---------- порядок ----------
+
+
+def _order_mismatch(current: list[uuid.UUID], wanted: list[uuid.UUID]) -> AppError | None:
+    """`ids` мають бути рівно поточним набором, кожен раз (інакше хтось змінив склад
+    паралельно, і новий порядок неоднозначний)."""
+    duplicates = sorted({str(i) for i in wanted if wanted.count(i) > 1})
+    missing = sorted(str(i) for i in set(current) - set(wanted))
+    unknown = sorted(str(i) for i in set(wanted) - set(current))
+    if not (duplicates or missing or unknown):
+        return None
+    return AppError(
+        "ORDER_MISMATCH",
+        "ids must list every current item exactly once",
+        status_code=422,
+        details={"missing": missing, "unknown": unknown, "duplicates": duplicates},
+    )
+
+
+async def _reorder(session: AsyncSession, model: Any, parent_filter: Any, ids: list[uuid.UUID]):
+    """Позиції 1..n у порядку `ids` однією транзакцією. UNIQUE (батько, позиція) не
+    відкладений, тож спершу всі позиції зсуваються за межі допустимих (> 1000), потім
+    ставляться остаточні. Повтор того самого порядку нічого не змінює (позиції вже такі)."""
+    rows = list(
+        await session.scalars(
+            select(model).where(parent_filter).order_by(model.position).with_for_update()
+        )
+    )
+    error = _order_mismatch([r.id for r in rows], ids)
+    if error is not None:
+        raise error
+    by_id = {r.id: r for r in rows}
+    if all(by_id[item_id].position == pos for pos, item_id in enumerate(ids, start=1)):
+        return [by_id[i] for i in ids]
+    await session.execute(
+        update(model).where(parent_filter).values(position=model.position + _POSITION_SHIFT)
+    )
+    for pos, item_id in enumerate(ids, start=1):
+        await session.execute(update(model).where(model.id == item_id).values(position=pos))
+    await session.commit()
+    return list(
+        await session.scalars(
+            select(model)
+            .where(parent_filter)
+            .order_by(model.position)
+            .execution_options(populate_existing=True)
+        )
+    )
+
+
+# Більше за максимальну позицію (1000) + кількість елементів; вміщається в SMALLINT.
+_POSITION_SHIFT = 2000
+
+
+async def reorder_modules(session: AsyncSession, lesson: Lesson, body: ModuleOrder) -> list[Module]:
+    return await _reorder(
+        session, Module, (Module.lesson_id == lesson.id) & (Module.part == body.part), body.ids
+    )
+
+
+async def reorder_cards(session: AsyncSession, module: Module, body: ItemOrder) -> list[Card]:
+    return await _reorder(session, Card, Card.module_id == module.id, body.ids)
+
+
+async def reorder_questions(session: AsyncSession, test: Test, body: ItemOrder) -> list[Question]:
+    return await _reorder(session, Question, Question.test_id == test.id, body.ids)
+
+
+# ---------- копія уроку ----------
+
+
+def _copy_id(lesson_id: uuid.UUID, kind: str, source_id: uuid.UUID) -> uuid.UUID:
+    """Id елемента копії: детерміновано від id копії, тож повтор дає ті самі id."""
+    return uuid.uuid5(lesson_id, f"{kind}:{source_id}")
+
+
+def _row(obj: Any, skip: Iterable[str] = ()) -> dict[str, Any]:
+    columns = obj.__table__.columns.keys()
+    return {c: getattr(obj, c) for c in columns if c not in ("created_at", "updated_at", *skip)}
+
+
+async def _copy_media(
+    session: AsyncSession, user: User, lesson_id: uuid.UUID, media_ids: set[uuid.UUID]
+) -> dict[uuid.UUID, uuid.UUID]:
+    """Медіа карток для копії: власні файли вчителя — як є; чужі (колеги зі школи) — нові записи
+    вчителя на той самий файл (`storage_key`), без копіювання файла. Тож вчитель може міняти
+    субтитри й далі перевикористовувати медіа в картках копії (лише власні медіа)."""
+    if not media_ids:
+        return {}
+    media = {
+        m.id: m
+        for m in await session.scalars(select(MediaAsset).where(MediaAsset.id.in_(media_ids)))
+    }
+    foreign = {m.id for m in media.values() if m.uploaded_by != user.id}
+    subtitle_ids = {media[i].subtitles_id for i in foreign if media[i].subtitles_id is not None}
+    if subtitle_ids:
+        media.update(
+            {
+                m.id: m
+                for m in await session.scalars(
+                    select(MediaAsset).where(MediaAsset.id.in_(subtitle_ids))
+                )
+            }
+        )
+    mapping = {i: i for i in media_ids if i not in foreign}
+    for i in foreign | {s for s in subtitle_ids if media[s].uploaded_by != user.id}:
+        mapping[i] = _copy_id(lesson_id, "media", i)
+    # Спершу субтитри: відео посилається на них.
+    for group in (subtitle_ids, foreign):
+        for i in sorted(group):
+            if mapping.get(i, i) == i:
+                continue
+            values = _row(media[i], skip=("id",))
+            values.update(id=mapping[i], uploaded_by=user.id)
+            if values["subtitles_id"] is not None:
+                values["subtitles_id"] = mapping.get(values["subtitles_id"], values["subtitles_id"])
+            await session.execute(
+                pg_insert(MediaAsset).values(**values).on_conflict_do_nothing(index_elements=["id"])
+            )
+    return mapping
+
+
+async def copy_lesson(
+    session: AsyncSession, user: User, source: Lesson, body: LessonCopy
+) -> tuple[Lesson, bool]:
+    """Глибока копія уроку (модулі, картки, тести, питання) у нову чернетку `user`.
+    Ідемпотентно за `body.id`: повтор (той самий автор і джерело) повертає наявну копію, навіть
+    якщо її вже редагували; інший урок під цим id — 409 ID_CONFLICT."""
+    await check_subject(session, source.subject_id, user.school_id)
+    lesson, created = await insert_or_get(
+        session,
+        Lesson,
+        {
+            "id": body.id,
+            "subject_id": source.subject_id,
+            "author_id": user.id,
+            "title": body.title or source.title,
+            "shelter_part": source.shelter_part,
+            "main_part": source.main_part,
+            "grade": source.grade,
+            "copied_from_id": source.id,
+        },
+        compare=["author_id", "copied_from_id"],
+    )
+    if not created:
+        await session.commit()
+        return lesson, False
+
+    new_id = lesson.id
+    modules = list(await session.scalars(select(Module).where(Module.lesson_id == source.id)))
+    cards = list(
+        await session.scalars(select(Card).where(Card.module_id.in_([m.id for m in modules])))
+    )
+    tests = list(await session.scalars(select(Test).where(Test.lesson_id == source.id)))
+    questions = list(
+        await session.scalars(select(Question).where(Question.test_id.in_([t.id for t in tests])))
+    )
+    media = await _copy_media(
+        session, user, new_id, {c.media_asset_id for c in cards if c.media_asset_id}
+    )
+
+    if modules:
+        await session.execute(
+            insert(Module),
+            [
+                {
+                    **_row(m),
+                    "id": _copy_id(new_id, "module", m.id),
+                    "lesson_id": new_id,
+                }
+                for m in modules
+            ],
+        )
+    if cards:
+        await session.execute(
+            insert(Card),
+            [
+                {
+                    **_row(c),
+                    "id": _copy_id(new_id, "card", c.id),
+                    "module_id": _copy_id(new_id, "module", c.module_id),
+                    "media_asset_id": media.get(c.media_asset_id) if c.media_asset_id else None,
+                }
+                for c in cards
+            ],
+        )
+    if tests:
+        await session.execute(
+            insert(Test),
+            [
+                # created_at джерела: тести уроку впорядковані за ним, порядок копії той самий.
+                {
+                    **_row(t),
+                    "id": _copy_id(new_id, "test", t.id),
+                    "lesson_id": new_id,
+                    "created_at": t.created_at,
+                }
+                for t in tests
+            ],
+        )
+    if questions:
+        await session.execute(
+            insert(Question),
+            [
+                {
+                    **_row(q),
+                    "id": _copy_id(new_id, "question", q.id),
+                    "test_id": _copy_id(new_id, "test", q.test_id),
+                }
+                for q in questions
+            ],
+        )
+    await session.commit()
+    return lesson, True
+
+
 # ---------- розміри (ліміт уроку й пакета дня) ----------
 
 
@@ -464,6 +743,8 @@ async def _text_bytes(session: AsyncSession, ids: set[uuid.UUID]) -> int:
             ln(Question.prompt)
             + ln(cast(Question.options, Text))
             + ln(cast(Question.answer_key, Text))
+            + func.coalesce(ln(cast(Question.right_options, Text)), 0)
+            + func.coalesce(ln(Question.explanation), 0)
         )
         .join(Test, Test.id == Question.test_id)
         .where(Test.lesson_id.in_(ids)),
@@ -538,7 +819,7 @@ async def publish_problems(
 
     subtitles = MediaAsset.__table__.alias("subtitles")
     rows = await session.execute(
-        select(Card.id, Card.media_asset_id)
+        select(Card.id, Card.media_asset_id, Module.id)
         .join(Module, Module.id == Card.module_id)
         .join(MediaAsset, MediaAsset.id == Card.media_asset_id)
         .outerjoin(subtitles, subtitles.c.id == MediaAsset.subtitles_id)
@@ -549,11 +830,12 @@ async def publish_problems(
         )
         .order_by(Card.id)
     )
-    for card_id, media_id in rows:
+    for card_id, media_id, module_id in rows:
         problems.append(
             {
                 "check": "video_subtitles",
                 "message": "Video has no VTT subtitles",
+                "module_id": str(module_id),
                 "card_id": str(card_id),
                 "media_asset_id": str(media_id),
             }

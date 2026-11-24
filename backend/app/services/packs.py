@@ -141,8 +141,13 @@ async def _lessons_content(
                         kind=q.kind,  # type: ignore[arg-type]
                         prompt=q.prompt,
                         options=[Option.model_validate(o) for o in q.options],
+                        right_options=None
+                        if q.right_options is None
+                        else [Option.model_validate(o) for o in q.right_options],
                         points=q.points,
-                        answer_key=None if t.window_enabled else list(q.answer_key),
+                        answer_key=None if t.window_enabled else q.answer_key,
+                        # Розбір помилок офлайн — лише разом із ключем.
+                        explanation=None if t.window_enabled else q.explanation,
                     )
                     for q in questions
                     if q.test_id == t.id

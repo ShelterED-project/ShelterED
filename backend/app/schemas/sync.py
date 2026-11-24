@@ -56,6 +56,13 @@ DeviceDatetime = Annotated[AwareDatetime, AfterValidator(utc_representable)]
 OptionId = Annotated[
     str, StringConstraints(min_length=1, max_length=16, pattern=r"^[A-Za-z0-9_-]+$")
 ]
+# Елемент відповіді: id варіанта (`single`/`multiple`) або введений текст (`text`, до 200).
+AnswerItem = Annotated[str, StringConstraints(max_length=200)]
+# Відповідь на питання: список (`single`/`multiple`/`text`) або пари `match`.
+Answer = (
+    Annotated[list[AnswerItem], Field(max_length=10)]
+    | Annotated[dict[OptionId, OptionId], Field(max_length=10)]
+)
 
 
 # ---------- payload по типах ----------
@@ -79,8 +86,10 @@ class TestAttemptPayload(BaseModel):
     __test__ = False
 
     test_id: uuid.UUID
-    answers: dict[uuid.UUID, list[OptionId]] = Field(
-        description="question_id -> id обраних варіантів", max_length=200
+    answers: dict[uuid.UUID, Answer] = Field(
+        description="question_id -> відповідь: `single`/`multiple` — id обраних варіантів; "
+        "`text` — `[введений текст]`; `match` — `{id лівого: id правого}`",
+        max_length=200,
     )
     completed_at: DeviceDatetime = Field(
         description="-> attempt.completed_at_client; від нього рахується вікно тесту"

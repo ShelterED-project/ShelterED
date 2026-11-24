@@ -35,6 +35,8 @@ class Lesson(TimestampMixin, Base):
         CheckConstraint("status IN ('draft', 'published')", name="status"),
         # «Мої уроки» вчителя.
         Index("ix_lesson_author_id", "author_id"),
+        # ON DELETE SET NULL при видаленні уроку-джерела.
+        Index("ix_lesson_copied_from_id", "copied_from_id"),
     )
 
     id: Mapped[uuid.UUID] = uuid_pk()
@@ -48,6 +50,11 @@ class Lesson(TimestampMixin, Base):
     version: Mapped[int] = mapped_column(Integer, server_default=text("1"))
     published_at: Mapped[dt.datetime | None]
     grade: Mapped[int | None] = mapped_column(SmallInteger)
+    # Урок-джерело, якщо урок створено копіюванням (`POST /lessons/{id}/copy`); за ним повтор
+    # копіювання з тим самим id розпізнається як той самий.
+    copied_from_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("lesson.id", ondelete="SET NULL")
+    )
 
 
 class Module(TimestampMixin, Base):
@@ -128,7 +135,9 @@ class Test(TimestampMixin, Base):
 class Question(TimestampMixin, Base):
     __tablename__ = "question"
     __table_args__ = (
-        CheckConstraint("kind IN ('single', 'multiple')", name="kind"),
+        CheckConstraint("kind IN ('single', 'multiple', 'text', 'match')", name="kind"),
+        # Праві елементи є лише в питанні на відповідність (`match`).
+        CheckConstraint("(kind = 'match') = (right_options IS NOT NULL)", name="right_options"),
         UniqueConstraint("test_id", "position", name="uq_question_test_position"),
     )
 
@@ -137,8 +146,13 @@ class Question(TimestampMixin, Base):
     position: Mapped[int] = mapped_column(SmallInteger)
     kind: Mapped[str]
     prompt: Mapped[str]
-    # [{"id": "a", "text": "..."}]
+    # [{"id": "a", "text": "..."}]; `text` — порожній список, `match` — ліві елементи.
     options: Mapped[Any] = mapped_column(JSONB)
-    # Правильні id варіантів; перевірку робить сервер.
+    # Лише `match`: праві елементи [{"id": "x", "text": "..."}].
+    right_options: Mapped[Any | None] = mapped_column(JSONB(none_as_null=True))
+    # `single`/`multiple` — id правильних варіантів; `text` — прийнятні відповіді;
+    # `match` — {id лівого: id правого}. Перевірку робить сервер (services/grading).
     answer_key: Mapped[Any] = mapped_column(JSONB)
     points: Mapped[int] = mapped_column(SmallInteger, server_default=text("1"))
+    # Пояснення для розбору помилок; у пакет — лише для тренувального тесту.
+    explanation: Mapped[str | None]
