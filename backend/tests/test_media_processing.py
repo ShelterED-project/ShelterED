@@ -54,7 +54,7 @@ async def test_video_source_upload_is_processing_and_enqueued(
     assert body["url"].startswith("/media/video_source/") and body["url"].endswith(".mov")
     assert body["processing_error"] is None and body["attribution"] is None
     tasks = [c for c in enqueued if c.name == "media.process_video"]
-    assert [(t.args, t.queue) for t in tasks] == [([str(media_id)], "default")]
+    assert [(t.args, t.queue) for t in tasks] == [([str(media_id)], "media")]
 
     # Повтор того самого файла — наявний запис і ще одна (ідемпотентна) постановка задачі.
     again = await upload(client, world.teacher_a, "video_source", "video/quicktime", MOV, media_id)

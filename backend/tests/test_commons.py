@@ -79,6 +79,8 @@ FILES: dict[str, tuple[dict, bytes]] = {
             "url": f"{UPLOAD}/4/4d/Melting_ice.webm",
             "thumburl": f"{UPLOAD}/thumb/4/4d/Melting_ice.webm/1280px-x.jpg",
             "mime": "video/webm",
+            "width": 640,
+            "height": 360,
             "extmetadata": {
                 "LicenseShortName": {"value": "CC BY 2.0"},
                 "License": {"value": "cc-by-2.0"},
@@ -88,7 +90,13 @@ FILES: dict[str, tuple[dict, bytes]] = {
         WEBM,
     ),
     "Proof.gif": (
-        {"url": f"{UPLOAD}/5/5e/Proof.gif", "mime": "image/gif", "extmetadata": CC0},
+        {
+            "url": f"{UPLOAD}/5/5e/Proof.gif",
+            "mime": "image/gif",
+            "width": 320,
+            "height": 240,
+            "extmetadata": CC0,
+        },
         GIF,
     ),
     "NonCommercial.jpg": (
@@ -324,3 +332,7 @@ def test_author_footnote_falls_back_to_credit() -> None:
     assert commons.attribution(info, "CC BY 2.0") == (
         "Автор: Always Shooting · CC BY 2.0 · Wikimedia Commons"
     )
+
+
+def test_strip_html_decodes_entities_once() -> None:
+    assert commons.strip_html("<b>Tom &amp;lt;script&amp;gt;</b>") == "Tom &lt;script&gt;"

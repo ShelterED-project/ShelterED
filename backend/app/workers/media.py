@@ -12,7 +12,8 @@ from app.workers.celery_app import LONG_TASK_LIMITS, TRANSIENT_RETRY, celery_app
 
 
 async def enqueue_process_video(media_id: uuid.UUID) -> None:
-    await enqueue("media.process_video", args=[str(media_id)])
+    # Окрема черга: довге стиснення не блокує push, синхронізацію й тривоги.
+    await enqueue("media.process_video", args=[str(media_id)], queue="media")
 
 
 async def _process_video(media_id: uuid.UUID) -> str:

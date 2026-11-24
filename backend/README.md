@@ -104,7 +104,7 @@ Redis для розробки піднімається в Docker на порту
 
 ```
 docker compose -f docker-compose.dev.yml up -d redis
-celery -A app.workers.celery_app worker -Q default,push,sync -l info --pool=solo
+celery -A app.workers.celery_app worker -Q default,push,sync,media -l info --pool=solo
 ```
 
 `--pool=solo` потрібен лише на Windows (там Celery не підтримує стандартний prefork-пул); у Docker і на Linux цей прапорець не потрібен.
@@ -128,7 +128,7 @@ celery -A app.workers.celery_app beat -l info
 
 - API: команда за замовчуванням (`uvicorn ... --proxy-headers`), порт 8000, перевірка `GET /health` (живий) і `GET /health/ready` (БД і Redis);
 - міграції перед стартом API: `alembic upgrade head` (потрібен `DATABASE_URL_DIRECT`);
-- воркер: `celery -A app.workers.celery_app worker -Q default,push,sync -l info`;
+- воркер: `celery -A app.workers.celery_app worker -Q default,push,sync -l info` і окремий для стиснення відео: `-Q media --concurrency=1`;
 - beat (рівно один): `celery -A app.workers.celery_app beat -l info -s /tmp/celerybeat-schedule`.
 
 Обов'язкові змінні: `DATABASE_URL`, `DATABASE_URL_DIRECT` (для міграцій), `JWT_SECRET`, `REDIS_URL`, `REDIS_RESULT_URL`, `RATE_LIMIT_REDIS_URL` (усі три Redis-URL за замовчуванням дивляться на `localhost:6380`, у контейнері їх треба задати), для push — `VAPID_*`. `FORWARDED_ALLOW_IPS` — IP чи підмережа Nginx. Медіа пишуться в `/app/media` — туди монтується том, який роздає Nginx. `.env` в образ не потрапляє (`.dockerignore`).

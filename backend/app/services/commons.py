@@ -20,7 +20,6 @@
 наявний запис без мережі; інший файл або чужий запис під цим id — 409 `ID_CONFLICT`.
 """
 
-import html
 import re
 import uuid
 from collections.abc import AsyncIterator
@@ -155,7 +154,8 @@ def strip_html(value: str) -> str:
     parser = _TextOnly()
     parser.feed(value)
     parser.close()
-    text = html.unescape("".join(parser.parts))
+    # convert_charrefs=True уже розкодував сутності; вдруге не можна (&amp;lt; → <).
+    text = "".join(parser.parts)
     return re.sub(r"\s+", " ", text).strip()
 
 
@@ -306,7 +306,8 @@ async def import_file(
             if mime in IMAGE_MIMES:
                 kind = "image"
                 file_url = info.get("thumburl") or info.get("url")
-            elif mime in VIDEO_MIMES:
+            elif mime in VIDEO_MIMES and info.get("width") and info.get("height"):
+                # ogg/webm на Commons часто лише аудіо (без кадру) — відсіюємо до завантаження.
                 kind = "video_source"
                 file_url = info.get("url")
             else:

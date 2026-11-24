@@ -13,7 +13,7 @@ from app.workers.system import ping
 
 def test_queues():
     names = {queue.name for queue in celery_app.conf.task_queues}
-    assert names == {"default", "push", "sync"}
+    assert names == {"default", "push", "sync", "media"}
     assert celery_app.conf.task_default_queue == "default"
 
 

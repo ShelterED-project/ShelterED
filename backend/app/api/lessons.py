@@ -52,6 +52,7 @@ from app.schemas.lessons import (
     TestUpdate,
 )
 from app.services import lessons as service
+from app.workers.media import enqueue_process_video
 from app.workers.packs import enqueue_rebuild_for_lesson
 from app.workers.sync import enqueue_regrade_test
 
@@ -275,6 +276,10 @@ async def copy_lesson(
     учнів не копіюються. `copied_from_id` копії — джерело."""
     copy, created = await service.copy_lesson(session, teacher, lesson, body)
     _created(response, created)
+    # Відео колеги ще стискається: копія має свій запис на той самий файл — ставимо задачу й
+    # для нього (ідемпотентно), інакше він може застрягти в processing.
+    for media_id in await service.processing_media(session, copy.id):
+        await enqueue_process_video(media_id)
     return await service.lesson_out(session, copy, storage)
 
 

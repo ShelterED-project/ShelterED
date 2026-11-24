@@ -642,6 +642,19 @@ async def _copy_media(
     return mapping
 
 
+async def processing_media(session: AsyncSession, lesson_id: uuid.UUID) -> list[uuid.UUID]:
+    """Медіа карток уроку, що ще стискаються."""
+    return list(
+        await session.scalars(
+            select(MediaAsset.id)
+            .join(Card, Card.media_asset_id == MediaAsset.id)
+            .join(Module, Module.id == Card.module_id)
+            .where(Module.lesson_id == lesson_id, MediaAsset.processing_status == "processing")
+            .distinct()
+        )
+    )
+
+
 async def copy_lesson(
     session: AsyncSession, user: User, source: Lesson, body: LessonCopy
 ) -> tuple[Lesson, bool]:
