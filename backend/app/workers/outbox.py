@@ -23,8 +23,23 @@ logger = logging.getLogger(__name__)
 FLUSH_BATCH = 100
 
 
+def _pending() -> bool:
+    """Чи є позначка «в outbox щось є». Redis недоступний — так (перевіряємо БД)."""
+    from app.workers.redis_client import redis_client
+
+    try:
+        return bool(redis_client().exists(celery_module.OUTBOX_PENDING_KEY))
+    except Exception:
+        return True
+
+
 async def _flush(batch_size: int = FLUSH_BATCH) -> int:
+    # Без позначки в БД не ходимо: інакше запит кожні 30 с не дає Neon засинати.
+    if not _pending():
+        return 0
+    _clear_pending()
     sent = 0
+    left = True
     async with standalone_session() as session:
         rows = list(
             await session.scalars(
@@ -44,8 +59,22 @@ async def _flush(batch_size: int = FLUSH_BATCH) -> int:
                 break
             row.sent_at = dt.datetime.now(dt.UTC)
             sent += 1
+        else:
+            left = len(rows) == batch_size
         await session.commit()
+    if left:
+        # Помилка брокера чи повна пачка: лишилось що публікувати — наступний запуск добере.
+        celery_module.mark_outbox_pending()
     return sent
+
+
+def _clear_pending() -> None:
+    from app.workers.redis_client import redis_client
+
+    try:
+        redis_client().delete(celery_module.OUTBOX_PENDING_KEY)
+    except Exception:
+        logger.warning("Cannot clear outbox pending mark in Redis")
 
 
 @celery_app.task(name="outbox.flush")

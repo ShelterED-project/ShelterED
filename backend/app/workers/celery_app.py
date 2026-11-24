@@ -96,7 +96,9 @@ celery_app.conf.update(
         },
         "alerts-lesson-starts": {
             "task": "alerts.lesson_starts",
-            "schedule": float(ALERTS_LESSON_START_INTERVAL_S),
+            # Лише в шкільні години (пн–пт ≈ 7:00–19:00 за Києвом; beat у UTC): поза ними уроки
+            # не починаються, а щохвилинний запит до БД не давав би Neon засинати.
+            "schedule": crontab(minute="*", hour="5-16", day_of_week="mon-fri"),
             "options": {"queue": "default", "expires": ALERTS_LESSON_START_INTERVAL_S},
         },
         "packs-refresh": {
@@ -186,7 +188,24 @@ async def enqueue(
             logger.exception("Failed to store task %s in the outbox", name)
 
 
+# Позначка в Redis «в outbox щось є»: beat-задача `outbox.flush` без неї не ходить у БД, тож
+# Neon може засинати між подіями. Якщо Redis недоступний — flush
+# однаково перевіряє БД (fail-open). Ставиться ПІСЛЯ commit рядка, а flush знімає її ДО читання:
+# рядок, закомічений посеред flush, лишається з позначкою й піде наступним запуском.
+OUTBOX_PENDING_KEY = "outbox:pending"
+
+
+def mark_outbox_pending() -> None:
+    from app.workers.redis_client import redis_client
+
+    try:
+        redis_client().set(OUTBOX_PENDING_KEY, "1")
+    except Exception:
+        logger.warning("Cannot mark outbox as pending in Redis")
+
+
 async def _store_in_outbox(name: str, args: list[Any], queue: str) -> None:
     async with standalone_session() as session:
         session.add(TaskOutbox(task_name=name, args=args, queue=queue))
         await session.commit()
+    mark_outbox_pending()

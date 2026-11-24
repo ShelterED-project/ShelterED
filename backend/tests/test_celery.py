@@ -131,3 +131,18 @@ def test_send_ignores_results(monkeypatch):
     module._send("x.y", [], "default", {})
     assert sent["ignore_result"] is True
     assert celery_app.conf.task_ignore_result is True
+
+
+def test_outbox_flush_skips_db_without_pending_mark(monkeypatch):
+    """Без позначки в Redis flush не ходить у БД — Neon може засинати."""
+    import asyncio
+
+    from app.workers import outbox
+
+    monkeypatch.setattr(outbox, "_pending", lambda: False)
+
+    def boom():
+        raise AssertionError("DB must not be touched")
+
+    monkeypatch.setattr(outbox, "standalone_session", boom)
+    assert asyncio.run(outbox._flush()) == 0
