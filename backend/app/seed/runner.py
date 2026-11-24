@@ -305,8 +305,9 @@ async def seed(
     today: dt.date | None = None,
     password: str | None = None,
     storage: MediaStorage | None = None,
+    allow_prod: bool = False,
 ) -> SeedResult:
-    if settings.environment == "prod":
+    if settings.environment == "prod" and not allow_prod:
         raise SeedRefused("Seed data is not allowed when ENVIRONMENT=prod")
     storage = storage or LocalMediaStorage(settings.media_root, settings.media_url_prefix)
     tz = ZoneInfo(c.SCHOOL["timezone"])

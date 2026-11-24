@@ -24,10 +24,11 @@ settings = get_settings()
 
 
 def get_url() -> str:
-    # Міграції — лише через direct endpoint Neon (не pooler).
-    if settings.database_url_direct is None:
-        raise RuntimeError("DATABASE_URL_DIRECT is not set")
-    return settings.database_url_direct.get_secret_value()
+    # Міграції — через direct endpoint Neon (не pooler); без нього (БД у контейнері) — DATABASE_URL.
+    url = settings.database_url_direct or settings.database_url
+    if url is None:
+        raise RuntimeError("DATABASE_URL_DIRECT / DATABASE_URL is not set")
+    return url.get_secret_value()
 
 
 def run_migrations_offline() -> None:
@@ -51,7 +52,7 @@ def do_run_migrations(connection: Connection) -> None:
 async def run_async_migrations() -> None:
     engine = create_async_engine(
         get_url(),
-        connect_args={"ssl": True} if settings.database_ssl else {},
+        connect_args={"ssl": True} if settings.use_db_ssl else {},
         poolclass=pool.NullPool,
     )
     async with engine.connect() as connection:

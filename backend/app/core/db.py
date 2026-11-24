@@ -48,7 +48,7 @@ def connect_args(settings: Settings) -> dict[str, Any]:
                 settings.db_idle_in_transaction_timeout_s * 1000
             ),
         }
-    if settings.database_ssl:
+    if settings.use_db_ssl:
         # asyncpg не розуміє sslmode в URL, тому TLS передаємо напряму драйверу.
         args["ssl"] = True
     return args

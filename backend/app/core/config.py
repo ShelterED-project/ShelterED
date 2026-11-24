@@ -1,6 +1,7 @@
 from functools import lru_cache
 from importlib.metadata import version
 from typing import Literal
+from urllib.parse import urlsplit
 
 from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -48,8 +49,9 @@ class Settings(BaseSettings):
     database_url: SecretStr | None = None
     # Міграції Alembic — завжди через direct endpoint Neon.
     database_url_direct: SecretStr | None = None
-    # Neon вимагає TLS; для локальної БД у Docker вимикаємо.
-    database_ssl: bool = True
+    # TLS до БД. Не задано — авто: увімкнено для зовнішніх хостів (Neon), вимкнено для БД у
+    # сусідньому контейнері чи локально (`db`, `localhost`, ім'я без крапки). Див. `use_db_ssl`.
+    database_ssl: bool | None = None
     # Пул з'єднань на процес API: pool_size + max_overflow, помножене на кількість воркерів
     # uvicorn (і задач Celery, що працюють одночасно), має лишатися нижче за ліміт з'єднань Neon.
     db_pool_size: int = 10
@@ -202,6 +204,9 @@ class Settings(BaseSettings):
     tutor_max_image_bytes: int = 4 * 1024 * 1024
     # Як часто beat шукає опубліковані уроки без закешованих пояснень (AI був недоступний).
     tutor_explanations_interval_s: int = 3600
+    # Версія промпту пояснень: входить у ключ кешу пояснень (`tutor_explanation.cache_key`),
+    # тож зміна генерує пояснення заново, а старі ключі стають невикористаними й прибираються.
+    tutor_prompt_version: str = "1"
 
     # Wikimedia Commons: API і файли лише з https://*.wikimedia.org. User-Agent — назва
     # проєкту без контактів людей (політика Wikimedia вимагає описовий UA).
@@ -221,6 +226,9 @@ class Settings(BaseSettings):
     retention_wellbeing_view_log_days: int = 365
     # Розмови з ШІ-репетитором (завдання, підказки, останні 8 реплік) — від останньої активності.
     retention_tutor_conversation_days: int = 30
+    # Закешовані пояснення ШІ, яких ніхто не брав N днів і на які не посилається жоден модуль
+    # опублікованого уроку (за поточним ключем).
+    retention_tutor_explanation_days: int = 90
 
     # Web Push (B8): пара ключів VAPID (`python -m app.cli gen-vapid`) і контакт `mailto:` для
     # push-сервісів. Не задано — відправка пропускається з попередженням у лог.
@@ -241,6 +249,28 @@ class Settings(BaseSettings):
     # Демо-дані (`python -m app.cli seed`): спільний пароль дорослих (≥ 8 символів). Не задано —
     # генерується й друкується один раз при створенні акаунтів.
     seed_password: SecretStr | None = None
+
+    @field_validator("database_url", "database_url_direct", mode="before")
+    @classmethod
+    def _async_driver(cls, value: object) -> object:
+        # Застосунок асинхронний: `postgresql://` (як у docker-compose) → драйвер asyncpg.
+        raw = value.get_secret_value() if isinstance(value, SecretStr) else value
+        if isinstance(raw, str):
+            for prefix in ("postgresql://", "postgres://"):
+                if raw.startswith(prefix):
+                    return "postgresql+asyncpg://" + raw[len(prefix) :]
+        return value
+
+    @property
+    def use_db_ssl(self) -> bool:
+        """TLS до БД: явний DATABASE_SSL або авто за хостом."""
+        if self.database_ssl is not None:
+            return self.database_ssl
+        url = self.database_url_direct or self.database_url
+        if url is None:
+            return False
+        host = urlsplit(url.get_secret_value()).hostname or ""
+        return host not in {"localhost", "127.0.0.1", "::1"} and "." in host
 
     @field_validator("jwt_secret")
     @classmethod

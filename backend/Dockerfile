@@ -26,6 +26,7 @@ COPY --from=build /install /usr/local
 COPY alembic.ini ./
 COPY alembic ./alembic
 COPY app ./app
+COPY --chmod=755 start.sh ./start.sh
 # Том для медіа монтується сюди; власник — непривілейований користувач.
 RUN mkdir -p /app/media && chown app:app /app/media
 
@@ -39,4 +40,5 @@ EXPOSE 8000
 # Never "*" while the API port is reachable bypassing Nginx: clients could spoof their IP.
 ENV FORWARDED_ALLOW_IPS=127.0.0.1,::1
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers"]
+# Міграції + uvicorn (див. start.sh). Celery-воркери перевизначають command і міграцій не запускають.
+CMD ["./start.sh"]

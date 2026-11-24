@@ -1,15 +1,31 @@
+# Спільне для backend і Celery: решта налаштувань (JWT_SECRET, VAPID, AI_*, ...) — у .env поруч.
+x-app-env: &app-env
+  # Драйвер asyncpg і TLS бекенд підбирає сам (postgresql:// → asyncpg; БД у контейнері — без TLS).
+  DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-shelter_db}
+  REDIS_URL: redis://redis:6379/0
+  RATE_LIMIT_REDIS_URL: redis://redis:6379/2
+  ENVIRONMENT: ${APP_ENV:-prod}
+  JWT_SECRET: ${JWT_SECRET}
+
+x-logging: &logging
+  driver: "json-file"
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   db:
-    image: postgres:15-alpine
+    image: postgres:17-alpine
     container_name: shelter_db
     restart: unless-stopped
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-shelter_db}
-      REDIS_URL: redis://redis:6379/0
-      ENVIRONMENT: ${APP_ENV:-prod}
-      JWT_SECRET: ${JWT_SECRET}
+      POSTGRES_DB: ${POSTGRES_DB:-shelter_db}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      # Новий том під PostgreSQL 17 (дані 15 несумісні). Старий том postgres_data не видаляється —
+      # лишається резервною копією; дамп і відновлення — див. README бекенду.
+      - postgres17_data:/var/lib/postgresql/data
     deploy:
       resources:
         limits:
@@ -19,11 +35,7 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
+    logging: *logging
 
   redis:
     image: redis:7-alpine
@@ -38,16 +50,13 @@ services:
       interval: 5s
       timeout: 3s
       retries: 5
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
+    logging: *logging
 
   backend:
     image: ghcr.io/sheltered-project/sheltered/backend:latest
     container_name: shelter_backend
     restart: unless-stopped
+    # Під час старту застосовує міграції (alembic upgrade head), потім uvicorn — див. backend/start.sh.
     env_file:
       - .env
     depends_on:
@@ -55,11 +64,7 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-shelter_db}
-      REDIS_URL: redis://redis:6379/0
-      ENVIRONMENT: ${APP_ENV:-prod}
-      JWT_SECRET: ${JWT_SECRET}
+    environment: *app-env
     ports:
       - "127.0.0.1:8000:8000"
     volumes:
@@ -68,37 +73,28 @@ services:
       resources:
         limits:
           memory: 300M
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
+    logging: *logging
 
   celery_worker:
     image: ghcr.io/sheltered-project/sheltered/backend:latest
     container_name: shelter_celery
     restart: unless-stopped
     command: ["celery", "-A", "app.workers.celery_app", "worker", "-Q", "default,push,sync", "--concurrency=1", "--loglevel=info"]
-    profiles: ["cloud"]
+    env_file:
+      - .env
     depends_on:
       redis:
         condition: service_healthy
-      db:
-        condition: service_healthy
-    environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-shelter_db}
-      REDIS_URL: redis://redis:6379/0
+      backend:
+        condition: service_started
+    environment: *app-env
     volumes:
       - media_data:/app/media
     deploy:
       resources:
         limits:
-          memory: 150M
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
+          memory: 200M
+    logging: *logging
 
   # Окремий воркер для стиснення відео (ffmpeg, до 25 хв): не блокує push, синхронізацію й тривоги.
   celery_media:
@@ -106,17 +102,14 @@ services:
     container_name: shelter_celery_media
     restart: unless-stopped
     command: ["celery", "-A", "app.workers.celery_app", "worker", "-Q", "media", "--concurrency=1", "--loglevel=info"]
-    profiles: ["cloud"]
+    env_file:
+      - .env
     depends_on:
       redis:
         condition: service_healthy
-      db:
-        condition: service_healthy
-    env_file:
-      - .env
-    environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-shelter_db}
-      REDIS_URL: redis://redis:6379/0
+      backend:
+        condition: service_started
+    environment: *app-env
     volumes:
       - media_data:/app/media
     deploy:
@@ -124,11 +117,25 @@ services:
         limits:
           # ffmpeg (720p) потребує ~200–300 МБ.
           memory: 512M
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
+    logging: *logging
+
+  # Розклад періодичних задач: тривоги, черга відправки, пакети, агрегати, пояснення ШІ.
+  celery_beat:
+    image: ghcr.io/sheltered-project/sheltered/backend:latest
+    container_name: shelter_celery_beat
+    restart: unless-stopped
+    command: ["celery", "-A", "app.workers.celery_app", "beat", "--loglevel=info", "--schedule=/tmp/celerybeat-schedule"]
+    env_file:
+      - .env
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment: *app-env
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+    logging: *logging
 
   frontend:
     image: ghcr.io/sheltered-project/sheltered/frontend:latest
@@ -146,12 +153,10 @@ services:
       resources:
         limits:
           memory: 64M
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
+    logging: *logging
 
 volumes:
+  # Дані PostgreSQL 15 (до переходу на 17) — не видаляти, доки не перевірено відновлення.
   postgres_data:
+  postgres17_data:
   media_data:
