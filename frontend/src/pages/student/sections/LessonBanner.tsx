@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router'
 import { pickCurrentLesson, useTodayPack } from '@/features/packs/usePacks'
 import { pluralUk } from '@/shared/lib/plural'
 import { lessonBanner, navRoutes } from '../content'
+import BackpackLine from './BackpackLine'
 
 export default function LessonBanner() {
   const { lessons } = useTodayPack()
@@ -48,6 +49,7 @@ export default function LessonBanner() {
           {title}
         </h2>
         <p className="text-sm leading-5 text-muted">{text}</p>
+        {lessons && lessons.length > 0 && <BackpackLine className="pt-1" />}
       </div>
       <div className="flex gap-2 md:shrink-0">
         <button

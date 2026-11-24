@@ -1,8 +1,17 @@
+/**
+ * Відповідь на одне питання тесту (docs/sync-protocol.md, test_attempt): single/multiple — id
+ * обраних варіантів, text — рівно один введений рядок, match — {id лівого: id правого}.
+ */
+export type QuestionAnswer = string[] | Record<string, string>
+
+/** Відповіді тесту за id питання. Питання без відповіді можна не надсилати. */
+export type TestAnswers = Record<string, QuestionAnswer>
+
 /** Payload подій за типом, див. docs/sync-protocol.md, розділ 3. */
 export interface EventPayloads {
   rollcall_status: { session_id: string; status: 'safe' | 'in_shelter' }
   module_progress: { module_id: string; progress_pct: number; completed_at?: string }
-  test_attempt: { test_id: string; answers: Record<string, string[]>; completed_at: string }
+  test_attempt: { test_id: string; answers: TestAnswers; completed_at: string }
   survey_answer: { value: 1 | 2 | 3 | 4 | 5 }
 }
 
@@ -88,4 +97,20 @@ export interface StoredSession {
     school_id: string | null
     class_id?: string | null
   }
+}
+
+/**
+ * Медіафайл «Рюкзака» з маніфесту (GET /packs/manifest): за ним картка знаходить URL файла
+ * й субтитрів без мережі, а екран «Рюкзака» — чи збережено відео на пристрої.
+ */
+export interface MediaRecord {
+  id: string
+  kind: 'video' | 'image' | 'subtitles'
+  url: string
+  size_bytes: number
+  sha256: string
+  subtitles_id: string | null
+  needed_on: string
+  /** Коли файл ліг у кеш Service Worker-а (ISO); null — ще не збережено */
+  cached_at: string | null
 }

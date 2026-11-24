@@ -37,6 +37,17 @@ export const lessonBanner = {
   breathe: 'Подихати',
 }
 
+/** Чи сьогоднішній урок (текст і медіа) уже на пристрої: один рядок у банері, «Уроках» і налаштуваннях. */
+export const backpackStatus = {
+  title: 'Сьогоднішній урок',
+  saved: (size: string) => `Урок збережено на телефоні ✓ (${size})`,
+  saving: (video: boolean, done: number, total: number) =>
+    `Зберігаю ${video ? 'відео' : 'малюнки'}… ${done} з ${total}`,
+  waiting: (video: boolean, done: number, total: number) =>
+    `Текст уроку на телефоні ✓. ${video ? 'Відео' : 'Малюнки'} збережу, коли буде інтернет (${done} з ${total})`,
+  unsupported: 'Текст уроку на телефоні ✓. Відео відкриються лише з інтернетом',
+}
+
 export const route = {
   title: 'Мій маршрут на сьогодні',
   range: (done: number, total: number) => `Пройдено ${done} з ${total}`,
@@ -266,8 +277,6 @@ export const lessonPage = {
   minutes: (n: number) => `≈ ${n} хв`,
   cardEyebrow: (card: number, kind: string) => `Картка ${card} · ${kind}`,
   kinds: { text: 'Текст', image: 'Малюнок', video: 'Відео' } as Record<string, string>,
-  // Медіа «Рюкзака» на пристрій ще не завантажуються: показуємо підпис і пояснення.
-  mediaPending: 'Цей матеріал відкриється, коли медіа уроку збережеться на пристрої.',
   nextCard: (card: number) => `Далі · картка ${card}`,
   nextStep: 'Далі',
   back: 'Назад',

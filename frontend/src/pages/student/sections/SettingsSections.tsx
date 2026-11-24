@@ -6,6 +6,7 @@ import { useAppSelector } from '@/app/hooks'
 import { useCurrentUser } from '@/features/auth/useCurrentUser'
 import { useLogout } from '@/features/auth/useLogout'
 import { requestPackSync } from '@/features/packs/syncPacks'
+import { useBackpackStatus } from '@/features/packs/useBackpackStatus'
 import { useDeviceStorage } from '@/features/settings/useDeviceStorage'
 import { requestSync } from '@/features/sync/syncOutbox'
 import { useConnection } from '@/features/sync/useConnection'
@@ -15,7 +16,8 @@ import { db } from '@/shared/db/db'
 import { useOutboxCount } from '@/shared/db/useOutboxCount'
 import { dateTimeLabel } from '@/shared/lib/date'
 import Spinner from '@/shared/ui/Spinner'
-import { studentSettings as t } from '../content'
+import { backpackStatus, studentSettings as t } from '../content'
+import { backpackLine } from './backpackText'
 
 export function ProfileSection() {
   const user = useCurrentUser()
@@ -57,9 +59,15 @@ export function OfflineSection() {
   const loginSaved = useAppSelector((s) => s.auth.persisted)
   const storage = useDeviceStorage()
   const [denied, setDenied] = useState(false)
+  const today = backpackLine(useBackpackStatus())
 
   return (
     <Section title={t.offline.title}>
+      {today && (
+        <Row title={backpackStatus.title} note={today.text}>
+          <Status ok={today.done}>{today.done ? t.offline.ready : t.offline.notYet}</Status>
+        </Row>
+      )}
       <Row
         title={t.offline.packs}
         note={packDays.length > 0 ? t.offline.packsDays(packDays.length) : t.offline.packsNone}

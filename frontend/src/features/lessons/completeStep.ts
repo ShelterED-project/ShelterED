@@ -1,7 +1,8 @@
 import { db } from '@/shared/db/db'
 import { addEvent } from '@/shared/db/outbox'
 import type { PackTest } from '@/shared/db/packTypes'
-import type { LessonProgressRecord } from '@/shared/db/types'
+import type { LessonProgressRecord, TestAnswers } from '@/shared/db/types'
+import { scoreTest, toWireAnswers } from './grading'
 
 /**
  * Подія й локальний прогрес пишуться в одній транзакції: або є обидва, або жодного.
@@ -23,32 +24,22 @@ export function completeModule(userId: string, lessonId: string, moduleId: strin
   )
 }
 
-/** Бали за тренувальний тест: питання зараховане, якщо обрана множина дорівнює ключу. Без ключа null. */
-export function scoreTest(test: PackTest, answers: Record<string, string[]>): { points: number; max: number } | null {
-  if (test.questions.some((q) => q.answer_key == null)) return null
-  let points = 0
-  let max = 0
-  for (const q of test.questions) {
-    max += q.points
-    const chosen = new Set(answers[q.id] ?? [])
-    const key = new Set(q.answer_key ?? [])
-    if (chosen.size === key.size && [...chosen].every((id) => key.has(id))) points += q.points
-  }
-  return { points, max }
-}
-
-/** Оцінює сервер після синхронізації; score у подію не передається (протокол v1). */
-export function completeTest(userId: string, lessonId: string, test: PackTest, answers: Record<string, string[]>) {
+/**
+ * Оцінює сервер після синхронізації; score у подію не передається (протокол v1). Відповіді йдуть
+ * у форматі за видом питання: список id, один рядок тексту або пари {лівий: правий}.
+ */
+export function completeTest(userId: string, lessonId: string, test: PackTest, answers: TestAnswers) {
   const completedAt = new Date().toISOString()
+  const wire = toWireAnswers(test, answers)
   return recordStep(
-    () => addEvent('test_attempt', userId, { test_id: test.id, answers, completed_at: completedAt }),
+    () => addEvent('test_attempt', userId, { test_id: test.id, answers: wire, completed_at: completedAt }),
     {
       user_id: userId,
       id: test.id,
       kind: 'test',
       lesson_id: lessonId,
       completed_at: completedAt,
-      score: scoreTest(test, answers),
+      score: scoreTest(test, wire),
     },
   )
 }

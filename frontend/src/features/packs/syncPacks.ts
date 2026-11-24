@@ -5,6 +5,7 @@ import { db } from '@/shared/db/db'
 import { markContact } from '@/features/sync/contact'
 import { resetChangesCursor } from '@/features/sync/syncChanges'
 import { requestSync } from '@/features/sync/syncOutbox'
+import { requestMediaSync, saveMediaManifest } from './mediaCache'
 import { packsApi } from './packsApi'
 
 let running: Promise<void> | null = null
@@ -68,6 +69,11 @@ async function sync() {
     })
     .map((pack) => pack.id)
   if (stale.length > 0) await db.packs.bulkDelete(stale)
+
+  // Медіа сьогоднішніх і завтрашніх уроків (маніфест дає лише їх) — у кеш, поки є мережа.
+  // Не чекаємо: відео великі, а пакети вже на пристрої й урок можна відкривати.
+  await saveMediaManifest(manifest.data.media)
+  void requestMediaSync()
 
   // Нові уроки на пристрої: перечитуємо стрічку змін, щоб підхопити їхній прогрес і оцінки
   // (раніше їх пропустили, бо уроку ще не було в пакетах).
