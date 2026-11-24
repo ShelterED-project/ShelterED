@@ -41,6 +41,8 @@ export interface TutorReply {
 /** Помилка після transformErrorResponse: retryAfter — секунди з заголовка Retry-After. */
 export interface TutorError {
   status: number | string;
+  /** Код помилки з тіла відповіді (`error.code`), якщо є */
+  code: string | null;
   retryAfter: number | null;
 }
 
@@ -53,8 +55,14 @@ export const tutorApi = baseApi.injectEndpoints({
           meta as { response?: Response } | undefined
         )?.response?.headers.get("Retry-After");
         const seconds = header ? Number.parseInt(header, 10) : NaN;
+        const data = (response as { data?: unknown }).data;
+        const code =
+          data && typeof data === "object" && "error" in data
+            ? (data as { error?: { code?: unknown } }).error?.code
+            : null;
         return {
           status: response.status,
+          code: typeof code === "string" ? code : null,
           retryAfter: Number.isFinite(seconds) ? seconds : null,
         };
       },

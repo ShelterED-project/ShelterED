@@ -65,3 +65,22 @@ class TutorExplanation(Base):
     module_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("module.id", ondelete="CASCADE"))
     text: Mapped[str]
     created_at: Mapped[dt.datetime] = mapped_column(server_default=func.now())
+
+
+class TutorExplanationAttempt(Base):
+    """Невдалі спроби отримати пояснення модуля (порожня/safety-відповідь, відхилений запит,
+    урок без класу). Після `MAX_EXPLANATION_ATTEMPTS` модуль цієї версії уроку beat не
+    чіпає, тож він не палить виклики LLM щогодини. Нова версія уроку — нові спроби."""
+
+    __tablename__ = "tutor_explanation_attempt"
+    __table_args__ = (
+        UniqueConstraint("module_id", "lesson_version", name="uq_tutor_explanation_attempt"),
+        Index("ix_tutor_explanation_attempt_lesson_id", "lesson_id"),
+    )
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    lesson_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("lesson.id", ondelete="CASCADE"))
+    lesson_version: Mapped[int] = mapped_column(Integer)
+    module_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("module.id", ondelete="CASCADE"))
+    attempts: Mapped[int] = mapped_column(SmallInteger, server_default=text("0"))
+    last_attempt_at: Mapped[dt.datetime] = mapped_column(server_default=func.now())

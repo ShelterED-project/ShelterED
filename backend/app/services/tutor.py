@@ -32,7 +32,7 @@ from app.core.config import Settings
 from app.core.errors import AppError
 from app.models.lessons import Card, Lesson, Module, Subject
 from app.models.school import SchoolClass, User
-from app.models.tutor import TutorConversation, TutorExplanation
+from app.models.tutor import TutorConversation, TutorExplanation, TutorExplanationAttempt
 from app.schemas.packs import PackExplanation
 from app.schemas.tutor import (
     TutorAnswerOut,
@@ -56,6 +56,9 @@ MAX_CONTEXT_CHARS = 3000
 MAX_REPLIES = 10
 # Скільки уроків без пояснень бере один прохід beat.
 MISSING_EXPLANATIONS_BATCH = 50
+# Скільки невдалих спроб (порожня/safety-відповідь, відхилений запит, урок без класу) на модуль
+# версії уроку, після чого beat його більше не чіпає.
+MAX_EXPLANATION_ATTEMPTS = 3
 
 EXPLAIN_PROMPT = "Поясни цей матеріал іншими словами, з одним прикладом:\n"
 # Репліка учня в історії, коли тексту немає (кнопка без повідомлення, лише фото).
@@ -129,27 +132,27 @@ async def _resolve_context(
     else:
         lesson_id = module_id = None
 
+    # Спершу визначаємо урок і перевіряємо доступ учня, лише потім звіряємо картку/модуль:
+    # будь-яка розбіжність чи чужий об'єкт дає однакову 404, без підказок про зв'язки.
     if body.card_id is not None:
         card = await session.get(Card, body.card_id)
         if card is None:
-            raise _not_found("Card")
+            raise _not_found("Resource")
         if module_id is not None and module_id != card.module_id:
-            raise _validation("VALIDATION_ERROR", "card_id does not belong to module_id")
+            raise _not_found("Resource")
         module_id = card.module_id
     if module_id is not None:
         module = await session.get(Module, module_id)
         if module is None:
-            raise _not_found("Module")
+            raise _not_found("Resource")
         if lesson_id is not None and lesson_id != module.lesson_id:
-            raise _validation("VALIDATION_ERROR", "module_id does not belong to lesson_id")
+            raise _not_found("Resource")
         lesson_id = module.lesson_id
     subject = None
     if lesson_id is not None:
         lesson = await session.get(Lesson, lesson_id)
-        if lesson is None:
-            raise _not_found("Lesson")
-        if not await student_has_lesson(session, student.id, lesson.id):
-            raise AppError("FORBIDDEN", "Lesson is not available to this student", 403)
+        if lesson is None or not await student_has_lesson(session, student.id, lesson.id):
+            raise _not_found("Resource")
         subject = await session.scalar(select(Subject.name).where(Subject.id == lesson.subject_id))
 
     grade = await _student_grade(session, student)
@@ -373,10 +376,13 @@ async def _save(
     if ctx.lesson is not None:
         conv.lesson_id = ctx.lesson.id
         conv.module_id = ctx.module.id if ctx.module else None
-    if not same_topic:
-        conv.task, conv.hints_used = None, 0
     if intent != "safety":
+        if not same_topic:
+            conv.task, conv.hints_used = None, 0
         task = ai.task
+        # AI мав би повертати `task` завжди, але на випадок `null` лишаємо збережене завдання.
+        if task is None and intent in ("explain", "practice") and conv.task is not None:
+            task = conv.task
         check = _check_result(ai.check_result)
         # Правильно розв'язане завдання закрите: наступне `practice` дасть нове, а не підказку.
         if intent == "check" and check is not None and check.correct:
@@ -442,16 +448,62 @@ def _has_explanation():
     )
 
 
+def _attempts_exhausted():
+    return exists().where(
+        TutorExplanationAttempt.module_id == Module.id,
+        TutorExplanationAttempt.lesson_version == Lesson.version,
+        TutorExplanationAttempt.attempts >= MAX_EXPLANATION_ATTEMPTS,
+    )
+
+
+async def _record_failed_attempt(
+    session: AsyncSession, lesson: Lesson, version: int, module_id: uuid.UUID
+) -> None:
+    stmt = pg_insert(TutorExplanationAttempt).values(
+        lesson_id=lesson.id, lesson_version=version, module_id=module_id, attempts=1
+    )
+    await session.execute(
+        stmt.on_conflict_do_update(
+            constraint="uq_tutor_explanation_attempt",
+            set_={
+                "attempts": TutorExplanationAttempt.attempts + 1,
+                "last_attempt_at": func.now(),
+            },
+        )
+    )
+    await session.commit()
+
+
 async def lessons_missing_explanations(
     session: AsyncSession, limit: int = MISSING_EXPLANATIONS_BATCH
 ) -> list[uuid.UUID]:
-    """Опубліковані уроки, у яких є модуль з текстом без пояснення поточної версії."""
+    """Опубліковані уроки, у яких є модуль з текстом без пояснення поточної версії.
+    Модулі, що вичерпали `MAX_EXPLANATION_ATTEMPTS` невдалих спроб, не враховуються. Спершу
+    уроки без спроб чи з найдавнішою спробою, далі новіші: старі проблемні уроки не
+    заважають новим."""
+    last_attempt = (
+        select(func.max(TutorExplanationAttempt.last_attempt_at))
+        .where(
+            TutorExplanationAttempt.lesson_id == Lesson.id,
+            TutorExplanationAttempt.lesson_version == Lesson.version,
+        )
+        .scalar_subquery()
+    )
     rows = await session.scalars(
         select(Lesson.id)
         .join(Module, Module.lesson_id == Lesson.id)
-        .where(Lesson.status == "published", _has_text_cards(), ~_has_explanation())
+        .where(
+            Lesson.status == "published",
+            _has_text_cards(),
+            ~_has_explanation(),
+            ~_attempts_exhausted(),
+        )
         .group_by(Lesson.id)
-        .order_by(Lesson.id)
+        .order_by(
+            last_attempt.asc().nulls_first(),
+            Lesson.published_at.desc().nulls_last(),
+            Lesson.id,
+        )
         .limit(limit)
     )
     return list(rows)
@@ -470,7 +522,12 @@ async def generate_explanations(
     modules = list(
         await session.scalars(
             select(Module)
-            .where(Module.lesson_id == lesson.id, _has_text_cards(), ~_has_explanation())
+            .where(
+                Module.lesson_id == lesson.id,
+                _has_text_cards(),
+                ~_has_explanation(),
+                ~_attempts_exhausted(),
+            )
             .join(Lesson, Lesson.id == Module.lesson_id)
             .order_by(Module.part.desc(), Module.position)
         )
@@ -487,12 +544,15 @@ async def generate_explanations(
     grade = await _lesson_grade(session, lesson)
     if grade is None:
         logger.warning("Lesson has no grade for explanations: lesson=%s", lesson.id)
+        for module in modules:
+            await _record_failed_attempt(session, lesson, version, module.id)
         return 0, False
     subject = await session.scalar(select(Subject.name).where(Subject.id == lesson.subject_id))
     created = 0
     for module in modules:
         text = await module_text(session, module.id)
         if not text:
+            await _record_failed_attempt(session, lesson, version, module.id)
             continue
         payload: dict[str, Any] = {
             "action": "explain",
@@ -512,8 +572,10 @@ async def generate_explanations(
             logger.warning(
                 "Explanation skipped: lesson=%s module=%s code=%s", lesson.id, module.id, exc.code
             )
+            await _record_failed_attempt(session, lesson, version, module.id)
             continue
         if ai.normalized_intent() == "safety" or not ai.reply.strip():
+            await _record_failed_attempt(session, lesson, version, module.id)
             continue
         inserted = await session.scalar(
             pg_insert(TutorExplanation)

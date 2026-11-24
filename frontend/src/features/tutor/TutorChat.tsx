@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
+import { useAppSelector } from "@/app/hooks";
 import { db } from "@/shared/db/db";
 import { generateId } from "@/shared/lib/uuid";
 import Markdown from "@/shared/ui/Markdown";
@@ -33,11 +34,20 @@ const bigButton =
 const outline = `${bigButton} border border-line-strong text-parchment hover:bg-surface-2`;
 const primary = `${bigButton} bg-accent font-bold text-oil focus-visible:ring-parchment/60`;
 
-/** Один чат на модуль: id розмови живе в sessionStorage, текст чату лише в памʼяті. */
-function conversationFor(moduleId: string): string {
-  const key = `tutor-conv:${moduleId}`;
+/** Один чат на учня й модуль: id розмови живе в sessionStorage, текст чату лише в памʼяті.
+ * Ключ містить id учня, щоб на спільному пристрої інший учень не взяв чужу розмову. */
+function conversationKey(userId: string | undefined, moduleId: string) {
+  return `tutor-conv:${userId ?? "anon"}:${moduleId}`;
+}
+
+function conversationFor(
+  userId: string | undefined,
+  moduleId: string,
+  renew = false,
+): string {
+  const key = conversationKey(userId, moduleId);
   try {
-    const saved = sessionStorage.getItem(key);
+    const saved = renew ? null : sessionStorage.getItem(key);
     if (saved) return saved;
     const fresh = generateId();
     sessionStorage.setItem(key, fresh);
@@ -45,6 +55,17 @@ function conversationFor(moduleId: string): string {
   } catch {
     return generateId();
   }
+}
+
+/** Мережі немає або ШІ тимчасово недоступний: показуємо пояснення з Рюкзака. */
+function isUnavailable(error: TutorError | null): boolean {
+  return (
+    error === null ||
+    error.status === "FETCH_ERROR" ||
+    error.status === "TIMEOUT_ERROR" ||
+    error.status === "TIMEOUT" ||
+    error.status === 503
+  );
 }
 
 /** Пояснення модуля з Рюкзака (пакет на пристрої). */
@@ -78,7 +99,10 @@ export default function TutorChat({ lessonId, moduleId, cardId }: Props) {
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState<TutorAskBody | null>(null);
   const [waitLeft, setWaitLeft] = useState(0);
-  const [conversationId] = useState(() => conversationFor(moduleId));
+  const userId = useAppSelector((s) => s.auth.session?.user.id);
+  const [conversationId, setConversationId] = useState(() =>
+    conversationFor(userId, moduleId),
+  );
   const [ask] = useAskTutorMutation();
   const cached = useCachedExplanation(lessonId, moduleId);
   const endRef = useRef<HTMLDivElement>(null);
@@ -137,6 +161,15 @@ export default function TutorChat({ lessonId, moduleId, cardId }: Props) {
       push({ role: "tutor", text: t.tooMany(seconds), note: true });
       return;
     }
+    if (error?.code === "INVALID_IMAGE") {
+      push({ role: "tutor", text: t.photoFailed, note: true });
+      return;
+    }
+    if (!isUnavailable(error)) {
+      // Інша помилка (403/404/422/502): повтор нічого не дасть.
+      push({ role: "tutor", text: t.unavailable, note: true });
+      return;
+    }
     // Мережі немає або ШІ недоступний: пояснення з Рюкзака, без лякаючих помилок.
     if (cached) {
       push({ role: "tutor", text: `**${t.cachedLabel}**\n\n${cached}` });
@@ -145,21 +178,33 @@ export default function TutorChat({ lessonId, moduleId, cardId }: Props) {
     }
   };
 
-  const send = async (body: TutorAskBody, shown?: string) => {
+  const send = async (body: TutorAskBody, shown?: string, renewed = false) => {
     if (locked) return;
-    if (shown) push({ role: "you", text: shown });
+    if (shown && !renewed) push({ role: "you", text: shown });
     setBusy(true);
     setFailed(null);
     setSuggestions([]);
     try {
       if (!navigator.onLine)
-        throw { status: "FETCH_ERROR", retryAfter: null } satisfies TutorError;
+        throw {
+          status: "FETCH_ERROR",
+          code: null,
+          retryAfter: null,
+        } satisfies TutorError;
       apply(await ask(body).unwrap());
     } catch (e) {
       const error = (
         e && typeof e === "object" && "status" in e ? e : null
       ) as TutorError | null;
-      if (error?.status !== 429) setFailed(body);
+      if (error?.status === 404 && !renewed) {
+        // Розмову не знайдено (id чужий або застарів): нова розмова й один повтор.
+        const fresh = conversationFor(userId, moduleId, true);
+        setConversationId(fresh);
+        setBusy(false);
+        await send({ ...body, conversation_id: fresh }, shown, true);
+        return;
+      }
+      if (isUnavailable(error)) setFailed(body);
       fallback(error);
     } finally {
       setBusy(false);
@@ -267,9 +312,18 @@ export default function TutorChat({ lessonId, moduleId, cardId }: Props) {
               )}
 
               {safety && (
-                <p className="rounded-2xl bg-surface-2 px-4 py-3 text-base leading-6 text-muted">
-                  {t.safety}
-                </p>
+                <>
+                  <p className="rounded-2xl bg-surface-2 px-4 py-3 text-base leading-6 text-muted">
+                    {t.safety}
+                  </p>
+                  <button
+                    type="button"
+                    className={outline}
+                    onClick={() => setSafety(false)}
+                  >
+                    {t.continueLesson}
+                  </button>
+                </>
               )}
 
               {failed && !busy && waitLeft === 0 && (

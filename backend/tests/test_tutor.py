@@ -18,7 +18,7 @@ from zoneinfo import ZoneInfo
 import httpx
 import pytest
 from conftest import auth_header
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 from app.api.tutor import get_ai_client
 from app.core.config import get_settings
@@ -320,6 +320,46 @@ async def test_safety_intent_returns_reply_and_stores_nothing_new(
     assert "мені страшно" not in json.dumps(conv.replies, ensure_ascii=False)
 
 
+async def test_safety_on_other_module_keeps_task_and_hints(
+    client, world, course, ai, db_session
+) -> None:
+    conv_id = uuid.uuid4()
+    other = Module(
+        lesson_id=course.lesson.id, part="main", position=2, title="Інший", duration_min=4
+    )
+    db_session.add(other)
+    await db_session.flush()
+    ai.responses = [
+        reply("practice", task=TASK, hints_used=1),
+        reply("safety", text="Підійди до дорослого.", task=None, suggestions=[]),
+    ]
+    await ask(
+        client,
+        world,
+        ask_body(conversation_id=conv_id, action="practice", module_id=course.module.id),
+    )
+    r = await ask(client, world, ask_body(conversation_id=conv_id, module_id=other.id, message="?"))
+    assert r.json()["intent"] == "safety"
+    conv = await db_session.get(TutorConversation, conv_id, populate_existing=True)
+    assert conv.task == TASK and conv.hints_used == 1
+
+
+async def test_missing_task_in_reply_keeps_stored_task(
+    client, world, course, ai, db_session
+) -> None:
+    conv_id = uuid.uuid4()
+    ai.responses = [reply("practice", task=TASK), reply("explain", task=None)]
+    await ask(
+        client,
+        world,
+        ask_body(conversation_id=conv_id, action="practice", module_id=course.module.id),
+    )
+    r = await ask(client, world, ask_body(conversation_id=conv_id, action="explain"))
+    assert r.json()["task"]["question"] == TASK["question"]
+    conv = await db_session.get(TutorConversation, conv_id, populate_existing=True)
+    assert conv.task == TASK
+
+
 async def test_unknown_intent_is_shown_as_explain(client, world, course, ai) -> None:
     ai.default = reply("brand_new_intent")
     r = await ask(client, world, ask_body(module_id=course.module.id, message="?"))
@@ -414,16 +454,26 @@ async def test_lesson_of_other_class_is_forbidden(client, world, course, ai) -> 
         ask_body(module_id=course.other_module.id, message="?"),
     ):
         r = await ask(client, world, body)
-        assert r.status_code == 403, r.text
+        assert r.status_code == 404, r.text
     assert (
         await ask(client, world, ask_body(lesson_id=uuid.uuid4(), message="?"))
     ).status_code == 404
     assert ai.requests == []
 
 
-async def test_card_must_match_module(client, world, course, ai) -> None:
-    r = await ask(client, world, ask_body(card_id=course.card.id, module_id=course.other_module.id))
-    assert r.status_code == 422
+async def test_mismatched_objects_give_same_not_found(client, world, course, ai) -> None:
+    """Розбіжність картки/модуля/уроку не розкриває звʼязків: та сама 404, що й для чужого."""
+    foreign = await ask(client, world, ask_body(module_id=course.other_module.id))
+    cases = [
+        ask_body(card_id=course.card.id, module_id=course.other_module.id),
+        ask_body(module_id=course.module.id, lesson_id=course.other_lesson.id),
+        ask_body(module_id=course.module.id, lesson_id=course.lesson.id, card_id=uuid.uuid4()),
+    ]
+    for body in cases:
+        r = await ask(client, world, body)
+        assert r.status_code == 404 and r.json()["error"]["code"] == "NOT_FOUND"
+        assert r.json() == foreign.json()
+    assert ai.requests == []
 
 
 async def test_conversation_of_other_student_is_not_found(client, world, factory, course, ai):
@@ -544,6 +594,30 @@ async def test_ai_down_explain_falls_back_to_cached_explanation(
 # ---------- закешовані пояснення для пакета ----------
 
 
+class FakeRedis:
+    def __init__(self) -> None:
+        self.data: dict[str, Any] = {}
+
+    def set(self, key, value, nx=False, ex=None):
+        if nx and key in self.data:
+            return None
+        self.data[key] = value
+        return True
+
+    def exists(self, key):
+        return int(key in self.data)
+
+    def delete(self, key):
+        return int(self.data.pop(key, None) is not None)
+
+
+@pytest.fixture(autouse=True)
+def fake_redis(monkeypatch) -> FakeRedis:
+    fake = FakeRedis()
+    monkeypatch.setattr(tutor_worker, "redis_client", lambda: fake)
+    return fake
+
+
 @pytest.fixture
 def worker(db_session, monkeypatch, ai) -> FakeAI:
     @asynccontextmanager
@@ -605,7 +679,7 @@ async def test_ai_down_keeps_explanations_for_retry(db_session, course, worker, 
 
 
 def test_explain_task_retries_later_when_ai_down(monkeypatch) -> None:
-    async def down(lesson_id):
+    async def down(lesson_id, retry=False):
         return 0, True
 
     retried: dict[str, Any] = {}
@@ -670,3 +744,77 @@ async def test_old_conversations_are_purged(db_session, world) -> None:
     counts = await retention_service.purge(db_session, get_settings(), now)
     assert counts["tutor_conversations"] == 1
     assert await db_session.get(TutorConversation, fresh.id) is not None
+
+
+# ---------- замок на урок і ліміт спроб ----------
+
+
+async def test_lock_blocks_parallel_runs_and_enqueue(
+    db_session, course, worker, enqueued, fake_redis
+) -> None:
+    fake_redis.data[tutor_worker._lock_key(course.lesson.id)] = "run"
+    assert await tutor_worker._explain_lesson(course.lesson.id) == (0, False)
+    assert worker.requests == []
+    await tutor_worker.enqueue_explain_lesson(course.lesson.id)
+    assert enqueued == []
+    # Beat пропускає заблокований урок і ставить лише вільний.
+    await tutor_worker._explain_missing()
+    assert [e.args[0] for e in enqueued] == [str(course.other_lesson.id)]
+
+
+async def test_lock_survives_ai_failure_until_retry(
+    db_session, course, worker, enqueued, fake_redis
+) -> None:
+    worker.responses = [raises(httpx.ConnectError)] * 2
+    assert await tutor_worker._explain_lesson(course.lesson.id) == (0, True)
+    assert fake_redis.data[tutor_worker._lock_key(course.lesson.id)] == "retry"
+    # Другий ланцюжок не стартує (нова публікація/beat і звичайний запуск), власний повтор іде.
+    await tutor_worker.enqueue_explain_lesson(course.lesson.id)
+    assert enqueued == []
+    assert await tutor_worker._explain_lesson(course.lesson.id) == (0, False)
+    assert len(worker.requests) == 2
+    assert await tutor_worker._explain_lesson(course.lesson.id, retry=True) == (1, False)
+    assert tutor_worker._lock_key(course.lesson.id) not in fake_redis.data
+
+
+async def test_unexplainable_module_stops_after_max_attempts(db_session, course, worker) -> None:
+    worker.default = reply("safety", text="Звернись до дорослого")
+    for _ in range(service.MAX_EXPLANATION_ATTEMPTS):
+        assert course.lesson.id in await service.lessons_missing_explanations(db_session)
+        assert await tutor_worker._explain_lesson(course.lesson.id) == (0, False)
+    assert len(worker.requests) == service.MAX_EXPLANATION_ATTEMPTS
+    assert course.lesson.id not in await service.lessons_missing_explanations(db_session)
+    assert await tutor_worker._explain_lesson(course.lesson.id) == (0, False)
+    assert len(worker.requests) == service.MAX_EXPLANATION_ATTEMPTS
+    # Нова версія уроку: нові спроби.
+    course.lesson.version += 1
+    await db_session.flush()
+    assert course.lesson.id in await service.lessons_missing_explanations(db_session)
+
+
+async def test_ai_unavailable_is_not_counted_as_attempt(db_session, course, worker) -> None:
+    for _ in range(service.MAX_EXPLANATION_ATTEMPTS + 1):
+        worker.responses = [raises(httpx.ConnectError)] * 2
+        assert await tutor_worker._explain_lesson(course.lesson.id, retry=True) == (0, True)
+    assert course.lesson.id in await service.lessons_missing_explanations(db_session)
+
+
+async def test_lesson_without_grade_stops_after_max_attempts(db_session, course, worker) -> None:
+    await db_session.execute(delete(ScheduleSlot))
+    await db_session.flush()
+    for _ in range(service.MAX_EXPLANATION_ATTEMPTS):
+        assert await tutor_worker._explain_lesson(course.lesson.id) == (0, False)
+    assert worker.requests == []
+    assert course.lesson.id not in await service.lessons_missing_explanations(db_session)
+
+
+async def test_beat_order_is_fair_to_new_lessons(db_session, course, worker) -> None:
+    older, newer = course.lesson, course.other_lesson
+    older.published_at = dt.datetime.now(dt.UTC) - dt.timedelta(days=2)
+    await db_session.flush()
+    assert await service.lessons_missing_explanations(db_session) == [newer.id, older.id]
+    # Урок, який щойно пробували, пропускає чергу.
+    worker.default = reply("safety")
+    await tutor_worker._explain_lesson(newer.id)
+    assert await service.lessons_missing_explanations(db_session) == [older.id, newer.id]
+    assert await service.lessons_missing_explanations(db_session, limit=1) == [older.id]
