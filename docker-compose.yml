@@ -47,6 +47,8 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-shelter_db}
       REDIS_URL: redis://redis:6379/0
       ENVIRONMENT: ${APP_ENV:-production}
+    volumes:
+      - media_data:/app/media
     deploy:
       resources:
         limits:
@@ -68,10 +70,14 @@ services:
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-shelter_db}
       REDIS_URL: redis://redis:6379/0
+    # Те саме сховище медіа, що й у backend: воркер стискає відео (ffmpeg) на місці.
+    volumes:
+      - media_data:/app/media
     deploy:
       resources:
         limits:
-          memory: 150M
+          # ffmpeg (720p) потребує ~200–300 МБ.
+          memory: 512M
 
   frontend:
     build:
@@ -84,6 +90,9 @@ services:
       - "443:443"
     depends_on:
       - backend
+    # Nginx віддає медіа уроків напряму зі спільного тому.
+    volumes:
+      - media_data:/srv/media:ro
     deploy:
       resources:
         limits:
@@ -91,3 +100,4 @@ services:
 
 volumes:
   postgres_data:
+  media_data:
