@@ -12,6 +12,7 @@ import { generateId } from '@/shared/lib/uuid'
 import Spinner from '@/shared/ui/Spinner'
 import { editor } from './content'
 import FieldStatus from './FieldStatus'
+import PendingMark from './PendingMark'
 import QuestionEditor from './QuestionEditor'
 import { tracked } from './saveStatus'
 import SortControls from './SortControls'
@@ -120,6 +121,7 @@ function TestItem({ lessonId, test, readOnly, fresh }: { lessonId: string; test:
       </div>
       <FieldStatus status={title.status} error={title.error} />
       <FieldStatus status={hours.status} error={hours.error} />
+      <PendingMark id={test.id} />
       <ErrorText error={error} />
 
       {ids.length === 0 ? (

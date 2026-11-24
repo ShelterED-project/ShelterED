@@ -10,6 +10,7 @@ import {
   useUnpublishLessonMutation,
 } from '@/features/teacher/lessonEditorApi'
 import type { LessonCheck } from '@/features/teacher/lessonEditorApi'
+import { usePendingLesson } from '@/features/teacher/pendingCreates'
 import Spinner from '@/shared/ui/Spinner'
 import TeacherHeader from '../sections/TeacherHeader'
 import TeacherSidebar from '../sections/TeacherSidebar'
@@ -27,6 +28,7 @@ import { dangerButton, primaryButton, secondaryButton } from './styles'
 import TestsSection from './TestsSection'
 import { useAction } from './useAction'
 import { useCopyLesson } from './useCopyLesson'
+import { usePendingSync } from './usePendingSync'
 
 /**
  * Редактор уроку. Усе зберігається саме (автозбереження), id створює клієнт.
@@ -46,7 +48,8 @@ export default function LessonEditorPage() {
   const [preview, setPreview] = useState(false)
   const navigate = useNavigate()
   // currentData — лише урок з цієї адреси: при переході до іншого уроку не показуємо попередній.
-  const data = lesson.currentData
+  const data = usePendingLesson(lesson.currentData)
+  usePendingSync()
   const readOnly = data?.status === 'published'
   const closePreview = useCallback(() => setPreview(false), [])
 

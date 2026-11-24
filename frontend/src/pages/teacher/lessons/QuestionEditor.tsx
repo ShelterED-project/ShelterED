@@ -5,6 +5,7 @@ import type { QuestionKind, QuestionOption, QuestionOut } from '@/features/teach
 import Spinner from '@/shared/ui/Spinner'
 import { editor } from './content'
 import FieldStatus from './FieldStatus'
+import PendingMark from './PendingMark'
 import { fromServer, missing, newQuestion, nextId, sameWire, switchKind, toWire } from './questionModel'
 import type { EditorQuestion } from './questionModel'
 import { tracked } from './saveStatus'
@@ -345,6 +346,7 @@ export default function QuestionEditor({
         )}
       </div>
 
+      <PendingMark id={id} />
       {open && (
         <fieldset disabled={readOnly} className="flex flex-col gap-4">
           <label className="flex flex-col gap-1 text-sm text-muted">

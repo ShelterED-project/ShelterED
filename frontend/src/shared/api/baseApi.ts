@@ -4,6 +4,7 @@ import type { AuthState } from '@/features/auth/authSlice'
 import { OAUTH_CLIENT_ID } from '@/features/auth/pkce'
 import { clearSession, saveSession, sessionFromTokens } from '@/features/auth/session'
 import type { TokenResponse } from '@/features/auth/types'
+import { interceptEditorRequest } from '@/features/teacher/pendingCreates'
 
 const baseUrl = import.meta.env.VITE_API_BASE_URL
 
@@ -62,11 +63,7 @@ function refreshSession(
   return refreshing
 }
 
-const baseQueryWithReauth: BaseQueryFn<string | FetchArgs, unknown, FetchBaseQueryError> = async (
-  args,
-  api,
-  extraOptions,
-) => {
+const plainQuery: BaseQueryFn<string | FetchArgs, unknown, FetchBaseQueryError> = async (args, api, extraOptions) => {
   const auth = (api.getState() as { auth: AuthState }).auth
   const session = auth.session
 
@@ -93,6 +90,14 @@ const baseQueryWithReauth: BaseQueryFn<string | FetchArgs, unknown, FetchBaseQue
   }
   return result
 }
+
+type QueryResult = { data: unknown } | { error: unknown }
+
+// Створення в редакторі уроків без мережі стає в чергу (див. pendingCreates).
+const baseQueryWithReauth: BaseQueryFn<string | FetchArgs, unknown, FetchBaseQueryError> = (args, api, extraOptions) =>
+  interceptEditorRequest(args, async () => (await plainQuery(args, api, extraOptions)) as QueryResult) as Promise<
+    Awaited<ReturnType<typeof plainQuery>>
+  >
 
 export const baseApi = createApi({
   reducerPath: 'api',

@@ -84,6 +84,21 @@ export interface EditorDraft {
   updatedAt: number
 }
 
+export type PendingKind = 'module' | 'card' | 'test' | 'question'
+
+/** Створення, що не дійшло до сервера (немає мережі): тіло запиту з клієнтським id. */
+export interface PendingCreate {
+  id: string
+  /** Порядок створення: батько раніше за дітей */
+  seq: number
+  kind: PendingKind
+  /** Урок (модуль, тест), модуль (картка) або тест (питання) */
+  parentId: string
+  body: Record<string, unknown>
+  /** Відхилено сервером (4xx): повідомлення для вчителя */
+  error: string | null
+}
+
 export interface MetaRecord {
   key: string
   value: unknown

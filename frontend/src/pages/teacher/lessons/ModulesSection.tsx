@@ -15,6 +15,7 @@ import Spinner from '@/shared/ui/Spinner'
 import CardItem from './CardItem'
 import { editor } from './content'
 import FieldStatus from './FieldStatus'
+import PendingMark from './PendingMark'
 import { focusOnMount, takeFocus } from './jump'
 import { tracked } from './saveStatus'
 import SortControls from './SortControls'
@@ -288,6 +289,7 @@ function ModuleItem({
         )}
       </div>
       <FieldStatus status={title.status} error={title.error} />
+      <PendingMark id={module.id} />
       <ErrorText error={error} />
 
       {cards.length === 0 && imports.items.length === 0 && (
