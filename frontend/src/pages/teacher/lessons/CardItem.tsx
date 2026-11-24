@@ -17,6 +17,7 @@ import Markdown from '@/shared/ui/Markdown'
 import Spinner from '@/shared/ui/Spinner'
 import { editor } from './content'
 import FieldStatus from './FieldStatus'
+import PendingMark from './PendingMark'
 import { takeFocus } from './jump'
 import { tracked } from './saveStatus'
 import { field, iconButton, linkButton, textarea } from './styles'
@@ -326,6 +327,7 @@ export default function CardItem({
           </button>
         )}
       </div>
+      <PendingMark id={card.id} />
       {card.kind === 'text' ? (
         <TextCard lessonId={lessonId} card={card} readOnly={readOnly} />
       ) : (

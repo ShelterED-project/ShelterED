@@ -7,6 +7,7 @@ import type {
   MediaRecord,
   MetaRecord,
   OutboxEvent,
+  PendingCreate,
   StoredSession,
 } from './types'
 
@@ -20,6 +21,7 @@ export const db = new Dexie('shelter-ed') as Dexie & {
   meta: EntityTable<MetaRecord, 'key'>
   media: EntityTable<MediaRecord, 'id'>
   editorDrafts: EntityTable<EditorDraft, 'key'>
+  pendingCreates: EntityTable<PendingCreate, 'id'>
 }
 
 db.version(1).stores({
@@ -89,4 +91,9 @@ db.version(8).stores({
 // чи закрита вкладка їх не загубили. Запис зникає, щойно сервер підтвердив збереження.
 db.version(9).stores({
   editorDrafts: 'key',
+})
+
+// Редактор уроків: створення модулів, карток, тестів і питань, що чекають мережі.
+db.version(10).stores({
+  pendingCreates: 'id, seq',
 })
