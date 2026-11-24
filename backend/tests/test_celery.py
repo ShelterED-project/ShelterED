@@ -121,3 +121,13 @@ async def test_task_is_kept_in_outbox_while_broker_is_down(db_session, monkeypat
 def test_outbox_is_flushed_by_beat():
     entry = celery_app.conf.beat_schedule["outbox-flush"]
     assert entry["task"] == "outbox.flush" and entry["schedule"] <= 60
+
+
+def test_send_ignores_results(monkeypatch):
+    from app.workers import celery_app as module
+
+    sent = {}
+    monkeypatch.setattr(module.celery_app, "send_task", lambda name, **kw: sent.update(kw))
+    module._send("x.y", [], "default", {})
+    assert sent["ignore_result"] is True
+    assert celery_app.conf.task_ignore_result is True
