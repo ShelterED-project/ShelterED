@@ -1,8 +1,9 @@
 """tutor explanation attempts
 
-`tutor_explanation_attempt`: лічильник невдалих спроб згенерувати пояснення модуля
-(на модуль + версію уроку), щоб beat не повторював виклики LLM для модулів, які не
-отримають пояснення. Персональних даних немає.
+`tutor_explanation_attempt`: лічильник невдалих спроб згенерувати пояснення за ключем кешу
+(`tutor_explanation.cache_key`), щоб beat не повторював виклики LLM для вмісту, який не
+отримає пояснення. Персональних даних немає. Downgrade — лише `drop_table` (спрацьовує й на
+ранній формі таблиці).
 
 Revision ID: d4a7c1e9b562
 Revises: b8e4f2a6c913
@@ -26,10 +27,7 @@ def upgrade() -> None:
     """Upgrade schema."""
     op.create_table(
         "tutor_explanation_attempt",
-        sa.Column("id", sa.UUID(), nullable=False),
-        sa.Column("lesson_id", sa.UUID(), nullable=False),
-        sa.Column("lesson_version", sa.Integer(), nullable=False),
-        sa.Column("module_id", sa.UUID(), nullable=False),
+        sa.Column("cache_key", sa.Text(), nullable=False),
         sa.Column("attempts", sa.SmallInteger(), server_default=sa.text("0"), nullable=False),
         sa.Column(
             "last_attempt_at",
@@ -37,30 +35,10 @@ def upgrade() -> None:
             server_default=sa.text("now()"),
             nullable=False,
         ),
-        sa.ForeignKeyConstraint(
-            ["lesson_id"],
-            ["lesson.id"],
-            name=op.f("fk_tutor_explanation_attempt_lesson_id_lesson"),
-            ondelete="CASCADE",
-        ),
-        sa.ForeignKeyConstraint(
-            ["module_id"],
-            ["module.id"],
-            name=op.f("fk_tutor_explanation_attempt_module_id_module"),
-            ondelete="CASCADE",
-        ),
-        sa.PrimaryKeyConstraint("id", name=op.f("pk_tutor_explanation_attempt")),
-        sa.UniqueConstraint("module_id", "lesson_version", name="uq_tutor_explanation_attempt"),
-    )
-    op.create_index(
-        "ix_tutor_explanation_attempt_lesson_id",
-        "tutor_explanation_attempt",
-        ["lesson_id"],
-        unique=False,
+        sa.PrimaryKeyConstraint("cache_key", name=op.f("pk_tutor_explanation_attempt")),
     )
 
 
 def downgrade() -> None:
     """Downgrade schema."""
-    op.drop_index("ix_tutor_explanation_attempt_lesson_id", table_name="tutor_explanation_attempt")
     op.drop_table("tutor_explanation_attempt")

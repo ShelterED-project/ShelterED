@@ -86,6 +86,35 @@ class FakeAI:
         return AIClient(AI_URL, AI_KEY, transport=httpx.MockTransport(self.handler))
 
 
+class FakeAsyncRedis:
+    """Redis замків пояснень у `POST /tutor/ask` (без справжнього Redis)."""
+
+    def __init__(self) -> None:
+        self.data: dict[str, Any] = {}
+
+    async def set(self, key, value, nx=False, ex=None):
+        if nx and key in self.data:
+            return None
+        self.data[key] = value
+        return True
+
+    async def get(self, key):
+        return self.data.get(key)
+
+    async def exists(self, key):
+        return int(key in self.data)
+
+    async def delete(self, key):
+        return int(self.data.pop(key, None) is not None)
+
+
+@pytest.fixture(autouse=True)
+def lock_redis(monkeypatch) -> FakeAsyncRedis:
+    fake = FakeAsyncRedis()
+    monkeypatch.setattr(service, "explain_lock_redis", lambda settings: fake)
+    return fake
+
+
 @pytest.fixture
 def ai(app) -> FakeAI:
     fake = FakeAI()
@@ -573,22 +602,30 @@ async def test_logs_have_no_key_and_no_child_text(client, world, course, ai, cap
     assert AI_KEY not in text and "таємниця" not in text
 
 
+async def module_key(db_session, lesson, module) -> str:
+    materials = await service.lesson_materials(db_session, [lesson])
+    return next(m.key for m in materials[lesson.id] if m.module_id == module.id)
+
+
 async def test_ai_down_explain_falls_back_to_cached_explanation(
     client, world, course, ai, db_session
 ) -> None:
     db_session.add(
         TutorExplanation(
-            lesson_id=course.lesson.id,
-            lesson_version=course.lesson.version,
-            module_id=course.module.id,
+            cache_key=await module_key(db_session, course.lesson, course.module),
+            prompt_version="1",
             text="Готове пояснення",
         )
     )
     await db_session.flush()
     ai.responses = [status(503, {"code": "model_unavailable"})]
-    r = await ask(client, world, ask_body(action="explain", module_id=course.module.id))
+    # З питанням учня кеш не відповідає (іде в AI), але при недоступному AI — пояснення модуля.
+    r = await ask(
+        client, world, ask_body(action="explain", module_id=course.module.id, message="Чому?")
+    )
     assert r.status_code == 200
     assert r.json()["reply"] == "Готове пояснення" and r.json()["cached"] is True
+    assert len(ai.requests) == 1
 
 
 # ---------- закешовані пояснення для пакета ----------
@@ -606,6 +643,9 @@ class FakeRedis:
 
     def exists(self, key):
         return int(key in self.data)
+
+    def get(self, key):
+        return self.data.get(key)
 
     def delete(self, key):
         return int(self.data.pop(key, None) is not None)
@@ -720,14 +760,17 @@ async def test_beat_and_task_skip_when_ai_disabled(db_session, course, monkeypat
     assert enqueued == []
 
 
-async def test_republished_lesson_needs_new_explanations(db_session, course, worker) -> None:
+async def test_changed_module_text_needs_new_explanation(db_session, course, worker) -> None:
     await tutor_worker._explain_lesson(course.lesson.id)
     course.lesson.version += 1
     await db_session.flush()
+    # Нова версія з тим самим вмістом: пояснення вже є.
+    assert course.lesson.id not in await service.lessons_missing_explanations(db_session)
+    course.card.body = {"text": "Інший текст картки"}
+    await db_session.flush()
     assert course.lesson.id in await service.lessons_missing_explanations(db_session)
-    await tutor_worker._explain_lesson(course.lesson.id)
-    rows = list(await db_session.scalars(select(TutorExplanation)))
-    assert [r.lesson_version for r in rows] == [course.lesson.version]
+    assert await tutor_worker._explain_lesson(course.lesson.id) == (1, False)
+    assert len(worker.requests) == 2
 
 
 # ---------- строк зберігання ----------
@@ -786,8 +829,12 @@ async def test_unexplainable_module_stops_after_max_attempts(db_session, course,
     assert course.lesson.id not in await service.lessons_missing_explanations(db_session)
     assert await tutor_worker._explain_lesson(course.lesson.id) == (0, False)
     assert len(worker.requests) == service.MAX_EXPLANATION_ATTEMPTS
-    # Нова версія уроку: нові спроби.
+    # Нова версія уроку з тим самим вмістом — той самий ключ, спроб не додається.
     course.lesson.version += 1
+    await db_session.flush()
+    assert course.lesson.id not in await service.lessons_missing_explanations(db_session)
+    # Змінений текст модуля — новий ключ, нові спроби.
+    course.card.body = {"text": "Виправлений текст"}
     await db_session.flush()
     assert course.lesson.id in await service.lessons_missing_explanations(db_session)
 

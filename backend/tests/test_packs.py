@@ -244,8 +244,9 @@ async def test_lesson_repeated_in_week_is_read_once_per_rebuild(
         event.remove(engine, "before_cursor_execute", record)
     by_day = {p.pack_date: content(p) for p in built}
     assert by_day[day]["lessons"] == by_day[course.day]["lessons"]
-    # Один запит модулів на кожен день із новими уроками (сьогодні й завтра), а не на кожен урок.
-    assert sum("FROM module" in s and "lesson_id IN" in s for s in statements) == 2
+    # Модулі читаються раз на кожен день із новими уроками (сьогодні й завтра), а не на кожен
+    # урок: вміст уроків і ключі пояснень (B13.3) — по запиту на день.
+    assert sum("FROM module" in s and "lesson_id IN" in s for s in statements) == 4
 
 
 async def test_answer_key_only_for_practice_tests(db_session, world, course) -> None:

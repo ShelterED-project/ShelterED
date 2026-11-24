@@ -123,7 +123,8 @@ class TutorAnswerOut(BaseModel):
     suggestions: list[str]
     check_result: TutorCheckResult | None
     cached: bool = Field(
-        description="true — AI недоступний, а це готове пояснення модуля з кешу (як у пакеті)"
+        description="true — готове пояснення з кешу без виклику LLM: спільне для цього "
+        "матеріалу (перше «Поясни» розмови) або, коли AI недоступний, пояснення модуля з пакета"
     )
 
     model_config = ConfigDict(

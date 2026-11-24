@@ -1,8 +1,8 @@
 """Пакети знань «Рюкзак» (B6): збірка, версії, маніфест, вміст.
 
 Пакет = клас + дата: розклад дня, опубліковані уроки дня (модулі, картки, тести без ключа
-відповідей), закешовані пояснення ШІ до модулів уроків (B13.3, `tutor_explanation` тієї
-версії уроку, що в пакеті).
+відповідей), закешовані пояснення ШІ до модулів уроків (B13.3, `tutor_explanation` за ключем
+вмісту модуля; модулі без пояснення пропускаються).
 Медіа в пакет не вкладаються: їх URL і розміри — у маніфесті, Service Worker кешує окремо.
 
 Збірка детермінована: хеш — sha256 канонічного JSON (сортовані ключі, без пробілів) вмісту без
@@ -58,9 +58,13 @@ BUILD_ATTEMPTS = 3
 
 # Розклад дня, уже розв'язаний для класу: (пояс школи, уроки дня).
 DaySchedule = tuple[ZoneInfo, list[ResolvedItem]]
-# Вміст уроку в пакеті на час однієї перезбірки класу: (урок, версія) -> (JSON, id медіа).
-# Опублікований урок незмінний, тож урок, що стоїть у кількох днях тижня, читається раз.
-LessonCache = dict[tuple[uuid.UUID, int], tuple[dict[str, Any], set[uuid.UUID]]]
+# Вміст уроку в пакеті на час однієї перезбірки класу: (урок, версія) -> (JSON, id медіа,
+# модулі з ключами пояснень). Опублікований урок незмінний, тож урок, що стоїть у кількох
+# днях тижня, читається раз.
+LessonCache = dict[
+    tuple[uuid.UUID, int],
+    tuple[dict[str, Any], set[uuid.UUID], list[tutor_service.ModuleMaterial]],
+]
 
 
 def _now() -> dt.datetime:
@@ -217,34 +221,40 @@ async def build_content(
 
     if cache is None:
         cache = {}
-    loaded = await _lessons_content(
-        session, [lesson for lesson in lessons.values() if (lesson.id, lesson.version) not in cache]
-    )
+    new_lessons = [
+        lesson for lesson in lessons.values() if (lesson.id, lesson.version) not in cache
+    ]
+    loaded = await _lessons_content(session, new_lessons)
+    materials = await tutor_service.lesson_materials(session, new_lessons)
     for lesson_id, (content, lesson_media) in loaded.items():
         cache[(lesson_id, lessons[lesson_id].version)] = (
             content.model_dump(mode="json"),
             lesson_media,
+            materials[lesson_id],
         )
 
     pack_lessons: list[dict[str, Any]] = []
     versions: dict[uuid.UUID, int] = {}
     media: set[uuid.UUID] = set()
+    modules: list[tutor_service.ModuleMaterial] = []
     for lesson_id in wanted:
         lesson = lessons.get(lesson_id)
         if lesson is None:
             continue
-        lesson_json, lesson_media = cache[(lesson.id, lesson.version)]
+        lesson_json, lesson_media, lesson_modules = cache[(lesson.id, lesson.version)]
         pack_lessons.append(lesson_json)
         versions[lesson.id] = lesson.version
         media |= lesson_media
+        modules.extend(lesson_modules)
     body = {
         "class_id": str(klass.id),
         "pack_date": day.isoformat(),
         "timezone": tz.key,
         "schedule": schedule,
         "lessons": pack_lessons,
-        # Закешовані пояснення ШІ (B13.3): поява пояснення змінює хеш — нова версія пакета.
-        "explanations": await tutor_service.pack_explanations(session, versions),
+        # Закешовані пояснення ШІ (B13.3) за поточним ключем вмісту кожного модуля: поява
+        # пояснення змінює хеш — нова версія пакета; той самий набір — той самий хеш.
+        "explanations": await tutor_service.pack_explanations(session, modules),
         # Медіа й субтитри: заміна субтитрів відео змінює хеш, а отже й версію пакета.
         "media": sorted(str(m) for m in media),
     }

@@ -9,7 +9,7 @@ import datetime as dt
 import uuid
 from typing import Any
 
-from sqlalchemy import ForeignKey, Index, Integer, SmallInteger, UniqueConstraint, func, text
+from sqlalchemy import ForeignKey, Index, SmallInteger, func, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -45,42 +45,42 @@ class TutorConversation(TimestampMixin, Base):
     # Відповіді на останні запити [{"request_id": "...", "response": {...}}] — повтор того
     # самого `request_id` повертає збережену відповідь без виклику AI (ідемпотентність).
     replies: Mapped[Any] = mapped_column(JSONB, server_default=text("'[]'::jsonb"))
+    # Ключі закешованих пояснень, які розмова вже отримала (до `MAX_EXPLAINED_KEYS`):
+    # повторне «Поясни» того самого матеріалу йде в LLM по інше пояснення.
+    explained_keys: Mapped[Any] = mapped_column(JSONB, server_default=text("'[]'::jsonb"))
 
 
 class TutorExplanation(Base):
-    """Закешоване пояснення модуля опублікованого уроку (B13.3): генерує Celery-задача після
-    публікації, входить у пакет «Рюкзак» для показу офлайн. Одне на (урок, версія, модуль)."""
+    """Закешоване пояснення ШІ (B13.3), адресоване вмістом: `cache_key` — sha256 канонічного
+    JSON {клас, предмет, назва модуля, тексти текстових карток, версія промпту}
+    (`services/tutor.explanation_key`). Не прив'язане до уроку чи модуля: повторна публікація,
+    копія уроку чи такий самий модуль колеги беруть те саме пояснення без виклику LLM.
+    Генерує Celery-задача після публікації (для пакета «Рюкзак») або перший `explain` учня
+    онлайн; далі його отримують і інші учні (`cached: true`). Прибирає `retention.purge`:
+    не використовувалося `RETENTION_TUTOR_EXPLANATION_DAYS` і не потрібне жодному модулю
+    опублікованого уроку."""
 
     __tablename__ = "tutor_explanation"
-    __table_args__ = (
-        UniqueConstraint(
-            "lesson_id", "lesson_version", "module_id", name="uq_tutor_explanation_module"
-        ),
-        Index("ix_tutor_explanation_module_id", "module_id"),
-    )
+    __table_args__ = (Index("ix_tutor_explanation_last_used_at", "last_used_at"),)
 
     id: Mapped[uuid.UUID] = uuid_pk()
-    lesson_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("lesson.id", ondelete="CASCADE"))
-    lesson_version: Mapped[int] = mapped_column(Integer)
-    module_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("module.id", ondelete="CASCADE"))
+    cache_key: Mapped[str] = mapped_column(unique=True)
+    # Для діагностики: ключ уже містить версію промпту.
+    prompt_version: Mapped[str]
     text: Mapped[str]
     created_at: Mapped[dt.datetime] = mapped_column(server_default=func.now())
+    # Остання видача (пакет, онлайн-кеш); оновлюється не частіше ніж раз на добу.
+    last_used_at: Mapped[dt.datetime] = mapped_column(server_default=func.now())
 
 
 class TutorExplanationAttempt(Base):
-    """Невдалі спроби отримати пояснення модуля (порожня/safety-відповідь, відхилений запит,
-    урок без класу). Після `MAX_EXPLANATION_ATTEMPTS` модуль цієї версії уроку beat не
-    чіпає, тож він не палить виклики LLM щогодини. Нова версія уроку — нові спроби."""
+    """Невдалі спроби отримати пояснення за ключем (порожня/safety-відповідь, відхилений
+    запит, урок без класу). Після `MAX_EXPLANATION_ATTEMPTS` beat цей ключ не чіпає, тож він
+    не палить виклики LLM щогодини. Змінений вміст чи версія промпту — новий ключ, нові
+    спроби. Недоступний AI спробою не вважається."""
 
     __tablename__ = "tutor_explanation_attempt"
-    __table_args__ = (
-        UniqueConstraint("module_id", "lesson_version", name="uq_tutor_explanation_attempt"),
-        Index("ix_tutor_explanation_attempt_lesson_id", "lesson_id"),
-    )
 
-    id: Mapped[uuid.UUID] = uuid_pk()
-    lesson_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("lesson.id", ondelete="CASCADE"))
-    lesson_version: Mapped[int] = mapped_column(Integer)
-    module_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("module.id", ondelete="CASCADE"))
+    cache_key: Mapped[str] = mapped_column(primary_key=True)
     attempts: Mapped[int] = mapped_column(SmallInteger, server_default=text("0"))
     last_attempt_at: Mapped[dt.datetime] = mapped_column(server_default=func.now())

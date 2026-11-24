@@ -120,7 +120,7 @@ celery -A app.workers.celery_app beat -l info
 - `alerts.poll` — кожні `ALERTS_POLL_INTERVAL_S` (30 с) опитує API тривог alerts.in.ua. Без `ALERTS_API_TOKEN` нічого не робить (лишається ручна кнопка «Тривога»). Школу вмикає тривога її області (`school.region_code`) або, якщо адмін указав точні локації (`PUT /schools/{id}/alert-locations`: uid району, громади, міста з таблиці «Повний список локацій» на https://devs.alerts.in.ua/), тривога цього району / громади / міста; будь-який тип тривоги. Кілька тривог одночасно — один запис у журналі й один push; відбій — коли не лишилось жодної. Деталі — `docs/db-schema.md`, «Рішення B7».
 - `packs.refresh_all` — кожні `PACKS_REFRESH_INTERVAL_S` (1 год) перезбирає пакети «Рюкзака» всіх класів на 7 днів наперед. Перезбірку після публікації уроку чи зміни розкладу API ставить одразу (`packs.rebuild_for_lesson`, `packs.rebuild_class`); без змін вмісту нова версія не створюється.
 - `stats.refresh_all` — кожні `STATS_REFRESH_INTERVAL_S` (1 год) перераховує агрегати кабінетів (B14) усіх учнів і класів і навчання під час тривог шкіл (за `STATS_ALERT_LOOKBACK_DAYS`): новий день у розкладі, зміни уроків, пропущені задачі. Після кожного пакета синхронізації з прийнятими подіями API одразу ставить `stats.recompute_student` (рядки учня), а та — відкладений на `STATS_CLASS_DEBOUNCE_S` `stats.recompute_class` (один в очікуванні на клас). Відбій тривоги (з API, ручний чи автоматичний) одразу ставить `stats.recompute_alert_study` для шкіл, де він був.
-- `tutor.explain_missing` — кожні `TUTOR_EXPLANATIONS_INTERVAL_S` (1 год) ставить `tutor.explain_lesson` для опублікованих уроків без закешованих пояснень ШІ (AI-сервіс був вимкнений). Публікація уроку ставить `tutor.explain_lesson` одразу; AI недоступний — повтор кожні 15 хв до доби. Після нових пояснень — `packs.rebuild_for_lesson`. Без `AI_SERVICE_URL` нічого не робить.
+- `tutor.explain_missing` — кожні `TUTOR_EXPLANATIONS_INTERVAL_S` (1 год) ставить `tutor.explain_lesson` для опублікованих уроків без закешованих пояснень ШІ (AI-сервіс був вимкнений). Пояснення кешуються за вмістом модуля (`docs/ai-contract.md`), тож повторна публікація чи копія з тим самим текстом LLM не викликає. Публікація уроку ставить `tutor.explain_lesson` одразу; AI недоступний — повтор кожні 15 хв до доби. Після нових пояснень — `packs.rebuild_for_lesson`. Без `AI_SERVICE_URL` нічого не робить.
 - `retention.purge` — щодня о 02:00 UTC: строки зберігання (`RETENTION_*`, `docs/data-inventory.md`) — payload `sync_event` старших за 180 днів стирається, відхилені події видаляються; прострочені refresh-токени й коди авторизації (через 7 днів), коди прив'язки батьків (через 30 днів), журнал переглядів «Як ти зараз?» (365 днів), розмови з ШІ-репетитором без активності (30 днів).
 
 ## Docker-образ
@@ -170,7 +170,8 @@ AI-сервіс — окремий сервіс Романа (контракт �
 - `AI_INTERNAL_KEY` — спільний секрет (заголовок `X-Internal-Key`); не логується. Невірний ключ — `ERROR` у лозі й 503 учню.
 - `AI_TIMEOUT_S` (30), `AI_IMAGE_TIMEOUT_S` (45) — таймаути; один повтор лише на помилку з'єднання.
 - `TUTOR_MAX_IMAGE_BYTES` (4 МБ) — фото зошита (JPEG/PNG); тіло `POST /tutor/ask` має відповідно більший ліміт, ніж `MAX_REQUEST_BODY_BYTES`.
-- `TUTOR_EXPLANATIONS_INTERVAL_S` (3600), `RETENTION_TUTOR_CONVERSATION_DAYS` (30).
+- `TUTOR_EXPLANATIONS_INTERVAL_S` (3600), `RETENTION_TUTOR_CONVERSATION_DAYS` (30), `RETENTION_TUTOR_EXPLANATION_DAYS` (90).
+- `TUTOR_PROMPT_VERSION` (`1`) — входить у ключ кешу пояснень: зміна промпту → пояснення генеруються заново, старі прибирає `retention.purge`.
 
 У тестах AI-сервіс підміняє `httpx.MockTransport` (`tests/test_tutor.py`), мережевих викликів немає.
 

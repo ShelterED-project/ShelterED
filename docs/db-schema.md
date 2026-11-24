@@ -473,7 +473,7 @@ UNIQUE (`lesson_id`, `part`, `position`).
 
 ## B13 ШІ-репетитор (24.11.2026)
 
-Міграція `b8e4f2a6c913`. Контракт і поведінка — `docs/ai-contract.md`.
+Міграції `b8e4f2a6c913`, `d4a7c1e9b562`. Контракт і поведінка — `docs/ai-contract.md`.
 
 ### `tutor_conversation`
 | Поле | Тип | Примітка |
@@ -489,14 +489,25 @@ UNIQUE (`lesson_id`, `part`, `position`).
 | created_at, updated_at | timestamptz | індекс на `updated_at` — строк зберігання (`RETENTION_TUTOR_CONVERSATION_DAYS`, 30) |
 
 ### `tutor_explanation`
+Кеш пояснень, адресований вмістом (міграції `b8e4f2a6c913`, `d4a7c1e9b562`, переписані 25.11.2026 до появи в проді). Персональних даних немає. Дизайн — `docs/ai-contract.md`, розділ 3.
+
 | Поле | Тип | Примітка |
 |---|---|---|
 | id | uuid PK | він же `id` у `explanations` пакета |
-| lesson_id | uuid FK → lesson ON DELETE CASCADE | UNIQUE (lesson_id, lesson_version, module_id) |
-| lesson_version | integer NOT NULL | версія уроку, для якої згенеровано; старші версії видаляються при генерації нових |
-| module_id | uuid FK → module ON DELETE CASCADE | індекс |
+| cache_key | text NOT NULL UNIQUE | sha256 {клас, предмет, назва модуля, тексти текстових карток, версія промпту}; без прив'язки до уроку чи модуля |
+| prompt_version | text NOT NULL | `TUTOR_PROMPT_VERSION` на час генерації (діагностика; вже входить у ключ) |
 | text | text NOT NULL | Markdown від AI |
 | created_at | timestamptz | |
+| last_used_at | timestamptz NOT NULL | остання видача (пакет, онлайн-кеш), не частіше раз на добу; індекс — строк зберігання |
+
+### `tutor_explanation_attempt`
+| Поле | Тип | Примітка |
+|---|---|---|
+| cache_key | text PK | ключ, для якого не вдалося отримати пояснення |
+| attempts | smallint NOT NULL DEFAULT 0 | порожня/safety-відповідь, відхилений запит, урок без класу; недоступний AI не рахується; ≥ 3 — beat ключ не чіпає |
+| last_attempt_at | timestamptz | черговість beat; строк зберігання |
+
+`tutor_conversation.explained_keys` (jsonb NOT NULL DEFAULT `[]`) — до 20 ключів пояснень, які розмова вже отримала: повторне «Поясни» йде в LLM.
 
 ## Поза B2 (з'явиться у своїх епіках)
 
@@ -556,7 +567,7 @@ UNIQUE (`lesson_id`, `part`, `position`).
 
 Міграція `0edf076a683a`: `knowledge_pack.content_gzip` (bytea NOT NULL; наявні рядки без вмісту видаляються — пакети похідні й перезбираються). Нових полів про дітей немає.
 
-- **Вміст пакета** (клас + дата): розклад дня, опубліковані уроки дня (модулі — спершу укриттєва частина, картки, тести й питання; `answer_key` — лише в питаннях тренувального тесту (`window_enabled = false`) для миттєвої перевірки офлайн, у тесті з вікном (B11, оцінюваному) поля немає зовсім — оцінює сервер після синхронізації. Ключ тренувального тесту входить у хеш, тож його виправлення дає нову версію пакета. Інших оцінюваних вправ у моделі немає: картки (`text`/`image`/`video`) — лише контент, відповіді на них лишаються на пристрої), `explanations` (закешовані пояснення ШІ до модулів уроків пакета в їхніх версіях — `tutor_explanation`, B13.3; поява пояснення дає нову версію пакета). Урок, знятий з публікації, у пакет не йде, а в розкладі пакета його `lesson_id = null`. День без уроків у розкладі пакета не має.
+- **Вміст пакета** (клас + дата): розклад дня, опубліковані уроки дня (модулі — спершу укриттєва частина, картки, тести й питання; `answer_key` — лише в питаннях тренувального тесту (`window_enabled = false`) для миттєвої перевірки офлайн, у тесті з вікном (B11, оцінюваному) поля немає зовсім — оцінює сервер після синхронізації. Ключ тренувального тесту входить у хеш, тож його виправлення дає нову версію пакета. Інших оцінюваних вправ у моделі немає: картки (`text`/`image`/`video`) — лише контент, відповіді на них лишаються на пристрої), `explanations` (закешовані пояснення ШІ до модулів уроків пакета за поточним ключем вмісту модуля — `tutor_explanation`, B13.3; модулі без пояснення пропускаються; поява пояснення дає нову версію пакета, той самий набір — той самий хеш). Урок, знятий з публікації, у пакет не йде, а в розкладі пакета його `lesson_id = null`. День без уроків у розкладі пакета не має.
 - **Нові типи питань і пояснення (24.11.2026, міграція `5d1e7c2a9b40`).** Питання `text` і `match` йдуть у пакет так само: `right_options` (праві елементи `match`) — завжди; `answer_key` і `explanation` (розбір помилки для офлайн-перевірки) — лише в тренувальному тесті. Поля, яких немає, у JSON відсутні (не `null`), тож пакети з питаннями старих типів без пояснень мають той самий хеш, що й раніше: нових версій через оновлення сервера не з'являється. Картки в пакеті без поля `media` (медіа — у маніфесті).
 - **Версія й хеш.** `content_hash` = sha256 канонічного JSON (сортовані ключі, без пробілів, UTF-8) вмісту без `id`, `version`, `built_at`. Той самий вміст → той самий хеш → нова версія не створюється (повтор і паралельна перезбірка нічого не дублюють; гонку версій ловить UNIQUE (class_id, pack_date, version) + `ON CONFLICT DO NOTHING`; програвша збірка перечитує дані й збирає пакет знову — до 3 спроб, тож виграють найсвіжіші дані). У хешований вміст входить `media` — id медіа уроків разом із субтитрами, тож заміна субтитрів дає нову версію. Готова відповідь зберігається в `content_gzip`, тому ETag завжди відповідає тілу.
 - **Перезбірка** — Celery (черга `default`): `packs.rebuild_for_lesson` після `publish`/`unpublish`; `packs.rebuild_class` після змін слотів, перевизначень і прив'язок уроків; `packs.refresh_all` — beat раз на `PACKS_REFRESH_INTERVAL_S` (3600 с): новий день у горизонті 7 днів і все, що могло не перезібратися (недоступний брокер). Нова версія хоч одного дня → **один** push `pack_updated` класу за перезбірку (`class_id`, `pack_id` і `pack_date` найранішого зміненого дня).
@@ -681,6 +692,6 @@ UNIQUE (`student_id`, `answered_on`) — одна відповідь на ден
 Частковий UNIQUE `uq_data_deletion_request_student_id_pending` (`student_id`) WHERE `status = 'pending'` — один відкритий запит на учня. Індекси (`school_id`, `status`), `requested_by`.
 
 - **Видалення:** `POST /deletion-requests/{id}/confirm` видаляє рядок `app_user` учня, решту — каскадом (членство, прив'язки батьків і коди, токени, коди авторизації, push-підписки, `sync_event` → `attempt`, `module_progress`, `rollcall_status`, `wellbeing_*`, агрегати учня); `stats.recompute_class` для його класів. Запит блокується `FOR UPDATE`; повтор підтвердження — той самий результат. Окремого журналу немає: підтверджені запити (без персональних даних, `student_hash`) зберігаються безстроково й переживають видалення школи. `GET /deletion-requests`: адміністрація — запити своєї школи; батьки — запити щодо своїх дітей (і створені школою чи другим із батьків) та власні; автор — лише роллю.
-- **Строки зберігання** (`retention.purge`, crontab 02:00 UTC, ідемпотентно): `sync_event` старші за `RETENTION_SYNC_EVENT_DAYS` (180) — payload `{}`, `device_id` і `clock_skew_ms` NULL (`is_suspicious` лишається), відхилені видаляються; пакетами по 5000 рядків, кожен у своїй транзакції, до 300 с за запуск; `refresh_token` і `auth_code` — через `RETENTION_AUTH_DAYS` (7) після `expires_at` (посилання `replaced_by_id` спершу обнуляються); `parent_link_code` — через `RETENTION_PARENT_LINK_CODE_DAYS` (30) після `expires_at`; `wellbeing_view_log` — `RETENTION_WELLBEING_VIEW_LOG_DAYS` (365); `tutor_conversation` — через `RETENTION_TUTOR_CONVERSATION_DAYS` (30) після `updated_at`. Рядки прийнятих подій лишаються: на них ідемпотентність і FK (`attempt.client_event_id` ON DELETE CASCADE!). Тригер стрічки змін на `sync_event` не стоїть, тож курсор `/sync/changes` не зачіпається.
+- **Строки зберігання** (`retention.purge`, crontab 02:00 UTC, ідемпотентно): `sync_event` старші за `RETENTION_SYNC_EVENT_DAYS` (180) — payload `{}`, `device_id` і `clock_skew_ms` NULL (`is_suspicious` лишається), відхилені видаляються; пакетами по 5000 рядків, кожен у своїй транзакції, до 300 с за запуск; `refresh_token` і `auth_code` — через `RETENTION_AUTH_DAYS` (7) після `expires_at` (посилання `replaced_by_id` спершу обнуляються); `parent_link_code` — через `RETENTION_PARENT_LINK_CODE_DAYS` (30) після `expires_at`; `wellbeing_view_log` — `RETENTION_WELLBEING_VIEW_LOG_DAYS` (365); `tutor_conversation` — через `RETENTION_TUTOR_CONVERSATION_DAYS` (30) після `updated_at`; `tutor_explanation` / `tutor_explanation_attempt` — не використані `RETENTION_TUTOR_EXPLANATION_DAYS` (90) і не потрібні жодному модулю опублікованого уроку за поточним ключем. Рядки прийнятих подій лишаються: на них ідемпотентність і FK (`attempt.client_event_id` ON DELETE CASCADE!). Тригер стрічки змін на `sync_event` не стоїть, тож курсор `/sync/changes` не зачіпається.
 - **Заголовки безпеки й ліміти:** без змін схеми — див. `backend/README.md`.
 

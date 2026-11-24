@@ -21,6 +21,9 @@
 - `wellbeing_view_log`: `RETENTION_WELLBEING_VIEW_LOG_DAYS` (365).
 - `tutor_conversation` (розмови з ШІ-репетитором): через `RETENTION_TUTOR_CONVERSATION_DAYS`
   (30) після останньої активності.
+- `tutor_explanation` (кеш пояснень ШІ, без персональних даних) і `tutor_explanation_attempt`:
+  не використані `RETENTION_TUTOR_EXPLANATION_DAYS` (90) і не потрібні жодному модулю
+  опублікованого уроку за його поточним ключем.
 - `task_outbox`: опубліковані задачі — через `OUTBOX_SENT_DAYS` (1) після публікації
   (неопубліковані лишаються, доки їх не опублікує `outbox.flush`).
 
@@ -39,6 +42,7 @@ from app.models.outbox import TaskOutbox
 from app.models.sync import SyncEvent
 from app.models.tutor import TutorConversation
 from app.models.wellbeing import WellbeingViewLog
+from app.services import tutor as tutor_service
 
 SYNC_EVENT_BATCH = 5000
 SYNC_EVENT_MAX_S = 300.0
@@ -134,6 +138,10 @@ async def purge(
         )
     )
     counts["tutor_conversations"] = result.rowcount or 0
+    (
+        counts["tutor_explanations"],
+        counts["tutor_explanation_attempts"],
+    ) = await tutor_service.purge_explanations(session, settings, now)
     result = await session.execute(
         delete(TaskOutbox).where(TaskOutbox.sent_at < now - _days(OUTBOX_SENT_DAYS))
     )

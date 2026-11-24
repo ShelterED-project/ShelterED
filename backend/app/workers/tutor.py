@@ -1,14 +1,17 @@
 """Закешовані пояснення ШІ-репетитора для пакета «Рюкзак» (B13.3, черга `default`).
 
-Після публікації уроку `tutor.explain_lesson` просить AI пояснити кожен модуль з текстом і
-зберігає відповіді (`tutor_explanation`), після чого перезбирає пакети класів з цим уроком.
-AI-сервіс працює на ПК розробника й буває вимкнений: тоді задача повторюється кожні
-15 хв до доби, а beat `tutor.explain_missing` раз на `TUTOR_EXPLANATIONS_INTERVAL_S` добирає
-опубліковані уроки без пояснень. Усе ідемпотентне (унікальний ключ урок + версія + модуль).
+Після публікації уроку `tutor.explain_lesson` просить AI пояснити кожен модуль з текстом, для
+ключа вмісту якого (`services/tutor.explanation_key`) ще немає пояснення, і зберігає відповіді
+(`tutor_explanation`), після чого перезбирає пакети уроків із цими ключами. Повторна
+публікація чи копія з тим самим вмістом LLM не викликає. AI-сервіс працює на ПК розробника й
+буває вимкнений: тоді задача повторюється кожні 15 хв до доби, а beat `tutor.explain_missing`
+раз на `TUTOR_EXPLANATIONS_INTERVAL_S` добирає опубліковані уроки без пояснень. Усе
+ідемпотентне (унікальний ключ кешу).
 """
 
 import asyncio
 import logging
+import math
 import uuid
 
 from redis.exceptions import RedisError
@@ -18,7 +21,6 @@ from app.core.db import standalone_session
 from app.services import tutor as tutor_service
 from app.services.ai import AIClient
 from app.workers.celery_app import celery_app, enqueue
-from app.workers.packs import enqueue_rebuild_for_lesson
 from app.workers.redis_client import redis_client
 
 logger = logging.getLogger(__name__)
@@ -67,6 +69,30 @@ def _finish_lock(lesson_id: uuid.UUID, retry_pending: bool) -> None:
         logger.warning("Explain lock update failed (expires by TTL): %s", exc)
 
 
+def _lock_explain_key(key: str) -> str | None:
+    """Замок на ключ пояснення, спільний з онлайн-запитами учнів (`POST /tutor/ask`).
+    Токен — взято; None — ключ уже генерують; "" — Redis недоступний (fail-open)."""
+    token = uuid.uuid4().hex
+    ttl = math.ceil(get_settings().ai_timeout_s) + tutor_service.EXPLAIN_KEY_LOCK_SLACK_S
+    try:
+        ok = redis_client().set(tutor_service.explain_lock_name(key), token, nx=True, ex=ttl)
+    except (RedisError, OSError) as exc:
+        logger.warning("Explain key lock unavailable, continuing without it: %s", exc)
+        return ""
+    return token if ok else None
+
+
+def _unlock_explain_key(key: str, token: str) -> None:
+    try:
+        value = redis_client().get(tutor_service.explain_lock_name(key))
+        if isinstance(value, bytes):
+            value = value.decode()
+        if value == token:
+            redis_client().delete(tutor_service.explain_lock_name(key))
+    except (RedisError, OSError) as exc:
+        logger.warning("Explain key unlock failed (expires by TTL): %s", exc)
+
+
 def ai_client() -> AIClient:
     """Клієнт AI для задач (тести підміняють транспорт)."""
     return AIClient.from_settings(get_settings())
@@ -90,12 +116,15 @@ async def _explain_lesson(lesson_id: uuid.UUID, retry: bool = False) -> tuple[in
     failed = False
     try:
         async with standalone_session() as session:
-            created, failed = await tutor_service.generate_explanations(session, lesson_id, client)
+            created, failed = await tutor_service.generate_explanations(
+                session, lesson_id, client, (_lock_explain_key, _unlock_explain_key)
+            )
+            if created:
+                # Пакети цього уроку і всіх опублікованих уроків з тим самим вмістом модуля.
+                await tutor_service.enqueue_pack_rebuilds(session, created)
     finally:
         _finish_lock(lesson_id, failed)
-    if created:
-        await enqueue_rebuild_for_lesson(lesson_id)
-    return created, failed
+    return len(created), failed
 
 
 async def _explain_missing() -> int:
@@ -122,5 +151,5 @@ def explain_lesson(self, lesson_id: str) -> int:
 
 @celery_app.task(name="tutor.explain_missing")
 def explain_missing() -> int:
-    """Періодично (beat): опубліковані уроки без пояснень поточної версії."""
+    """Періодично (beat): опубліковані уроки з модулями без пояснення за поточним ключем."""
     return asyncio.run(_explain_missing())
