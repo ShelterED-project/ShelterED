@@ -192,6 +192,13 @@ def test_cli_seed_refuses_production(monkeypatch, capsys) -> None:
     assert "not allowed" in capsys.readouterr().err
 
 
+def test_cli_seed_allow_prod_requires_seed_password(monkeypatch, capsys) -> None:
+    settings = get_settings().model_copy(update={"environment": "prod", "seed_password": None})
+    monkeypatch.setattr(cli, "get_settings", lambda: settings)
+    assert cli.main(["seed", "--allow-prod"]) == 1
+    assert "SEED_PASSWORD is required" in capsys.readouterr().err
+
+
 def test_seed_password_is_read_from_env_file(tmp_path, monkeypatch, capsys) -> None:
     """SEED_PASSWORD береться через Settings, тож працює і з `.env`, і в repr не видно."""
     from types import SimpleNamespace
@@ -208,7 +215,7 @@ def test_seed_password_is_read_from_env_file(tmp_path, monkeypatch, capsys) -> N
 
     captured = {}
 
-    async def fake_seed(session, settings, password=None):
+    async def fake_seed(session, settings, password=None, allow_prod=False):
         captured["password"] = password
         return SimpleNamespace(
             school_id="s",

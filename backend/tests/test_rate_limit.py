@@ -200,8 +200,9 @@ async def test_client_ip_comes_from_trusted_proxy_header(app: FastAPI, world) ->
 
     from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
-    dockerfile = (Path(__file__).resolve().parent.parent / "Dockerfile").read_text()
-    assert '"--proxy-headers"' in dockerfile and "ENV FORWARDED_ALLOW_IPS=" in dockerfile
+    root = Path(__file__).resolve().parent.parent
+    dockerfile = (root / "Dockerfile").read_text() + (root / "start.sh").read_text()
+    assert "--proxy-headers" in dockerfile and "ENV FORWARDED_ALLOW_IPS=" in dockerfile
 
     proxied = ProxyHeadersMiddleware(app, trusted_hosts="172.18.0.2")
     transport = ASGITransport(app=proxied, client=("172.18.0.2", 50000))
@@ -321,8 +322,8 @@ async def test_parent_link_code_guessing_is_limited(client: AsyncClient, world) 
 def tutor_body() -> dict:
     return {
         "request_id": str(uuid.uuid4()),
-        "mode": "explain_again",
-        "lesson_id": "0192f0a0-0000-7000-8000-00000000ffff",
+        "conversation_id": str(uuid.uuid4()),
+        "message": "Що таке дріб?",
     }
 
 
@@ -342,16 +343,17 @@ def relay_body() -> dict:
 
 
 async def test_tutor_is_limited_per_student(client: AsyncClient, world) -> None:
-    """Кожен запит рахується (і поки заглушка відповідає 501); інший учень не зачеплений."""
+    """Кожен запит рахується (і невдалий: AI у тестах вимкнений — 503); інший учень не
+    зачеплений."""
     headers = auth_header(world.student_a)
     for _ in range(20):
         r = await client.post("/tutor/ask", json=tutor_body(), headers=headers)
-        assert r.status_code == 501
+        assert r.status_code == 503
     r = await client.post("/tutor/ask", json=tutor_body(), headers=headers)
     assert r.status_code == 429 and r.json()["error"]["code"] == "RATE_LIMITED"
     assert 0 < int(r.headers["Retry-After"]) <= 600
     other = await client.post("/tutor/ask", json=tutor_body(), headers=auth_header(world.student_b))
-    assert other.status_code == 501
+    assert other.status_code == 503
 
 
 async def test_tutor_limit_not_spent_by_denied_roles(client: AsyncClient, world) -> None:

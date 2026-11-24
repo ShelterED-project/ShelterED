@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import TutorChat from '@/features/tutor/TutorChat'
 import { PackCardContent } from '@/features/lessons/CardContent'
 import { completeModule } from '@/features/lessons/completeStep'
 import LessonIntro from '@/features/lessons/LessonIntro'
@@ -52,6 +53,7 @@ export default function ModuleTask({
           <PackCardContent key={card.id} card={card} textClassName="text-[17px] leading-[27px] text-parchment" />
         </div>
       )}
+      <TutorChat lessonId={lessonId} moduleId={module.id} cardId={card?.id} />
       <div className="flex flex-col gap-3 pt-[9px] md:flex-row md:justify-end">
         <button type="button" onClick={() => void advance()} disabled={saving} className={primaryButton}>
           {isLast ? task.finishModule : task.next}

@@ -41,6 +41,8 @@ def connect_args(settings: Settings) -> dict[str, Any]:
     if _is_pooler(settings):
         # PgBouncer відкидає або ігнорує server_settings — без обмеження, з попередженням.
         _warn_pooler()
+        # PgBouncer у режимі транзакцій не тримає підготовлені запити між транзакціями.
+        args["statement_cache_size"] = 0
     else:
         args["server_settings"] = {
             # У мілісекундах; задається при підключенні, тож діє на кожне з'єднання пулу.
@@ -48,7 +50,7 @@ def connect_args(settings: Settings) -> dict[str, Any]:
                 settings.db_idle_in_transaction_timeout_s * 1000
             ),
         }
-    if settings.database_ssl:
+    if settings.use_db_ssl:
         # asyncpg не розуміє sslmode в URL, тому TLS передаємо напряму драйверу.
         args["ssl"] = True
     return args

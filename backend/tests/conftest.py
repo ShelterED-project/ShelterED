@@ -60,6 +60,11 @@ os.environ["RETENTION_SYNC_EVENT_DAYS"] = "180"
 os.environ["RETENTION_AUTH_DAYS"] = "7"
 os.environ["RETENTION_PARENT_LINK_CODE_DAYS"] = "30"
 os.environ["RETENTION_WELLBEING_VIEW_LOG_DAYS"] = "365"
+os.environ["RETENTION_TUTOR_CONVERSATION_DAYS"] = "30"
+# AI-сервіс у тестах вимкнений; тести репетитора підставляють клієнт із фейковим транспортом.
+os.environ["AI_SERVICE_URL"] = ""
+os.environ["AI_INTERNAL_KEY"] = ""
+os.environ["TUTOR_MAX_IMAGE_BYTES"] = str(4 * 1024 * 1024)
 
 import uuid  # noqa: E402
 from collections.abc import AsyncIterator  # noqa: E402

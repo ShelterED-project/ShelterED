@@ -1,8 +1,9 @@
 import { useState } from 'react'
 import type { FormEvent } from 'react'
-import { Link, useNavigate } from 'react-router'
+import { Link, useNavigate, useSearchParams } from 'react-router'
 import { errorMessage, useCreateLessonMutation } from '@/features/teacher/lessonEditorApi'
 import { useLessonsQuery, useSchoolLessonsQuery, useSubjectsQuery } from '@/features/teacher/teacherApi'
+import { matchesSearch } from '@/shared/lib/search'
 import { generateId } from '@/shared/lib/uuid'
 import Spinner from '@/shared/ui/Spinner'
 import TeacherHeader from '../sections/TeacherHeader'
@@ -105,6 +106,39 @@ export default function LessonsListPage() {
   const [creating, setCreating] = useState(false)
   const copy = useCopyLesson()
   const subjectName = new Map((subjects ?? []).map((s) => [s.id, s.name]))
+  const [params, setParams] = useSearchParams()
+  const query = params.get('q') ?? ''
+  const [statusFilter, setStatusFilter] = useState<'all' | 'draft' | 'published'>('all')
+  const setQuery = (value: string) =>
+    setParams(
+      (prev) => {
+        const next = new URLSearchParams(prev)
+        if (value) next.set('q', value)
+        else next.delete('q')
+        return next
+      },
+      { replace: true },
+    )
+  const inSearch = (l: { title: string; subject_id: string }) =>
+    matchesSearch(query, l.title, subjectName.get(l.subject_id))
+  const mine = (lessons.data ?? []).filter((l) => inSearch(l) && (statusFilter === 'all' || l.status === statusFilter))
+  const theirs = (colleagues ?? []).filter(inSearch)
+  const filtering = query.trim() !== '' || statusFilter !== 'all'
+  const nothing = filtering && mine.length === 0 && theirs.length === 0
+  const hasLessons = (lessons.data?.length ?? 0) > 0 || (colleagues?.length ?? 0) > 0
+  const chip = (id: typeof statusFilter, label: string) => (
+    <button
+      key={id}
+      type="button"
+      aria-pressed={statusFilter === id}
+      onClick={() => setStatusFilter(id)}
+      className={`flex h-10 shrink-0 items-center rounded-full border px-4 text-sm font-semibold focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:outline-none ${
+        statusFilter === id ? 'border-accent bg-surface-2 text-accent' : 'border-line text-muted hover:bg-surface'
+      }`}
+    >
+      {label}
+    </button>
+  )
 
   return (
     <div className="flex min-h-screen">
@@ -125,6 +159,44 @@ export default function LessonsListPage() {
           </div>
 
           {creating && <NewLessonForm onCancel={() => setCreating(false)} />}
+
+          {hasLessons && (
+            <div className="flex flex-col gap-3">
+              <input
+                type="search"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape') setQuery('')
+                }}
+                placeholder={lessonsList.searchPlaceholder}
+                aria-label={lessonsList.searchLabel}
+                className={`${field} w-full md:max-w-md`}
+              />
+              {(lessons.data?.length ?? 0) > 0 && (
+                <div className="flex gap-2 overflow-x-auto" role="group" aria-label={lessonsList.title}>
+                  {chip('all', lessonsList.filterAll)}
+                  {chip('draft', lessonsList.filterDraft)}
+                  {chip('published', lessonsList.filterPublished)}
+                </div>
+              )}
+              {nothing && (
+                <div role="status" className="flex flex-wrap items-center gap-3">
+                  <p className="text-sm text-muted">{lessonsList.nothingFound}</p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setQuery('')
+                      setStatusFilter('all')
+                    }}
+                    className={secondaryButton}
+                  >
+                    {lessonsList.clearSearch}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
 
           {lessons.data && lessons.data.length === 0 && !creating ? (
             <section className="flex flex-col gap-4 rounded-[22px] border border-accent/40 bg-surface p-5 md:p-6">
@@ -150,7 +222,7 @@ export default function LessonsListPage() {
             </p>
           ) : (
             <ul className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-              {lessons.data.map((lesson) => (
+              {mine.map((lesson) => (
                 <li key={lesson.id} className="flex flex-col rounded-2xl border border-line bg-surface hover:bg-surface-2">
                   <Link
                     to={`/teacher/lessons/${lesson.id}`}
@@ -194,14 +266,14 @@ export default function LessonsListPage() {
             </ul>
           )}
 
-          {colleagues && colleagues.length > 0 && (
+          {theirs.length > 0 && (
             <section className="flex flex-col gap-3">
               <div className="flex flex-col gap-1">
                 <h2 className="font-heading text-xl leading-7 text-parchment">{lessonsList.colleaguesTitle}</h2>
                 <p className="text-sm text-dim">{lessonsList.colleaguesHint}</p>
               </div>
               <ul className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                {colleagues.map((lesson) => (
+                {theirs.map((lesson) => (
                   <li key={lesson.id} className="flex flex-col rounded-2xl border border-line bg-surface">
                     <div className="flex flex-1 flex-col gap-2 p-4">
                       <span className="truncate text-xs text-dim">{subjectName.get(lesson.subject_id) ?? '—'}</span>

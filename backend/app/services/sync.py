@@ -201,6 +201,10 @@ async def _student_has_lesson(
     return bool(await session.scalar(select(or_(exists(in_pack), exists(assigned)))))
 
 
+# Публічне ім'я для інших доменів (ШІ-репетитор перевіряє доступ учня до уроку так само).
+student_has_lesson = _student_has_lesson
+
+
 async def _check_lesson_access(
     session: AsyncSession, batch: Batch, model: type[Module] | type[Test], entity_id: uuid.UUID
 ) -> None:

@@ -6691,67 +6691,129 @@
         "type": "object"
       },
       "TutorAnswerOut": {
+        "description": "`reply` — Markdown. Кнопки й екран вибирати за `intent` (що AI зробив насправді):\n`safety` — показати `reply` як є, без кнопок уроку (завдання не змінюється).",
         "examples": [
           {
             "cached": false,
-            "explanation": "Уяви піцу з 4 шматків: 1/2 — це 2 шматки, 1/4 — ще один.",
-            "explanation_id": "0192f0a0-0000-7000-8000-000000000701",
-            "request_id": "0193a1b2-0000-7000-8000-0000000000f1"
+            "conversation_id": "0193a1b2-0000-7000-8000-0000000000c1",
+            "hints_used": 0,
+            "intent": "practice",
+            "reply": "Знайди **20%** від числа 150.",
+            "request_id": "0193a1b2-0000-7000-8000-0000000000f1",
+            "suggestions": [
+              "💡 Дай підказку",
+              "✅ Відповісти"
+            ],
+            "task": {
+              "answer_type": "number",
+              "question": "Знайди 20% від числа 150."
+            }
           }
         ],
         "properties": {
           "cached": {
-            "description": "true — готове пояснення з кешу, без виклику LLM",
+            "description": "true — готове пояснення з кешу без виклику LLM: спільне для цього матеріалу (перше «Поясни» розмови) або, коли AI недоступний, пояснення модуля з пакета",
             "title": "Cached",
             "type": "boolean"
           },
-          "explanation": {
-            "title": "Explanation",
+          "check_result": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TutorCheckResult"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "conversation_id": {
+            "format": "uuid",
+            "title": "Conversation Id",
             "type": "string"
           },
-          "explanation_id": {
-            "format": "uuid",
-            "title": "Explanation Id",
+          "hints_used": {
+            "title": "Hints Used",
+            "type": "integer"
+          },
+          "intent": {
+            "enum": [
+              "explain",
+              "practice",
+              "check",
+              "safety"
+            ],
+            "title": "Intent",
+            "type": "string"
+          },
+          "reply": {
+            "title": "Reply",
             "type": "string"
           },
           "request_id": {
             "format": "uuid",
             "title": "Request Id",
             "type": "string"
+          },
+          "suggestions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Suggestions",
+            "type": "array"
+          },
+          "task": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TutorTaskOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
           "request_id",
-          "explanation",
-          "explanation_id",
+          "conversation_id",
+          "reply",
+          "intent",
+          "task",
+          "hints_used",
+          "suggestions",
+          "check_result",
           "cached"
         ],
         "title": "TutorAnswerOut",
         "type": "object"
       },
       "TutorAskRequest": {
-        "description": "- `explain_again`: пояснити матеріал іншими словами (`lesson_id`, бажано `module_id`);\n- `test_review`: розбір помилок у спробі тесту (`attempt_event_id` — `client_event_id`\n  події `test_attempt`).",
+        "description": "Один крок розмови з репетитором.\n\n- `action` — режим, якщо він уже відомий (кнопки «Поясни», «Дай задачу»/«Підказка»,\n  «Перевірити»); без нього режим вибирає AI за `message`.\n- Контекст: `lesson_id`, `module_id`, `card_id` (досить найвужчого — решту backend\n  знайде сам). Без них — контекст, збережений у розмові раніше. Урок має бути в розкладі\n  чи пакеті класу учня, інакше 403.\n- `explain` з `card_id` — пояснити текст картки іншими словами.\n- `check` — відповідь на поточне завдання розмови (`message` або фото `image_base64`,\n  JPEG/PNG до `TUTOR_MAX_IMAGE_BYTES`, base64 без префікса або data URL); без завдання\n  в розмові — 422 `TUTOR_TASK_REQUIRED`.\n- Історію реплік клієнт не надсилає: її зберігає сервер (до 8 останніх).",
         "examples": [
           {
+            "action": "explain",
             "card_id": "0192f0a0-0000-7000-8000-000000000321",
+            "conversation_id": "0193a1b2-0000-7000-8000-0000000000c1",
             "lesson_id": "0192f0a0-0000-7000-8000-000000000301",
-            "mode": "explain_again",
             "module_id": "0192f0a0-0000-7000-8000-000000000311",
             "request_id": "0193a1b2-0000-7000-8000-0000000000f1"
           }
         ],
         "properties": {
-          "attempt_event_id": {
+          "action": {
             "anyOf": [
               {
-                "format": "uuid",
+                "enum": [
+                  "explain",
+                  "practice",
+                  "check"
+                ],
                 "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Attempt Event Id"
+            "title": "Action"
           },
           "card_id": {
             "anyOf": [
@@ -6765,6 +6827,24 @@
             ],
             "title": "Card Id"
           },
+          "conversation_id": {
+            "description": "Створює клієнт, один на чат (модуль); чужий id — 404",
+            "format": "uuid",
+            "title": "Conversation Id",
+            "type": "string"
+          },
+          "image_base64": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Фото зошита для `check`: JPEG/PNG, base64 або data URL",
+            "title": "Image Base64"
+          },
           "lesson_id": {
             "anyOf": [
               {
@@ -6777,13 +6857,17 @@
             ],
             "title": "Lesson Id"
           },
-          "mode": {
-            "enum": [
-              "explain_again",
-              "test_review"
+          "message": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
             ],
-            "title": "Mode",
-            "type": "string"
+            "title": "Message"
           },
           "module_id": {
             "anyOf": [
@@ -6797,21 +6881,8 @@
             ],
             "title": "Module Id"
           },
-          "previous_explanation_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Попереднє пояснення, яке не допомогло",
-            "title": "Previous Explanation Id"
-          },
           "request_id": {
-            "description": "Створює клієнт; повтор повертає ту саму відповідь",
+            "description": "Створює клієнт на кожне надсилання; повтор того самого id повертає ту саму відповідь без нового виклику AI",
             "format": "uuid",
             "title": "Request Id",
             "type": "string"
@@ -6819,9 +6890,69 @@
         },
         "required": [
           "request_id",
-          "mode"
+          "conversation_id"
         ],
         "title": "TutorAskRequest",
+        "type": "object"
+      },
+      "TutorCheckResult": {
+        "properties": {
+          "correct": {
+            "title": "Correct",
+            "type": "boolean"
+          },
+          "score": {
+            "title": "Score",
+            "type": "number"
+          }
+        },
+        "required": [
+          "correct",
+          "score"
+        ],
+        "title": "TutorCheckResult",
+        "type": "object"
+      },
+      "TutorTaskOut": {
+        "description": "Завдання для учня — лише умова. Правильної відповіді, підказок і типових помилок\nтут немає ніколи: перевіряє AI через `action: check`.",
+        "properties": {
+          "answer_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "`choice` | `number` | `fraction` | `text`",
+            "title": "Answer Type"
+          },
+          "options": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Варіанти для `choice`",
+            "title": "Options"
+          },
+          "question": {
+            "title": "Question",
+            "type": "string"
+          }
+        },
+        "required": [
+          "question",
+          "answer_type"
+        ],
+        "title": "TutorTaskOut",
         "type": "object"
       },
       "UserOut": {
@@ -16779,7 +16910,7 @@
     },
     "/tutor/ask": {
       "post": {
-        "description": "Пояснити іншими словами або розібрати помилки в спробі тесту. Лише учень, з лімітом\nзапитів (`RATE_LIMIT_TUTOR` за `RATE_LIMIT_TUTOR_WINDOW_S`, 429 з `Retry-After`).\nПадіння AI-сервісу не ламає уроки: клієнт показує пояснення з пакета.",
+        "description": "Один крок розмови з репетитором: пояснення, завдання й підказки, перевірка відповіді\n(текстом або фото). Лише учень, з лімітом запитів (`RATE_LIMIT_TUTOR` за\n`RATE_LIMIT_TUTOR_WINDOW_S`, 429 з `Retry-After`). Стан розмови (завдання, підказки,\n8 останніх реплік) зберігає сервер; повтор `request_id` повертає ту саму відповідь без\nнового виклику AI і без витрати ліміту. Типове `explain` (без `message`) спершу бере\nспільне закешоване пояснення матеріалу (`cached: true`, без LLM); повторне в тій самій\nрозмові — нове від LLM. Недоступний AI → 503 (для `explain` модуля з готовим поясненням —\nвоно, `cached: true`): клієнт показує пояснення з пакета.",
         "operationId": "ask_tutor_ask_post",
         "requestBody": {
           "content": {
@@ -16797,9 +16928,19 @@
               "application/json": {
                 "example": {
                   "cached": false,
-                  "explanation": "Уяви піцу з 4 шматків: 1/2 — це 2 шматки, 1/4 — ще один.",
-                  "explanation_id": "0192f0a0-0000-7000-8000-000000000701",
-                  "request_id": "0193a1b2-0000-7000-8000-0000000000f1"
+                  "conversation_id": "0193a1b2-0000-7000-8000-0000000000c1",
+                  "hints_used": 0,
+                  "intent": "practice",
+                  "reply": "Знайди **20%** від числа 150.",
+                  "request_id": "0193a1b2-0000-7000-8000-0000000000f1",
+                  "suggestions": [
+                    "💡 Дай підказку",
+                    "✅ Відповісти"
+                  ],
+                  "task": {
+                    "answer_type": "number",
+                    "question": "Знайди 20% від числа 150."
+                  }
                 },
                 "schema": {
                   "$ref": "#/components/schemas/TutorAnswerOut"
@@ -16826,7 +16967,27 @@
                 }
               }
             },
-            "description": "Недостатньо прав"
+            "description": "Не учень або урок не в розкладі/пакеті класу учня"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Урок/модуль/картку не знайдено або розмова належить іншому учню"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "PAYLOAD_TOO_LARGE: тіло з фото завелике"
           },
           "422": {
             "content": {
@@ -16836,7 +16997,7 @@
                 }
               }
             },
-            "description": "Unprocessable Content"
+            "description": "VALIDATION_ERROR; INVALID_IMAGE (не JPEG/PNG, завелике чи не прочиталось); TUTOR_TASK_REQUIRED (`check` без завдання); TUTOR_TOPIC_REQUIRED"
           },
           "429": {
             "content": {
@@ -16865,7 +17026,7 @@
             },
             "description": "Internal Server Error"
           },
-          "501": {
+          "502": {
             "content": {
               "application/json": {
                 "schema": {
@@ -16873,7 +17034,7 @@
                 }
               }
             },
-            "description": "NOT_IMPLEMENTED: заглушка контракту"
+            "description": "AI_BAD_REQUEST: AI-сервіс відхилив запит backend (помилка контракту)"
           },
           "503": {
             "content": {

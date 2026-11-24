@@ -79,19 +79,23 @@ def gen_vapid() -> tuple[str, str]:
     return _b64url(public), _b64url(private)
 
 
-def run_seed() -> int:
+def run_seed(*, allow_prod: bool = False) -> int:
     """Демо-дані в БД з DATABASE_URL. Пароль дорослих — SEED_PASSWORD, інакше генерується й
     друкується один раз (лише при створенні акаунтів); у репозиторії паролів немає."""
     from app.seed.content import STUDENT_PIN
     from app.seed.runner import SeedRefused, seed
 
     settings = get_settings()
-    if settings.environment == "prod":
+    if settings.environment == "prod" and not allow_prod:
         print("Error: seed data is not allowed when ENVIRONMENT=prod", file=sys.stderr)
         return 1
     # Із Settings: змінна оточення або `.env` (SecretStr — у repr/логи не потрапляє).
     secret = settings.seed_password
     password = (secret.get_secret_value() if secret else None) or None
+    if settings.environment == "prod" and password is None:
+        # Згенерований пароль надрукувався б у лог деплою.
+        print("Error: SEED_PASSWORD is required with --allow-prod", file=sys.stderr)
+        return 1
     if password is not None and len(password) < 8:
         print("SEED_PASSWORD must be at least 8 characters", file=sys.stderr)
         return 1
@@ -99,7 +103,7 @@ def run_seed() -> int:
     async def run():
         try:
             async with get_sessionmaker()() as session:
-                return await seed(session, settings, password=password)
+                return await seed(session, settings, password=password, allow_prod=allow_prod)
         finally:
             await get_engine().dispose()
 
@@ -136,11 +140,16 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--password", help="Для скриптів; інакше буде запит")
     sub.add_parser("export-openapi", help="Записати docs/openapi.json зі специфікації FastAPI")
     sub.add_parser("gen-vapid", help="Надрукувати нову пару ключів VAPID (у .env не пише)")
-    sub.add_parser("seed", help="Демо-дані: школа, класи, люди, розклад, уроки, пакети")
+    p_seed = sub.add_parser("seed", help="Демо-дані: школа, класи, люди, розклад, уроки, пакети")
+    p_seed.add_argument(
+        "--allow-prod",
+        action="store_true",
+        help="Дозволити демо-дані при ENVIRONMENT=prod (демо-сервер); потрібен SEED_PASSWORD",
+    )
     args = parser.parse_args(argv)
 
     if args.command == "seed":
-        return run_seed()
+        return run_seed(allow_prod=args.allow_prod)
 
     if args.command == "gen-vapid":
         # Лише в stdout: ключ не пишеться у файли й не потрапляє в логи.

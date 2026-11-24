@@ -35,8 +35,20 @@ export async function saveSession(dispatch: Dispatch, session: Session, persist:
   }
 }
 
+/** Розмови репетитора живуть у sessionStorage: на спільному пристрої вони не мають пережити вихід. */
+function clearTutorConversations() {
+  try {
+    for (const key of Object.keys(sessionStorage)) {
+      if (key.startsWith('tutor-conv:')) sessionStorage.removeItem(key)
+    }
+  } catch {
+    // sessionStorage недоступне: нічого чистити.
+  }
+}
+
 export async function clearSession(dispatch: Dispatch) {
   dispatch(sessionCleared())
+  clearTutorConversations()
   try {
     await db.session.clear()
   } catch {

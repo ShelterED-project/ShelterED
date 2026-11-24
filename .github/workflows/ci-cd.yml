@@ -5,6 +5,18 @@ on:
     branches: [ "main" ]
   pull_request:
     branches: [ "main" ]
+  # Ручний запуск деплою (Actions → CI/CD Pipeline → Run workflow), за потреби з демо-даними.
+  workflow_dispatch:
+    inputs:
+      seed:
+        description: "Заповнити демо-даними (python -m app.cli seed --allow-prod; потрібен секрет SEED_PASSWORD)"
+        type: boolean
+        default: false
+
+# Деплої з main по черзі: другий не підхопить образ першого.
+concurrency:
+  group: ${{ github.event_name == 'pull_request' && format('pr-{0}', github.ref) || 'deploy-main' }}
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -51,6 +63,7 @@ jobs:
       - name: Запуск лінтера Ruff
         run: |
           ruff check backend/
+          ruff format --check backend/
 
       - name: Запуск лінтера Flake8
         run: |
@@ -88,34 +101,74 @@ jobs:
         with:
           context: ./backend
           file: ./backend/Dockerfile
-          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-          tags: ${{ env.IMAGE_PREFIX }}/backend:latest
+          push: ${{ github.ref == 'refs/heads/main' && github.event_name != 'pull_request' }}
+          build-args: GIT_SHA=${{ github.sha }}
+          tags: |
+            ${{ env.IMAGE_PREFIX }}/backend:latest
+            ${{ env.IMAGE_PREFIX }}/backend:${{ github.sha }}
 
       - name: Build and Push Frontend
         uses: docker/build-push-action@v5
         with:
           context: ./frontend
           file: ./frontend/Dockerfile
-          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-          tags: ${{ env.IMAGE_PREFIX }}/frontend:latest
+          push: ${{ github.ref == 'refs/heads/main' && github.event_name != 'pull_request' }}
+          tags: |
+            ${{ env.IMAGE_PREFIX }}/frontend:latest
+            ${{ env.IMAGE_PREFIX }}/frontend:${{ github.sha }}
   deploy:
     needs: docker-build-push
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     steps:
       - name: Деплой на AWS EC2 по SSH
         uses: appleboy/ssh-action@v1
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DATABASE_URL_DIRECT: ${{ secrets.DATABASE_URL_DIRECT }}
+          AI_SERVICE_URL: ${{ secrets.AI_SERVICE_URL }}
+          AI_INTERNAL_KEY: ${{ secrets.AI_INTERNAL_KEY }}
+          SEED_PASSWORD: ${{ secrets.SEED_PASSWORD }}
+          IMAGE_TAG: ${{ github.sha }}
+          RUN_SEED: ${{ github.event_name == 'workflow_dispatch' && inputs.seed && 'true' || 'false' }}
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
+          envs: IMAGE_TAG,DATABASE_URL,DATABASE_URL_DIRECT,AI_SERVICE_URL,AI_INTERNAL_KEY,SEED_PASSWORD,RUN_SEED
           script_stop: true
           script: |
+            set -e
             cd ~/shelter-app
             git fetch origin main
             git checkout -B main origin/main
+
+            # Секрети з GitHub → .env (лише непорожні; значення в лог не друкуються).
+            touch .env && chmod 600 .env
+            upsert() {
+              [ -z "$2" ] && return 0
+              grep -v "^$1=" .env > .env.tmp || true
+              printf '%s=%s\n' "$1" "$2" >> .env.tmp
+              mv .env.tmp .env && chmod 600 .env
+            }
+            upsert DATABASE_URL "$DATABASE_URL"
+            upsert DATABASE_URL_DIRECT "$DATABASE_URL_DIRECT"
+            upsert AI_SERVICE_URL "$AI_SERVICE_URL"
+            upsert AI_INTERNAL_KEY "$AI_INTERNAL_KEY"
+
+            # Образи саме цього коміту (тег = sha), а не «останні»; можна відкотитись на будь-який sha.
+            export IMAGE_TAG
             docker compose -f docker-compose.prod.yml pull
+
+            # Бекенд при старті сам застосовує міграції до Neon (backend/start.sh).
             docker compose -f docker-compose.prod.yml up -d --remove-orphans
             docker image prune -f
-            sleep 5
+            sleep 10
             docker compose -f docker-compose.prod.yml ps
+
+            if [ "$RUN_SEED" = "true" ]; then
+              if [ -z "$SEED_PASSWORD" ]; then echo "SEED_PASSWORD secret is not set"; exit 1; fi
+              for i in $(seq 1 30); do docker exec shelter_backend python -c "import urllib.request as u; u.urlopen('http://localhost:8000/health')" >/dev/null 2>&1 && break; sleep 3; done
+              docker exec -e SEED_PASSWORD="$SEED_PASSWORD" shelter_backend python -m app.cli seed --allow-prod
+            fi
+            curl -fsS http://127.0.0.1:8000/health && echo

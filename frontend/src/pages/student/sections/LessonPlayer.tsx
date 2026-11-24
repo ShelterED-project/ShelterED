@@ -10,6 +10,7 @@ import { cardField, plainText } from '@/features/lessons/cardField'
 import { completeModule } from '@/features/lessons/completeStep'
 import LessonIntro from '@/features/lessons/LessonIntro'
 import type { LessonStep } from '@/features/lessons/lessonSteps'
+import TutorChat from '@/features/tutor/TutorChat'
 import { useShelterLesson } from '@/features/lessons/useShelterLesson'
 import { TaskFrame } from '@/pages/shelter/sections/TaskCard'
 import type { FinishedTest } from '@/pages/shelter/sections/TaskCard'
@@ -127,6 +128,8 @@ function ModulePlayer({
           </div>
         )}
       </article>
+
+      <TutorChat lessonId={lessonId} moduleId={module.id} cardId={card?.id} />
 
       {nextCard ? (
         <NextPreview

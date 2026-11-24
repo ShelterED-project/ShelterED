@@ -28,7 +28,7 @@ app/
 | `rollcall` | сесії й статуси переклички | B2.6, B12 |
 | `alerts` | тривоги: опитування API тривог, ручна тривога, журнал | B2.6, B7 |
 
-Також `push` (Web Push, B8) і `tutor` (проксі до AI-сервісу, B13). Ендпоінти `tutor` поки заглушки контракту (B4, `app/api/stub.py`): перевіряють автентифікацію й роль і відповідають `501 NOT_IMPLEMENTED`; успішні відповіді описані в OpenAPI з прикладами.
+Також `push` (Web Push, B8) і `tutor` (ШІ-репетитор, B13): `POST /tutor/ask` проксує запит до AI-сервісу й зберігає стан розмови на сервері; закешовані пояснення модулів входять у пакет «Рюкзака». Контракт — `docs/ai-contract.md`.
 
 Спільні модулі без власного домену: `services/idempotency.py` (створення з клієнтським id), `services/grading.py` (перевірка відповіді на питання тесту за типом `single`/`multiple`/`text`/`match`; нею користуються `sync` і агрегати `stats`).
 
@@ -43,7 +43,7 @@ app/
 - **Батьки**: вчитель чи адмін видає код `POST /students/{id}/parent-link-codes` (7 днів), батьки вводять його в `POST /parent/link`.
 - Адмін створює вчителів, батьків, адмінів: `POST /admin/users`.
 - Блокування акаунтів немає (діти могли б блокувати однокласників). Захист від підбору PIN і паролів — rate limiting невдалих спроб (`app/core/rate_limit.py`, Redis БД 2): `POST /auth/student/join` — на пару IP + (код класу + ім'я) (`RATE_LIMIT_JOIN_ACCOUNT`, 10) і на IP (`RATE_LIMIT_JOIN_IP`, 300), `POST /auth/authorize` — на пару IP + email і на IP (`RATE_LIMIT_LOGIN_*`, 10 / 300); для обох — ще загальний ліміт на акаунт з усіх IP (`RATE_LIMIT_*_ACCOUNT_ALL_IPS`, 100) проти перебору зі зміною IP. Ключ акаунта містить IP, тож однокласник, що перебирає чужий PIN, блокує лише себе, а власник входить з іншого IP; ліміт на IP високий, бо клас чи школа часто за одним NAT, фіксоване вікно `RATE_LIMIT_WINDOW_S` (900 с). Понад ліміт — 429 `RATE_LIMITED` з `Retry-After`; успішні входи не рахуються. Redis недоступний — вхід дозволено (fail-open) з попередженням у лог. `POST /auth/token` не обмежується: `code` і refresh-токен — випадкові рядки, які не підібрати. За Nginx справжній IP — через `uvicorn --proxy-headers` і `FORWARDED_ALLOW_IPS` (IP чи підмережа Nginx; у Dockerfile за замовчуванням лише localhost), інакше всі клієнти ділять лічильники IP Nginx.
-- Ліміт запитів (рахується кожен, `enforce` у `app/core/rate_limit.py`): `POST /tutor/ask` — на учня (`RATE_LIMIT_TUTOR`, 20 за `RATE_LIMIT_TUTOR_WINDOW_S` 600 с), `POST /sync/events` від вчителя (ретрансляція з локального сервера укриття) — на вчителя (`RATE_LIMIT_QR_RELAY`, 120 за 600 с). Створення нових учнів у `POST /auth/student/join` — на пару IP + клас (`RATE_LIMIT_JOIN_NEW_STUDENTS`, 40 за `RATE_LIMIT_JOIN_NEW_STUDENTS_WINDOW_S` 900 с): хто знає код класу, не засипле клас вигаданими іменами, а весь клас за одним шкільним NAT входить; вхід наявних учнів не рахується. Ліміт перевіряється до відповіді 501 заглушок; синхронізація учня не обмежується. Понад ліміт — 429 `RATE_LIMITED` з `Retry-After`.
+- Ліміт запитів (рахується кожен, `enforce` у `app/core/rate_limit.py`): `POST /tutor/ask` — на учня (`RATE_LIMIT_TUTOR`, 20 за `RATE_LIMIT_TUTOR_WINDOW_S` 600 с), `POST /sync/events` від вчителя (ретрансляція з локального сервера укриття) — на вчителя (`RATE_LIMIT_QR_RELAY`, 120 за 600 с). Створення нових учнів у `POST /auth/student/join` — на пару IP + клас (`RATE_LIMIT_JOIN_NEW_STUDENTS`, 40 за `RATE_LIMIT_JOIN_NEW_STUDENTS_WINDOW_S` 900 с): хто знає код класу, не засипле клас вигаданими іменами, а весь клас за одним шкільним NAT входить; вхід наявних учнів не рахується. Повтор того самого `request_id` у `POST /tutor/ask` ліміт не витрачає; синхронізація учня не обмежується. Понад ліміт — 429 `RATE_LIMITED` з `Retry-After`.
 - Заголовки безпеки (`app/core/security_headers.py`): на всіх відповідях `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `X-Frame-Options: DENY`; на `/auth/*` — `Cache-Control: no-store`. `Strict-Transport-Security: max-age=HSTS_MAX_AGE_S` — лише якщо `HSTS_ENABLED=true` або `ENVIRONMENT=prod` і запит прийшов по HTTPS (схему ставить `uvicorn --proxy-headers` за `X-Forwarded-Proto` від довіреного Nginx). Редирект HTTP→HTTPS і HSTS для фронтенду — у Nginx.
 - Видалення даних учня (B15.5): батьки дитини або адміністрація школи створюють запит `POST /students/{id}/deletion-requests` (`id` від клієнта, причина — лише з переліку), адміністрація школи бачить `GET /deletion-requests?status=pending` і вирішує `POST /deletion-requests/{id}/confirm` (безповоротне видалення учня й усіх його даних каскадом, ідемпотентно) або `/reject`; батьки бачать статус своїх запитів у `GET /deletion-requests`. Журнал `data_deletion_log` — без персональних даних. Інвентаризація даних і строки зберігання — `docs/data-inventory.md`.
 - Залежності доступу: `app/api/deps.py` (`get_current_user`, `require_roles`, `get_accessible_class`, `get_accessible_student`).
@@ -120,7 +120,8 @@ celery -A app.workers.celery_app beat -l info
 - `alerts.poll` — кожні `ALERTS_POLL_INTERVAL_S` (30 с) опитує API тривог alerts.in.ua. Без `ALERTS_API_TOKEN` нічого не робить (лишається ручна кнопка «Тривога»). Школу вмикає тривога її області (`school.region_code`) або, якщо адмін указав точні локації (`PUT /schools/{id}/alert-locations`: uid району, громади, міста з таблиці «Повний список локацій» на https://devs.alerts.in.ua/), тривога цього району / громади / міста; будь-який тип тривоги. Кілька тривог одночасно — один запис у журналі й один push; відбій — коли не лишилось жодної. Деталі — `docs/db-schema.md`, «Рішення B7».
 - `packs.refresh_all` — кожні `PACKS_REFRESH_INTERVAL_S` (1 год) перезбирає пакети «Рюкзака» всіх класів на 7 днів наперед. Перезбірку після публікації уроку чи зміни розкладу API ставить одразу (`packs.rebuild_for_lesson`, `packs.rebuild_class`); без змін вмісту нова версія не створюється.
 - `stats.refresh_all` — кожні `STATS_REFRESH_INTERVAL_S` (1 год) перераховує агрегати кабінетів (B14) усіх учнів і класів і навчання під час тривог шкіл (за `STATS_ALERT_LOOKBACK_DAYS`): новий день у розкладі, зміни уроків, пропущені задачі. Після кожного пакета синхронізації з прийнятими подіями API одразу ставить `stats.recompute_student` (рядки учня), а та — відкладений на `STATS_CLASS_DEBOUNCE_S` `stats.recompute_class` (один в очікуванні на клас). Відбій тривоги (з API, ручний чи автоматичний) одразу ставить `stats.recompute_alert_study` для шкіл, де він був.
-- `retention.purge` — щодня о 02:00 UTC: строки зберігання (`RETENTION_*`, `docs/data-inventory.md`) — payload `sync_event` старших за 180 днів стирається, відхилені події видаляються; прострочені refresh-токени й коди авторизації (через 7 днів), коди прив'язки батьків (через 30 днів), журнал переглядів «Як ти зараз?» (365 днів).
+- `tutor.explain_missing` — кожні `TUTOR_EXPLANATIONS_INTERVAL_S` (1 год) ставить `tutor.explain_lesson` для опублікованих уроків без закешованих пояснень ШІ (AI-сервіс був вимкнений). Пояснення кешуються за вмістом модуля (`docs/ai-contract.md`), тож повторна публікація чи копія з тим самим текстом LLM не викликає. Публікація уроку ставить `tutor.explain_lesson` одразу; AI недоступний — повтор кожні 15 хв до доби. Після нових пояснень — `packs.rebuild_for_lesson`. Без `AI_SERVICE_URL` нічого не робить.
+- `retention.purge` — щодня о 02:00 UTC: строки зберігання (`RETENTION_*`, `docs/data-inventory.md`) — payload `sync_event` старших за 180 днів стирається, відхилені події видаляються; прострочені refresh-токени й коди авторизації (через 7 днів), коди прив'язки батьків (через 30 днів), журнал переглядів «Як ти зараз?» (365 днів), розмови з ШІ-репетитором без активності (30 днів).
 
 ## Docker-образ
 
@@ -160,6 +161,19 @@ location /media/ {
     autoindex off;
 }
 ```
+
+## ШІ-репетитор (AI-сервіс)
+
+AI-сервіс — окремий сервіс Романа (контракт у гілці `feature/ai-service`: `contracts/openapi.yaml`, `docs/backend-quickstart.md`; наш бік — `docs/ai-contract.md`). Налаштування в `.env`:
+
+- `AI_SERVICE_URL` — адреса без `/` у кінці (дає AI-розробник); порожньо — репетитор вимкнений: `POST /tutor/ask` відповідає `503 AI_UNAVAILABLE`, пояснення для пакетів не генеруються.
+- `AI_INTERNAL_KEY` — спільний секрет (заголовок `X-Internal-Key`); не логується. Невірний ключ — `ERROR` у лозі й 503 учню.
+- `AI_TIMEOUT_S` (30), `AI_IMAGE_TIMEOUT_S` (45) — таймаути; один повтор лише на помилку з'єднання.
+- `TUTOR_MAX_IMAGE_BYTES` (4 МБ) — фото зошита (JPEG/PNG); тіло `POST /tutor/ask` має відповідно більший ліміт, ніж `MAX_REQUEST_BODY_BYTES`.
+- `TUTOR_EXPLANATIONS_INTERVAL_S` (3600), `RETENTION_TUTOR_CONVERSATION_DAYS` (30), `RETENTION_TUTOR_EXPLANATION_DAYS` (90).
+- `TUTOR_PROMPT_VERSION` (`1`) — входить у ключ кешу пояснень: зміна промпту → пояснення генеруються заново, старі прибирає `retention.purge`.
+
+У тестах AI-сервіс підміняє `httpx.MockTransport` (`tests/test_tutor.py`), мережевих викликів немає.
 
 ## Web Push (VAPID)
 

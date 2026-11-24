@@ -59,3 +59,19 @@ def test_prod_requires_database_url(monkeypatch):
         Settings(_env_file=None)
     monkeypatch.setenv("ENVIRONMENT", "dev")
     assert Settings(_env_file=None).database_url is None
+
+
+def test_database_url_gets_async_driver_and_auto_ssl(monkeypatch):
+    monkeypatch.delenv("DATABASE_SSL", raising=False)
+    monkeypatch.delenv("DATABASE_URL_DIRECT", raising=False)
+    monkeypatch.setenv("DATABASE_URL", "postgresql://u:p@db:5432/shelter_db")
+    settings = Settings(_env_file=None)
+    assert settings.database_url.get_secret_value() == "postgresql+asyncpg://u:p@db:5432/shelter_db"
+    assert settings.use_db_ssl is False  # БД у сусідньому контейнері
+
+    monkeypatch.setenv("DATABASE_URL", "postgres://u:p@ep-x.eu-central-1.aws.neon.tech/db")
+    assert Settings(_env_file=None).use_db_ssl is True  # Neon
+    monkeypatch.setenv("DATABASE_SSL", "")
+    assert Settings(_env_file=None).use_db_ssl is True  # порожнє — авто
+    monkeypatch.setenv("DATABASE_SSL", "false")
+    assert Settings(_env_file=None).use_db_ssl is False  # явне значення має пріоритет

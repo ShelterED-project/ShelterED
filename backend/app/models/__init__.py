@@ -11,6 +11,7 @@ from app.models import (
     school,
     stats,
     sync,
+    tutor,
     wellbeing,
 )
 from app.models.base import Base
@@ -28,5 +29,6 @@ __all__ = [
     "school",
     "stats",
     "sync",
+    "tutor",
     "wellbeing",
 ]
