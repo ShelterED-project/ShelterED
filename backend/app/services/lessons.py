@@ -194,10 +194,21 @@ async def get_editable_question(
 # ---------- урок ----------
 
 
-async def list_lessons(session: AsyncSession, user: User, status: str | None) -> list[Lesson]:
-    """Вчитель — свої уроки, адмін — уроки вчителів своєї школи."""
+async def list_lessons(
+    session: AsyncSession, user: User, status: str | None, scope: str = "mine"
+) -> list[Lesson]:
+    """Вчитель — свої уроки, адмін — уроки вчителів своєї школи. `scope=school` для вчителя —
+    опубліковані уроки колег його школи (щоб скопіювати й адаптувати)."""
     query = select(Lesson).order_by(Lesson.updated_at.desc(), Lesson.id)
-    if user.role == "admin":
+    if scope == "school" and user.role != "admin":
+        if user.school_id is None:
+            return []
+        query = query.join(User, User.id == Lesson.author_id).where(
+            User.school_id == user.school_id,
+            Lesson.author_id != user.id,
+            Lesson.status == "published",
+        )
+    elif user.role == "admin":
         query = query.join(User, User.id == Lesson.author_id).where(
             User.school_id == user.school_id
         )

@@ -11979,7 +11979,7 @@
     },
     "/lessons": {
       "get": {
-        "description": "Вчитель — свої уроки, адмін — уроки вчителів своєї школи.",
+        "description": "Вчитель — свої уроки, адмін — уроки вчителів своєї школи. `scope=school`: для вчителя —\nопубліковані уроки колег зі школи (для копіювання, `POST /lessons/{id}/copy`).",
         "operationId": "list_lessons_lessons_get",
         "parameters": [
           {
@@ -12000,6 +12000,20 @@
                 }
               ],
               "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "scope",
+            "required": false,
+            "schema": {
+              "default": "mine",
+              "enum": [
+                "mine",
+                "school"
+              ],
+              "title": "Scope",
+              "type": "string"
             }
           }
         ],

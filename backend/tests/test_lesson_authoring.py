@@ -704,3 +704,25 @@ async def test_migration_down_and_up(committed) -> None:
         assert q.explanation is None and q.right_options is None
         s.add(Question(test_id=test.id, position=2, **TEXT_Q))
         await s.commit()
+
+
+async def test_list_school_scope_shows_published_colleague_lessons(
+    client: AsyncClient, db_session, world, factory, media_storage
+) -> None:
+    source = await _rich_lesson(client, world, factory)
+    hb = auth_header(world.teacher_b)
+    resp = await client.get("/lessons", params={"scope": "school"}, headers=hb)
+    assert resp.status_code == 200 and resp.json() == []  # чернетки колег не видно
+
+    lesson = await db_session.get(Lesson, uuid.UUID(source["id"]))
+    lesson.status = "published"
+    await db_session.flush()
+    resp = await client.get("/lessons", params={"scope": "school"}, headers=hb)
+    assert [item["id"] for item in resp.json()] == [source["id"]]
+    # Свої уроки в scope=school не дублюються; звичайний список — лише свої.
+    own = await client.get(
+        "/lessons", params={"scope": "school"}, headers=auth_header(world.teacher_a)
+    )
+    assert own.json() == []
+    mine = await client.get("/lessons", headers=hb)
+    assert source["id"] not in {item["id"] for item in mine.json()}

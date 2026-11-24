@@ -135,9 +135,11 @@ async def list_lessons(
     user: Staff,
     session: Session,
     lesson_status: Annotated[Literal["draft", "published"] | None, Query(alias="status")] = None,
+    scope: Literal["mine", "school"] = "mine",
 ) -> list[LessonSummary]:
-    """Вчитель — свої уроки, адмін — уроки вчителів своєї школи."""
-    lessons = await service.list_lessons(session, user, lesson_status)
+    """Вчитель — свої уроки, адмін — уроки вчителів своєї школи. `scope=school`: для вчителя —
+    опубліковані уроки колег зі школи (для копіювання, `POST /lessons/{id}/copy`)."""
+    lessons = await service.list_lessons(session, user, lesson_status, scope)
     return [LessonSummary.model_validate(lesson) for lesson in lessons]
 
 
