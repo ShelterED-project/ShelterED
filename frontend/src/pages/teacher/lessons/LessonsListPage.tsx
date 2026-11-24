@@ -8,14 +8,29 @@ import Spinner from '@/shared/ui/Spinner'
 import TeacherHeader from '../sections/TeacherHeader'
 import TeacherSidebar from '../sections/TeacherSidebar'
 import TeacherTabs from '../sections/TeacherTabs'
-import { lessonsList, lessonStatus, newLesson } from './content'
+import { guideSteps, lessonsList, lessonStatus, newLesson } from './content'
 import { field, primaryButton, secondaryButton } from './styles'
+import { useCopyLesson } from './useCopyLesson'
+
+const LAST_SUBJECT = 'teacher.lastSubject'
+
+function lastSubject(): string {
+  try {
+    return localStorage.getItem(LAST_SUBJECT) ?? ''
+  } catch {
+    return ''
+  }
+}
 
 function NewLessonForm({ onCancel }: { onCancel: () => void }) {
   const { data: subjects } = useSubjectsQuery()
   const [create, { isLoading }] = useCreateLessonMutation()
   const navigate = useNavigate()
-  const [subjectId, setSubjectId] = useState('')
+  // Предмет за замовчуванням — останній обраний (або єдиний): на один вибір менше.
+  const [picked, setPicked] = useState(lastSubject)
+  const list = subjects ?? []
+  const subjectId = list.some((s) => s.id === picked) ? picked : list.length === 1 ? (list[0]?.id ?? '') : ''
+  const setSubjectId = setPicked
   const [title, setTitle] = useState('')
   const [error, setError] = useState<string | null>(null)
   // id уроку створюємо один раз на форму: повторне натискання після обриву мережі не дасть дубля.
@@ -26,6 +41,11 @@ function NewLessonForm({ onCancel }: { onCancel: () => void }) {
     setError(null)
     try {
       await create({ id, subject_id: subjectId, title: title.trim(), shelter_part: '', main_part: '', grade: null }).unwrap()
+      try {
+        localStorage.setItem(LAST_SUBJECT, subjectId)
+      } catch {
+        // Без сховища просто не запамʼятаємо.
+      }
       navigate(`/teacher/lessons/${id}`)
     } catch (err) {
       setError(errorMessage(err))
@@ -52,6 +72,7 @@ function NewLessonForm({ onCancel }: { onCancel: () => void }) {
         {newLesson.name}
         <input
           required
+          autoFocus
           maxLength={200}
           value={title}
           onChange={(e) => setTitle(e.target.value)}
@@ -81,6 +102,7 @@ export default function LessonsListPage() {
   const lessons = useLessonsQuery()
   const { data: subjects } = useSubjectsQuery()
   const [creating, setCreating] = useState(false)
+  const copy = useCopyLesson()
   const subjectName = new Map((subjects ?? []).map((s) => [s.id, s.name]))
 
   return (
@@ -103,17 +125,34 @@ export default function LessonsListPage() {
 
           {creating && <NewLessonForm onCancel={() => setCreating(false)} />}
 
-          {!lessons.data || lessons.data.length === 0 ? (
+          {lessons.data && lessons.data.length === 0 && !creating ? (
+            <section className="flex flex-col gap-4 rounded-[22px] border border-accent/40 bg-surface p-5 md:p-6">
+              <h2 className="font-heading text-xl leading-7 text-parchment">{lessonsList.emptyTitle}</h2>
+              <p className="text-sm text-muted">{lessonsList.emptyText}</p>
+              <ol className="grid gap-3 md:grid-cols-3">
+                {guideSteps.map((step, i) => (
+                  <li key={step.title} className="flex flex-col gap-1 rounded-2xl border border-line-soft bg-surface-2 p-4">
+                    <p className="text-xs font-semibold tracking-[0.96px] text-accent uppercase">{i + 1}</p>
+                    <p className="text-[17px] font-semibold text-parchment">{step.title}</p>
+                    <p className="text-sm text-muted">{step.text}</p>
+                  </li>
+                ))}
+              </ol>
+              <button type="button" onClick={() => setCreating(true)} className={`${primaryButton} self-start`}>
+                {lessonsList.create}
+              </button>
+            </section>
+          ) : !lessons.data || lessons.data.length === 0 ? (
             <p role="status" className="text-sm text-muted">
-              {lessons.isLoading ? lessonsList.loading : lessons.isError ? lessonsList.offline : lessonsList.empty}
+              {lessons.isLoading ? lessonsList.loading : lessons.isError ? lessonsList.offline : ''}
             </p>
           ) : (
             <ul className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
               {lessons.data.map((lesson) => (
-                <li key={lesson.id}>
+                <li key={lesson.id} className="flex flex-col rounded-2xl border border-line bg-surface hover:bg-surface-2">
                   <Link
                     to={`/teacher/lessons/${lesson.id}`}
-                    className="flex h-full flex-col gap-2 rounded-2xl border border-line bg-surface p-4 hover:bg-surface-2 focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:outline-none"
+                    className="flex flex-1 flex-col gap-2 rounded-t-2xl p-4 focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:outline-none"
                   >
                     <span className="flex items-center justify-between gap-2 text-xs text-dim">
                       <span className="truncate">{subjectName.get(lesson.subject_id) ?? '—'}</span>
@@ -131,6 +170,23 @@ export default function LessonsListPage() {
                       {lessonsList.version(lesson.version)}
                     </span>
                   </Link>
+                  <div className="flex items-center justify-end gap-2 border-t border-line-soft px-2 py-1">
+                    {copy.error?.id === lesson.id && (
+                      <p role="alert" className="flex-1 px-2 text-xs font-semibold text-accent">
+                        {copy.error.message}
+                      </p>
+                    )}
+                    <button
+                      type="button"
+                      title={lessonsList.copyHint}
+                      disabled={copy.busyId !== null}
+                      onClick={() => void copy.run(lesson)}
+                      className="inline-flex min-h-10 items-center gap-2 rounded-[10px] px-3 text-sm font-semibold text-muted hover:text-parchment focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:outline-none disabled:opacity-50"
+                    >
+                      {copy.busyId === lesson.id && <Spinner />}
+                      {copy.busyId === lesson.id ? lessonsList.copying : lessonsList.copy}
+                    </button>
+                  </div>
                 </li>
               ))}
             </ul>

@@ -77,6 +77,13 @@ export interface ServerAttemptResult {
 }
 
 /** Дрібні значення пристрою: device_id, остання відома сесія переклички. */
+/** Незбережена правка редактора уроків. key — `<сутність>:<id>:<поле>`. */
+export interface EditorDraft {
+  key: string
+  value: unknown
+  updatedAt: number
+}
+
 export interface MetaRecord {
   key: string
   value: unknown

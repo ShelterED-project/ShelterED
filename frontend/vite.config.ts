@@ -115,6 +115,9 @@ export default defineConfig({
         // символ, а старі .woff цільовим браузерам не потрібні. Версія кешу змінюється з кожною
         // збіркою (хеш файлів).
         globPatterns: ['**/*.{js,css,html,svg,png,ico}', '**/*-{cyrillic,cyrillic-ext,latin,latin-ext}-[0-9]*.woff2'],
+        // Важкі бібліотеки редактора вчителя (стискання відео, імпорт PDF) не кешуємо наперед:
+        // учням вони не потрібні, а вчитель працює з редактором онлайн.
+        globIgnores: ['**/editor-lib-*.js'],
         cleanupOutdatedCaches: true,
         // Будь-яка сторінка без мережі відкривається з index.html, але не API й медіа.
         navigateFallback: 'index.html',
@@ -143,6 +146,16 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),
+    },
+  },
+  build: {
+    rolldownOptions: {
+      output: {
+        chunkFileNames: (chunk) =>
+          chunk.moduleIds.some((id) => /node_modules[/\\](mediabunny|pdfjs-dist)[/\\]/.test(id))
+            ? 'assets/editor-lib-[name]-[hash].js'
+            : 'assets/[name]-[hash].js',
+      },
     },
   },
   server: { proxy: apiProxy },
