@@ -12,7 +12,12 @@
   у маніфесті пакета й може звірити завантажене);
 - `source_sha256` — хеш файла, який надіслав клієнт. За ним перевіряється ідемпотентність:
   повтор того самого файла під тим самим `media_id` → наявний запис, без повторного перекодування.
-Для відео й субтитрів вони однакові.
+Для відео й субтитрів вони однакові; для відео, яке стискає сервер, `source_sha256` лишається
+хешем оригіналу, а `sha256` після стиснення описує готовий MP4.
+
+Відео від браузера без WebCodecs (`kind=video_source`, до `MEDIA_MAX_VIDEO_SOURCE_BYTES`)
+зберігається як оригінал під `video_source/…` із `processing_status = 'processing'` і стискається
+Celery-задачею `media.process_video` (ffmpeg, `services/video.py`); дедуплікації оригіналів немає.
 
 Дедуплікація: якщо файл з таким самим вмістом (sha256, розмір, тип) уже є у сховищі, новий запис
 посилається на його `storage_key`, а щойно записана копія видаляється. Тож один файл може
@@ -47,8 +52,24 @@ MEDIA_TYPES: dict[str, dict[str, str]] = {
     "video": {"video/mp4": "mp4", "video/webm": "webm"},
     "image": {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp"},
     "subtitles": {"text/vtt": "vtt"},
+    # Оригінал, який стисне сервер: будь-що, що читає ffmpeg; GIF-анімація теж стає відео.
+    "video_source": {
+        "video/mp4": "mp4",
+        "video/webm": "webm",
+        "video/quicktime": "mov",
+        "video/ogg": "ogv",
+        "application/ogg": "ogv",
+        "image/gif": "gif",
+    },
 }
 HEAD_BYTES = 16
+# Атоми, з яких починається файл QuickTime (.mov) без `ftyp`.
+_MOV_ATOMS = {b"ftyp", b"moov", b"mdat", b"wide", b"free", b"skip", b"pnot"}
+
+
+def stored_kind(kind: str) -> str:
+    """`kind` запису: оригінал для стиснення сервером — теж відео."""
+    return "video" if kind == "video_source" else kind
 
 
 def max_bytes(kind: str, settings: Settings) -> int:
@@ -56,6 +77,7 @@ def max_bytes(kind: str, settings: Settings) -> int:
         "video": settings.media_max_video_bytes,
         "image": settings.media_max_image_bytes,
         "subtitles": settings.media_max_subtitles_bytes,
+        "video_source": settings.media_max_video_source_bytes,
     }[kind]
 
 
@@ -66,6 +88,12 @@ def magic_ok(mime: str, head: bytes) -> bool:
             return head[4:8] == b"ftyp"
         case "video/webm":
             return head[:4] == b"\x1a\x45\xdf\xa3"
+        case "video/quicktime":
+            return head[4:8] in _MOV_ATOMS
+        case "video/ogg" | "application/ogg":
+            return head[:4] == b"OggS"
+        case "image/gif":
+            return head[:6] in (b"GIF87a", b"GIF89a")
         case "image/jpeg":
             return head[:3] == b"\xff\xd8\xff"
         case "image/png":
@@ -273,6 +301,10 @@ def media_out(media: MediaAsset, storage: MediaStorage) -> MediaOut:
         duration_s=media.duration_s,
         subtitles_id=media.subtitles_id,
         url=storage.url(media.storage_key),
+        processing_status=media.processing_status,  # type: ignore[arg-type]
+        processing_error=media.processing_error,
+        attribution=media.attribution,
+        source_url=media.source_url,
     )
 
 
@@ -287,10 +319,15 @@ async def upload(
     content_length: int | None,
     chunks: AsyncIterable[bytes],
     settings: Settings,
+    attribution: str | None = None,
+    source_url: str | None = None,
 ) -> tuple[MediaAsset, bool]:
     """Ідемпотентно за клієнтським `media_id`: повтор того самого файла повертає наявний запис,
-    інший файл під тим самим id — 409."""
+    інший файл під тим самим id — 409. `kind=video_source` — запис відео в стані `processing`
+    (задачу стиснення ставить викликач після commit). `attribution`, `source_url` — для файлів
+    із Wikimedia Commons."""
     mime = parse_content_type(kind, content_type)
+    record_kind = stored_kind(kind)
     limit = max_bytes(kind, settings)
     if content_length is not None and content_length > limit:
         raise _too_large(limit)
@@ -309,7 +346,7 @@ async def upload(
             # (source_sha256) з перевіреною сигнатурою й так означає однаковий тип.
             for name, ours, theirs in (
                 ("uploaded_by", user.id, existing.uploaded_by),
-                ("kind", kind, existing.kind),
+                ("kind", record_kind, existing.kind),
                 ("source_sha256", stream.sha.hexdigest(), existing.source_sha256),
             )
             if ours != theirs
@@ -343,26 +380,33 @@ async def upload(
         size, sha = stream.size, stream.sha.hexdigest()
         source_sha = sha
     # Спершу пишемо, потім шукаємо дубль: паралельні завантаження однакового вмісту в гіршому
-    # разі лишать дві копії, але ніколи не втратять файл.
-    shared_key = await session.scalar(
-        select(MediaAsset.storage_key)
-        .where(
-            MediaAsset.sha256 == sha,
-            MediaAsset.size_bytes == size,
-            MediaAsset.kind == kind,
-            MediaAsset.mime_type == mime,
+    # разі лишать дві копії, але ніколи не втратять файл. Оригінали для стиснення не діляться:
+    # задача стиснення замінює й видаляє файл свого запису.
+    shared_key = None
+    if kind != "video_source":
+        shared_key = await session.scalar(
+            select(MediaAsset.storage_key)
+            .where(
+                MediaAsset.sha256 == sha,
+                MediaAsset.size_bytes == size,
+                MediaAsset.kind == kind,
+                MediaAsset.mime_type == mime,
+                MediaAsset.processing_status == "ready",
+            )
+            .limit(1)
         )
-        .limit(1)
-    )
     values = {
         "id": media_id,
-        "kind": kind,
+        "kind": record_kind,
         "storage_key": shared_key or key,
         "mime_type": mime,
         "size_bytes": size,
         "sha256": sha,
         "source_sha256": source_sha,
         "uploaded_by": user.id,
+        "processing_status": "processing" if kind == "video_source" else "ready",
+        "attribution": attribution,
+        "source_url": source_url,
     }
     keep_new = False
     try:
@@ -424,9 +468,6 @@ async def set_subtitles(
             raise AppError("NOT_FOUND", "Subtitles not found", status_code=404)
         if subtitles.kind != "subtitles":
             raise _invalid("subtitles_id must reference a VTT file")
-    elif media.subtitles_id is not None and await _published_lessons(session, media.id):
-        # Опублікований урок пройшов перевірку субтитрів — не ламаємо її заднім числом.
-        raise AppError("LESSON_PUBLISHED", "Video is used in a published lesson", status_code=409)
     if media.subtitles_id == subtitles_id:
         return media, []
     media.subtitles_id = subtitles_id

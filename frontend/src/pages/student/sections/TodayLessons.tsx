@@ -17,6 +17,7 @@ import { db } from '@/shared/db/db'
 import type { LessonProgressRecord } from '@/shared/db/types'
 import { timeLabel } from '@/shared/lib/date'
 import { navRoutes, todayLessons as t } from '../content'
+import BackpackLine from './BackpackLine'
 
 type View = 'days' | 'subjects'
 type Day = 'today' | 'next'
@@ -195,6 +196,7 @@ function Backpack({ count, builtAt }: { count: number | null; builtAt: string | 
           {count === null ? t.backpackMissing : t.backpackReady}
         </p>
         <p className="text-xs leading-4 text-dim">{count === null ? t.backpackMissingText : t.backpackText(count)}</p>
+        {count !== null && count > 0 && <BackpackLine className="pt-1.5" />}
       </div>
       {builtAt && <p className="shrink-0 text-xs leading-4 text-dim">{t.updated(timeLabel(builtAt))}</p>}
     </section>

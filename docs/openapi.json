@@ -595,7 +595,7 @@
         "properties": {
           "body": {
             "additionalProperties": true,
-            "description": "Вміст картки (текст, розмітка, підписи)",
+            "description": "Текст картки (`body.text`) — проста розмітка Markdown, решту клієнт показує як є: `**жирний**`, `*курсив*`, рядок `## ` — заголовок, рядки `- ` — список, рядки `1. ` — нумерований список, порожній рядок — новий абзац. HTML не підтримується (показується текстом). Підпис медіа — `body.caption` (звичайний текст).",
             "title": "Body",
             "type": "object"
           },
@@ -641,10 +641,159 @@
         "title": "CardCreate",
         "type": "object"
       },
+      "CardMediaOut": {
+        "description": "Медіа картки для редактора: файл і (для відео) його субтитри.",
+        "examples": [
+          {
+            "attribution": "Автор: Addemf · CC0 · Wikimedia Commons",
+            "duration_s": 95,
+            "id": "0192f0a0-0000-7000-8000-000000000501",
+            "kind": "video",
+            "mime_type": "video/mp4",
+            "processing_status": "ready",
+            "sha256": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+            "size_bytes": 7340032,
+            "source_url": "https://commons.wikimedia.org/wiki/File:Triangle.gif",
+            "subtitles_id": "0192f0a0-0000-7000-8000-000000000502",
+            "url": "/media/video/0192f0a0-0000-7000-8000-000000000501-3f9a.mp4"
+          }
+        ],
+        "properties": {
+          "attribution": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Автор і ліцензія («Автор: … · CC BY-SA 4.0 · Wikimedia Commons»); показувати під медіа. `null` — власний файл вчителя",
+            "title": "Attribution"
+          },
+          "duration_s": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration S"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "video",
+              "image",
+              "subtitles"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "mime_type": {
+            "description": "Тип збереженого файла (зображення зазвичай image/webp)",
+            "title": "Mime Type",
+            "type": "string"
+          },
+          "processing_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Чому не вдалося стиснути відео (для вчителя)",
+            "title": "Processing Error"
+          },
+          "processing_status": {
+            "default": "ready",
+            "description": "Відео, яке стискає сервер: `processing` (у черзі; `url`, `size_bytes`, `sha256` — ще оригіналу), `ready`, `failed` (причина — `processing_error`). Урок із відео не в стані `ready` не публікується. Решта медіа — одразу `ready`.",
+            "enum": [
+              "processing",
+              "ready",
+              "failed"
+            ],
+            "title": "Processing Status",
+            "type": "string"
+          },
+          "sha256": {
+            "description": "sha256 збереженого файла (того, що за `url`)",
+            "title": "Sha256",
+            "type": "string"
+          },
+          "size_bytes": {
+            "title": "Size Bytes",
+            "type": "integer"
+          },
+          "source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Сторінка джерела (Wikimedia Commons)",
+            "title": "Source Url"
+          },
+          "subtitles": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MediaOut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "VTT-субтитри відео (`null` — немає)"
+          },
+          "subtitles_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "VTT-субтитри до відео",
+            "title": "Subtitles Id"
+          },
+          "url": {
+            "description": "URL файла (роздає Nginx)",
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "mime_type",
+          "size_bytes",
+          "sha256",
+          "duration_s",
+          "subtitles_id",
+          "url",
+          "subtitles"
+        ],
+        "title": "CardMediaOut",
+        "type": "object"
+      },
       "CardOut": {
         "properties": {
           "body": {
             "additionalProperties": true,
+            "description": "Текст картки (`body.text`) — проста розмітка Markdown, решту клієнт показує як є: `**жирний**`, `*курсив*`, рядок `## ` — заголовок, рядки `- ` — список, рядки `1. ` — нумерований список, порожній рядок — новий абзац. HTML не підтримується (показується текстом). Підпис медіа — `body.caption` (звичайний текст).",
             "title": "Body",
             "type": "object"
           },
@@ -656,6 +805,17 @@
           "kind": {
             "title": "Kind",
             "type": "string"
+          },
+          "media": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CardMediaOut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Медіа картки з URL і субтитрами (у відповідях редактора; у пакеті немає)"
           },
           "media_asset_id": {
             "anyOf": [
@@ -694,7 +854,7 @@
         "examples": [
           {
             "body": {
-              "text": "Новий текст"
+              "text": "## Дроби\n\n**Дріб** — частина цілого"
             }
           }
         ],
@@ -709,6 +869,7 @@
                 "type": "null"
               }
             ],
+            "description": "Текст картки (`body.text`) — проста розмітка Markdown, решту клієнт показує як є: `**жирний**`, `*курсив*`, рядок `## ` — заголовок, рядки `- ` — список, рядки `1. ` — нумерований список, порожній рядок — новий абзац. HTML не підтримується (показується текстом). Підпис медіа — `body.caption` (звичайний текст).",
             "title": "Body"
           },
           "kind": {
@@ -1253,6 +1414,35 @@
         "title": "ClassUpdate",
         "type": "object"
       },
+      "CommonsImport": {
+        "description": "Імпорт файла з Wikimedia Commons під клієнтським `id`.",
+        "examples": [
+          {
+            "id": "0192f0a0-0000-7000-8000-000000000501",
+            "url": "https://commons.wikimedia.org/wiki/File:Fraction_Circles_Shaded.png"
+          }
+        ],
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "url": {
+            "description": "Сторінка файла `https://commons.wikimedia.org/wiki/File:…`, пряме посилання `https://upload.wikimedia.org/…` або назва `File:…`",
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "url"
+        ],
+        "title": "CommonsImport",
+        "type": "object"
+      },
       "CurrentLessonOut": {
         "description": "Урок, що йде в момент `at`; `item` = null, якщо зараз уроку немає.",
         "properties": {
@@ -1717,6 +1907,32 @@
         "title": "HealthResponse",
         "type": "object"
       },
+      "ItemOrder": {
+        "description": "Новий порядок карток модуля чи питань тесту: `ids` — усі елементи, кожен раз.",
+        "examples": [
+          {
+            "ids": [
+              "0192f0a0-0000-7000-8000-000000000321"
+            ]
+          }
+        ],
+        "properties": {
+          "ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "maxItems": 1000,
+            "title": "Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "ids"
+        ],
+        "title": "ItemOrder",
+        "type": "object"
+      },
       "JoinCodeRequest": {
         "description": "Новий код класу; старий одразу перестає діяти. Без терміну — безстроковий.",
         "examples": [
@@ -1826,6 +2042,42 @@
         "title": "KnowledgeMapSubject",
         "type": "object"
       },
+      "LessonCopy": {
+        "description": "Копія уроку в нову чернетку. `id` генерує клієнт; повтор ідемпотентний.",
+        "examples": [
+          {
+            "id": "0192f0a0-0000-7000-8000-000000000302",
+            "title": "Дроби (7-Б)"
+          }
+        ],
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "pattern": "^[^\\x00-\\x1f]+$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Назва копії; без неї — як у джерела",
+            "title": "Title"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "LessonCopy",
+        "type": "object"
+      },
       "LessonCreate": {
         "description": "Новий урок (чернетка). `id` генерує клієнт; повтор ідемпотентний.",
         "examples": [
@@ -1898,6 +2150,7 @@
             "author_id": "0192f0a0-0000-7000-8000-0000000000bb",
             "grade": 7,
             "id": "0192f0a0-0000-7000-8000-000000000301",
+            "limit_bytes": 52428800,
             "main_part": "Розбір задач на уроці.",
             "modules": [],
             "shelter_part": "Переглянь коротке відео й розв'яжи 3 задачі.",
@@ -1907,7 +2160,16 @@
             "tests": [],
             "title": "Звичайні дроби",
             "updated_at": "2026-11-05T10:00:00Z",
-            "version": 1
+            "version": 1,
+            "warnings": [
+              {
+                "card_id": "0192f0a0-0000-7000-8000-000000000321",
+                "check": "video_subtitles",
+                "media_asset_id": "0192f0a0-0000-7000-8000-000000000501",
+                "message": "Video has no VTT subtitles",
+                "module_id": "0192f0a0-0000-7000-8000-000000000311"
+              }
+            ]
           }
         ],
         "properties": {
@@ -1915,6 +2177,19 @@
             "format": "uuid",
             "title": "Author Id",
             "type": "string"
+          },
+          "copied_from_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Урок-джерело, якщо урок створено копіюванням",
+            "title": "Copied From Id"
           },
           "grade": {
             "anyOf": [
@@ -1931,6 +2206,12 @@
             "format": "uuid",
             "title": "Id",
             "type": "string"
+          },
+          "limit_bytes": {
+            "default": 0,
+            "description": "Ліміт розміру уроку й пакета дня (публікація понад нього не пройде)",
+            "title": "Limit Bytes",
+            "type": "integer"
           },
           "main_part": {
             "title": "Main Part",
@@ -1999,6 +2280,16 @@
           "version": {
             "title": "Version",
             "type": "integer"
+          },
+          "warnings": {
+            "default": [],
+            "description": "Зауваження, які не блокують публікацію (формат — як у `details` помилки `LESSON_NOT_PUBLISHABLE`): `video_subtitles` — відео без VTT-субтитрів (`module_id`, `card_id`, `media_asset_id`)",
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Warnings",
+            "type": "array"
           }
         },
         "required": [
@@ -2294,6 +2585,18 @@
       "MediaManifestItem": {
         "description": "Медіафайл для кешу Service Worker (окремий URL, кешується незалежно від пакета).",
         "properties": {
+          "attribution": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Автор і ліцензія (показувати учневі під медіа); `null` — немає",
+            "title": "Attribution"
+          },
           "id": {
             "format": "uuid",
             "title": "Id",
@@ -2321,6 +2624,18 @@
           "size_bytes": {
             "title": "Size Bytes",
             "type": "integer"
+          },
+          "source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Сторінка джерела (Wikimedia Commons)",
+            "title": "Source Url"
           },
           "subtitles_id": {
             "anyOf": [
@@ -2355,16 +2670,32 @@
       "MediaOut": {
         "examples": [
           {
+            "attribution": "Автор: Addemf · CC0 · Wikimedia Commons",
+            "duration_s": 95,
             "id": "0192f0a0-0000-7000-8000-000000000501",
             "kind": "video",
             "mime_type": "video/mp4",
+            "processing_status": "ready",
             "sha256": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
             "size_bytes": 7340032,
+            "source_url": "https://commons.wikimedia.org/wiki/File:Triangle.gif",
             "subtitles_id": "0192f0a0-0000-7000-8000-000000000502",
             "url": "/media/video/0192f0a0-0000-7000-8000-000000000501-3f9a.mp4"
           }
         ],
         "properties": {
+          "attribution": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Автор і ліцензія («Автор: … · CC BY-SA 4.0 · Wikimedia Commons»); показувати під медіа. `null` — власний файл вчителя",
+            "title": "Attribution"
+          },
           "duration_s": {
             "anyOf": [
               {
@@ -2395,6 +2726,29 @@
             "title": "Mime Type",
             "type": "string"
           },
+          "processing_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Чому не вдалося стиснути відео (для вчителя)",
+            "title": "Processing Error"
+          },
+          "processing_status": {
+            "default": "ready",
+            "description": "Відео, яке стискає сервер: `processing` (у черзі; `url`, `size_bytes`, `sha256` — ще оригіналу), `ready`, `failed` (причина — `processing_error`). Урок із відео не в стані `ready` не публікується. Решта медіа — одразу `ready`.",
+            "enum": [
+              "processing",
+              "ready",
+              "failed"
+            ],
+            "title": "Processing Status",
+            "type": "string"
+          },
           "sha256": {
             "description": "sha256 збереженого файла (того, що за `url`)",
             "title": "Sha256",
@@ -2403,6 +2757,18 @@
           "size_bytes": {
             "title": "Size Bytes",
             "type": "integer"
+          },
+          "source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Сторінка джерела (Wikimedia Commons)",
+            "title": "Source Url"
           },
           "subtitles_id": {
             "anyOf": [
@@ -2516,6 +2882,42 @@
           "duration_min"
         ],
         "title": "ModuleCreate",
+        "type": "object"
+      },
+      "ModuleOrder": {
+        "description": "Новий порядок модулів однієї частини уроку: `ids` — усі модулі частини, кожен раз.",
+        "examples": [
+          {
+            "ids": [
+              "0192f0a0-0000-7000-8000-000000000311"
+            ],
+            "part": "shelter"
+          }
+        ],
+        "properties": {
+          "ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "maxItems": 1000,
+            "title": "Ids",
+            "type": "array"
+          },
+          "part": {
+            "enum": [
+              "shelter",
+              "main"
+            ],
+            "title": "Part",
+            "type": "string"
+          }
+        },
+        "required": [
+          "part",
+          "ids"
+        ],
+        "title": "ModuleOrder",
         "type": "object"
       },
       "ModuleOut": {
@@ -3032,11 +3434,13 @@
             "date_to": "2026-11-15",
             "media": [
               {
+                "attribution": "Автор: Addemf · CC0 · Wikimedia Commons",
                 "id": "0192f0a0-0000-7000-8000-000000000501",
                 "kind": "video",
                 "needed_on": "2026-11-09",
                 "sha256": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
                 "size_bytes": 7340032,
+                "source_url": "https://commons.wikimedia.org/wiki/File:Triangle.gif",
                 "subtitles_id": "0192f0a0-0000-7000-8000-000000000502",
                 "url": "/media/video/0192f0a0-0000-7000-8000-000000000501-3f9a.mp4"
               }
@@ -3299,7 +3703,7 @@
         "type": "object"
       },
       "PackQuestion": {
-        "description": "Питання тесту в пакеті. `answer_key` (id правильних варіантів) є лише в тренувальному\nтесті (`window_enabled = false`) для миттєвої перевірки офлайн; в оцінюваному тесті з\nвікном поля немає зовсім — оцінює сервер після синхронізації.",
+        "description": "Питання тесту в пакеті (формат за `kind` — як у `QuestionCreate`). `answer_key` і\n`explanation` (розбір помилки) є лише в тренувальному тесті (`window_enabled = false`) для\nмиттєвої перевірки й розбору офлайн; в оцінюваному тесті з вікном цих полів немає зовсім —\nоцінює сервер після синхронізації. Поля, яких немає, у JSON відсутні (не `null`).",
         "properties": {
           "answer_key": {
             "anyOf": [
@@ -3310,10 +3714,27 @@
                 "type": "array"
               },
               {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
                 "type": "null"
               }
             ],
             "title": "Answer Key"
+          },
+          "explanation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Explanation"
           },
           "id": {
             "format": "uuid",
@@ -3323,12 +3744,15 @@
           "kind": {
             "enum": [
               "single",
-              "multiple"
+              "multiple",
+              "text",
+              "match"
             ],
             "title": "Kind",
             "type": "string"
           },
           "options": {
+            "description": "Варіанти; для `match` — ліві елементи",
             "items": {
               "$ref": "#/components/schemas/Option"
             },
@@ -3346,6 +3770,21 @@
           "prompt": {
             "title": "Prompt",
             "type": "string"
+          },
+          "right_options": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/Option"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Лише `match`: праві елементи",
+            "title": "Right Options"
           }
         },
         "required": [
@@ -3649,12 +4088,13 @@
         "type": "object"
       },
       "QuestionCreate": {
-        "description": "Питання тесту. `answer_key` — id правильних варіантів (`single` — рівно один).",
+        "description": "Питання тесту. Формат залежить від `kind`:\n\n- `single` / `multiple` — `options` (2–10 варіантів), `answer_key` — id правильних варіантів\n  (`single` — рівно один);\n- `text` — учень вводить коротку відповідь: `options` порожній, `answer_key` — 1–20 прийнятних\n  відповідей (до 200 символів). Порівняння без різниці регістру, пробілів на краях і всередині\n  (кілька поспіль = один) та виду апострофа (’ ʼ ' ` — однакові);\n- `match` — відповідність: `options` — ліві елементи (2–10), `right_options` — праві (2–10,\n  можна із зайвими), `answer_key` — `{id лівого: id правого}` для кожного лівого, праві не\n  повторюються.\n\nПитання зараховане лише повністю правильною відповіддю (часткових балів немає).\n`explanation` (до 2000 символів) — розбір для учня; у пакет потрапляє лише в тренувальному\nтесті (без вікна), разом із ключем.",
         "examples": [
           {
             "answer_key": [
               "a"
             ],
+            "explanation": "Зведи до спільного знаменника: 2/4 + 1/4 = 3/4.",
             "id": "0192f0a0-0000-7000-8000-000000000341",
             "kind": "single",
             "options": [
@@ -3670,17 +4110,95 @@
             "points": 1,
             "position": 1,
             "prompt": "Скільки буде 1/2 + 1/4?"
+          },
+          {
+            "answer_key": [
+              "чисельник"
+            ],
+            "id": "0192f0a0-0000-7000-8000-000000000342",
+            "kind": "text",
+            "options": [],
+            "points": 1,
+            "position": 2,
+            "prompt": "Як називається число над рискою дробу?"
+          },
+          {
+            "answer_key": {
+              "l1": "r2",
+              "l2": "r1"
+            },
+            "id": "0192f0a0-0000-7000-8000-000000000343",
+            "kind": "match",
+            "options": [
+              {
+                "id": "l1",
+                "text": "1/2"
+              },
+              {
+                "id": "l2",
+                "text": "1/4"
+              }
+            ],
+            "points": 2,
+            "position": 3,
+            "prompt": "Зістав дріб і десятковий запис",
+            "right_options": [
+              {
+                "id": "r1",
+                "text": "0,25"
+              },
+              {
+                "id": "r2",
+                "text": "0,5"
+              },
+              {
+                "id": "r3",
+                "text": "0,75"
+              }
+            ]
           }
         ],
         "properties": {
           "answer_key": {
-            "items": {
-              "type": "string"
-            },
-            "maxItems": 10,
-            "minItems": 1,
-            "title": "Answer Key",
-            "type": "array"
+            "anyOf": [
+              {
+                "items": {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "patternProperties": {
+                  "^[A-Za-z0-9_-]+$": {
+                    "maxLength": 16,
+                    "minLength": 1,
+                    "pattern": "^[A-Za-z0-9_-]+$",
+                    "type": "string"
+                  }
+                },
+                "propertyNames": {
+                  "maxLength": 16,
+                  "minLength": 1
+                },
+                "type": "object"
+              }
+            ],
+            "title": "Answer Key"
+          },
+          "explanation": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Розбір для учня (у пакеті лише в тренувальному тесті)",
+            "title": "Explanation"
           },
           "id": {
             "format": "uuid",
@@ -3690,17 +4208,19 @@
           "kind": {
             "enum": [
               "single",
-              "multiple"
+              "multiple",
+              "text",
+              "match"
             ],
             "title": "Kind",
             "type": "string"
           },
           "options": {
+            "default": [],
             "items": {
               "$ref": "#/components/schemas/Option"
             },
             "maxItems": 10,
-            "minItems": 2,
             "title": "Options",
             "type": "array"
           },
@@ -3722,6 +4242,22 @@
             "minLength": 1,
             "title": "Prompt",
             "type": "string"
+          },
+          "right_options": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/Option"
+                },
+                "maxItems": 10,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Лише `match`: праві елементи",
+            "title": "Right Options"
           }
         },
         "required": [
@@ -3729,7 +4265,6 @@
           "position",
           "kind",
           "prompt",
-          "options",
           "answer_key"
         ],
         "title": "QuestionCreate",
@@ -3738,11 +4273,32 @@
       "QuestionOut": {
         "properties": {
           "answer_key": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Answer Key",
-            "type": "array"
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              }
+            ],
+            "title": "Answer Key"
+          },
+          "explanation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Explanation"
           },
           "id": {
             "format": "uuid",
@@ -3750,6 +4306,12 @@
             "type": "string"
           },
           "kind": {
+            "enum": [
+              "single",
+              "multiple",
+              "text",
+              "match"
+            ],
             "title": "Kind",
             "type": "string"
           },
@@ -3772,6 +4334,21 @@
             "title": "Prompt",
             "type": "string"
           },
+          "right_options": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/Option"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Лише `match`: праві елементи",
+            "title": "Right Options"
+          },
           "test_id": {
             "format": "uuid",
             "title": "Test Id",
@@ -3785,13 +4362,16 @@
           "kind",
           "prompt",
           "options",
+          "right_options",
           "answer_key",
-          "points"
+          "points",
+          "explanation"
         ],
         "title": "QuestionOut",
         "type": "object"
       },
       "QuestionUpdate": {
+        "description": "Часткова зміна; після злиття з наявним питання перевіряється як `QuestionCreate`.\nЗміна `kind` на не-`match` без `right_options` прибирає праві елементи.\n`explanation: null` чи `\"\"` — прибрати пояснення.",
         "examples": [
           {
             "points": 2
@@ -3802,9 +4382,26 @@
             "anyOf": [
               {
                 "items": {
+                  "maxLength": 200,
+                  "minLength": 1,
                   "type": "string"
                 },
                 "type": "array"
+              },
+              {
+                "patternProperties": {
+                  "^[A-Za-z0-9_-]+$": {
+                    "maxLength": 16,
+                    "minLength": 1,
+                    "pattern": "^[A-Za-z0-9_-]+$",
+                    "type": "string"
+                  }
+                },
+                "propertyNames": {
+                  "maxLength": 16,
+                  "minLength": 1
+                },
+                "type": "object"
               },
               {
                 "type": "null"
@@ -3812,12 +4409,26 @@
             ],
             "title": "Answer Key"
           },
+          "explanation": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Explanation"
+          },
           "kind": {
             "anyOf": [
               {
                 "enum": [
                   "single",
-                  "multiple"
+                  "multiple",
+                  "text",
+                  "match"
                 ],
                 "type": "string"
               },
@@ -3877,6 +4488,20 @@
               }
             ],
             "title": "Prompt"
+          },
+          "right_options": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/Option"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Right Options"
           }
         },
         "title": "QuestionUpdate",
@@ -5553,15 +6178,34 @@
                 "properties": {
                   "answers": {
                     "additionalProperties": {
-                      "items": {
-                        "maxLength": 16,
-                        "minLength": 1,
-                        "pattern": "^[A-Za-z0-9_-]+$",
-                        "type": "string"
-                      },
-                      "type": "array"
+                      "anyOf": [
+                        {
+                          "items": {
+                            "maxLength": 200,
+                            "type": "string"
+                          },
+                          "maxItems": 10,
+                          "type": "array"
+                        },
+                        {
+                          "maxProperties": 10,
+                          "patternProperties": {
+                            "^[A-Za-z0-9_-]+$": {
+                              "maxLength": 16,
+                              "minLength": 1,
+                              "pattern": "^[A-Za-z0-9_-]+$",
+                              "type": "string"
+                            }
+                          },
+                          "propertyNames": {
+                            "maxLength": 16,
+                            "minLength": 1
+                          },
+                          "type": "object"
+                        }
+                      ]
                     },
-                    "description": "question_id -> id обраних варіантів",
+                    "description": "question_id -> відповідь: `single`/`multiple` — id обраних варіантів; `text` — `[введений текст]`; `match` — `{id лівого: id правого}`",
                     "maxProperties": 200,
                     "propertyNames": {
                       "format": "uuid"
@@ -11335,7 +11979,7 @@
     },
     "/lessons": {
       "get": {
-        "description": "Вчитель — свої уроки, адмін — уроки вчителів своєї школи.",
+        "description": "Вчитель — свої уроки, адмін — уроки вчителів своєї школи. `scope=school`: для вчителя —\nопубліковані уроки колег зі школи (для копіювання, `POST /lessons/{id}/copy`).",
         "operationId": "list_lessons_lessons_get",
         "parameters": [
           {
@@ -11356,6 +12000,20 @@
                 }
               ],
               "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "scope",
+            "required": false,
+            "schema": {
+              "default": "mine",
+              "enum": [
+                "mine",
+                "school"
+              ],
+              "title": "Scope",
+              "type": "string"
             }
           }
         ],
@@ -11616,7 +12274,7 @@
         ]
       },
       "get": {
-        "description": "Урок з модулями, картками, тестами й питаннями (з ключами відповідей).",
+        "description": "Урок з модулями, картками (з медіа: URL, розмір, субтитри), тестами й питаннями (з\nключами відповідей і поясненнями). `size_bytes` / `limit_bytes` — для «X МБ з 50 МБ».",
         "operationId": "get_lesson_lessons__lesson_id__get",
         "parameters": [
           {
@@ -11809,6 +12467,118 @@
         ]
       }
     },
+    "/lessons/{lesson_id}/copy": {
+      "post": {
+        "description": "Копія уроку в нову чернетку вчителя: модулі, картки, тести, питання (з ключами й\nпоясненнями). Джерело — свій урок або урок колеги зі школи (чернетка чи опублікований).\nId елементів копії генерує сервер детерміновано від `id` копії, тож повтор нічого не дублює.\nМедіа не дублюються: свої — ті самі записи; медіа колеги — нові записи вчителя на той самий\nфайл (інші `id`, той самий `url`), щоб вчитель міг прив'язати субтитри. Розклад і результати\nучнів не копіюються. `copied_from_id` копії — джерело.",
+        "operationId": "copy_lesson_lessons__lesson_id__copy_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "lesson_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Lesson Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LessonCopy"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Повтор із тим самим `id` (той самий автор і джерело): наявна копія"
+          },
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LessonOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Не автентифіковано"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Недостатньо прав"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Не знайдено"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "ID_CONFLICT: під цим `id` інший урок"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Copy Lesson",
+        "tags": [
+          "lessons"
+        ]
+      }
+    },
     "/lessons/{lesson_id}/modules": {
       "post": {
         "operationId": "create_module_lessons__lesson_id__modules_post",
@@ -11920,9 +12690,122 @@
         ]
       }
     },
+    "/lessons/{lesson_id}/modules/order": {
+      "put": {
+        "description": "Новий порядок модулів частини `part`: позиції стають 1..n у порядку `ids`. `ids` —\nусі модулі цієї частини, кожен раз. Ідемпотентно. Відповідь — модулі частини з картками.",
+        "operationId": "reorder_modules_lessons__lesson_id__modules_order_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "lesson_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Lesson Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModuleOrder"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ModuleOut"
+                  },
+                  "title": "Response Reorder Modules Lessons  Lesson Id  Modules Order Put",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Не автентифіковано"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Недостатньо прав"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Не знайдено"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "LESSON_PUBLISHED"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "ORDER_MISMATCH: `ids` не збігаються з поточним набором; `details` — `missing` (бракує), `unknown` (чужі чи видалені), `duplicates` (повтори)"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Reorder Modules",
+        "tags": [
+          "lessons"
+        ]
+      }
+    },
     "/lessons/{lesson_id}/publish": {
       "post": {
-        "description": "Публікація після серверних перевірок: є укриттєва частина, у кожного відео є VTT-субтитри,\nурок і пакети днів, де він уже стоїть, — у межах ліміту. Повторна публікація після правок\nзбільшує `version`. Ідемпотентно. Пакети класів, де урок стоїть, перезбирає Celery.",
+        "description": "Публікація після серверних перевірок: є укриттєва частина й модулі, тести мають питання,\nусі відео стиснуті (`video_processing` — ще стискаються, `video_failed` — не вдалося), урок і\nпакети днів, де він уже стоїть, — у межах ліміту. Відео без VTT-субтитрів не блокує\nпублікацію: це попередження `video_subtitles` у `warnings` уроку. Повторна публікація після\nправок збільшує `version`. Ідемпотентно. Пакети класів, де урок стоїть, перезбирає Celery.",
         "operationId": "publish_lesson_lessons__lesson_id__publish_post",
         "parameters": [
           {
@@ -11990,9 +12873,10 @@
                       },
                       {
                         "card_id": "0192f0a0-0000-7000-8000-000000000321",
-                        "check": "video_subtitles",
+                        "check": "video_processing",
                         "media_asset_id": "0192f0a0-0000-7000-8000-000000000501",
-                        "message": "Video has no VTT subtitles"
+                        "message": "Video is still being compressed",
+                        "module_id": "0192f0a0-0000-7000-8000-000000000311"
                       },
                       {
                         "check": "lesson_size",
@@ -12233,6 +13117,146 @@
         ]
       }
     },
+    "/media/import/commons": {
+      "post": {
+        "description": "Вчитель додає зображення чи відео з Wikimedia Commons за посиланням (сторінка файла,\n`upload.wikimedia.org` або `File:Назва`). Лише суспільне надбання, CC0, CC BY, CC BY-SA;\nпідпис автора й ліцензії — в `attribution` (показувати під медіа; він же в маніфесті пакета).\n\nЗображення (і SVG/TIFF як PNG/JPEG) — мініатюра 1280 px, далі як звичайне завантаження\n(WebP). Відео й GIF стискає сервер: відповідь із `processing_status: \"processing\"`, як у\n`PUT /media/{id}?kind=video_source`. Ідемпотентно за `id`. Ліміт —\n`RATE_LIMIT_COMMONS_IMPORT` запитів на вчителя за `RATE_LIMIT_COMMONS_IMPORT_WINDOW_S`.",
+        "operationId": "import_from_commons_media_import_commons_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CommonsImport"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Повтор із тим самим файлом під тим самим id: наявний запис"
+          },
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MediaOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Не автентифіковано"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Недостатньо прав"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "COMMONS_FILE_NOT_FOUND"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "ID_CONFLICT: інший файл під цим id"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "MEDIA_TOO_LARGE"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "UNSUPPORTED_MEDIA_TYPE (аудіо, PDF…)"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "INVALID_COMMONS_URL; LICENSE_NOT_ALLOWED (`details.license`); INVALID_MEDIA, INVALID_IMAGE"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RATE_LIMITED (з `Retry-After`)"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "COMMONS_UNAVAILABLE: Commons не відповів"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Import From Commons",
+        "tags": [
+          "media"
+        ]
+      }
+    },
     "/media/{media_id}": {
       "get": {
         "operationId": "get_media_media__media_id__get",
@@ -12428,7 +13452,7 @@
         ]
       },
       "put": {
-        "description": "Вчитель завантажує файл потоком. `id` генерує клієнт; повтор ідемпотентний.\n\nДозволено: відео `video/mp4`, `video/webm` (≤ 30 МБ); зображення `image/jpeg`, `image/png`,\n`image/webp` (≤ 2 МБ); субтитри `text/vtt` у UTF-8 (≤ 200 КБ). Вміст перевіряється за\nсигнатурою. Зображення зберігаються як WebP (довша сторона ≤ 1280 px, без EXIF/GPS), якщо\nтак менше або в оригіналі є метадані: `mime_type`, `size_bytes`, `sha256` і `url` у відповіді\nописують збережений файл. Відео без субтитрів не пройде публікацію уроку: прив'яжіть VTT через\n`PATCH /media/{id}`.",
+        "description": "Вчитель завантажує файл потоком. `id` генерує клієнт; повтор ідемпотентний.\n\nДозволено: відео `video/mp4`, `video/webm` (≤ 30 МБ); зображення `image/jpeg`, `image/png`,\n`image/webp` (≤ 2 МБ); субтитри `text/vtt` у UTF-8 (≤ 200 КБ). Вміст перевіряється за\nсигнатурою. Зображення зберігаються як WebP (довша сторона ≤ 1280 px, без EXIF/GPS), якщо\nтак менше або в оригіналі є метадані: `mime_type`, `size_bytes`, `sha256` і `url` у відповіді\nописують збережений файл. Субтитри до відео прив'язуються через `PATCH /media/{id}`; без них\nурок публікується з попередженням `video_subtitles`.\n\n`kind=video_source` — оригінал відео, який стисне сервер (для браузерів без WebCodecs):\n`video/mp4`, `video/webm`, `video/quicktime`, `video/ogg`, `image/gif` (≤ 300 МБ). Запис\nстворюється як `kind: \"video\"` з `processing_status: \"processing\"`; стан видно в\n`GET /media/{id}` і в картці уроку (`ready` — стиснуте MP4 ≤ 30 МБ, `failed` — причина в\n`processing_error`: `too_large`, `invalid_video`, `timeout`, `source_missing`). Картку з таким\nвідео можна створити одразу, але урок не опублікується, доки відео не `ready`.",
         "operationId": "upload_media_media__media_id__put",
         "parameters": [
           {
@@ -12449,7 +13473,8 @@
               "enum": [
                 "video",
                 "image",
-                "subtitles"
+                "subtitles",
+                "video_source"
               ],
               "title": "Kind",
               "type": "string"
@@ -12490,6 +13515,18 @@
         ],
         "requestBody": {
           "content": {
+            "application/ogg": {
+              "schema": {
+                "format": "binary",
+                "type": "string"
+              }
+            },
+            "image/gif": {
+              "schema": {
+                "format": "binary",
+                "type": "string"
+              }
+            },
             "image/jpeg": {
               "schema": {
                 "format": "binary",
@@ -12515,6 +13552,18 @@
               }
             },
             "video/mp4": {
+              "schema": {
+                "format": "binary",
+                "type": "string"
+              }
+            },
+            "video/ogg": {
+              "schema": {
+                "format": "binary",
+                "type": "string"
+              }
+            },
+            "video/quicktime": {
               "schema": {
                 "format": "binary",
                 "type": "string"
@@ -12835,7 +13884,7 @@
     },
     "/modules/{module_id}/cards": {
       "post": {
-        "description": "Картка; для `image`/`video` — власний файл вчителя того самого типу.",
+        "description": "Картка; для `image`/`video` — власний файл вчителя того самого типу. Текст картки —\nпроста розмітка (див. `body` у схемі).",
         "operationId": "create_card_modules__module_id__cards_post",
         "parameters": [
           {
@@ -12945,6 +13994,119 @@
         ]
       }
     },
+    "/modules/{module_id}/cards/order": {
+      "put": {
+        "description": "Новий порядок карток модуля: позиції 1..n у порядку `ids` (усі картки модуля, кожна\nраз). Ідемпотентно.",
+        "operationId": "reorder_cards_modules__module_id__cards_order_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "module_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Module Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ItemOrder"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/CardOut"
+                  },
+                  "title": "Response Reorder Cards Modules  Module Id  Cards Order Put",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Не автентифіковано"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Недостатньо прав"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Не знайдено"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "LESSON_PUBLISHED"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "ORDER_MISMATCH: `ids` не збігаються з поточним набором; `details` — `missing` (бракує), `unknown` (чужі чи видалені), `duplicates` (повтори)"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Reorder Cards",
+        "tags": [
+          "lessons"
+        ]
+      }
+    },
     "/packs/manifest": {
       "get": {
         "description": "Актуальні (найновіші) версії пакетів класу на дні `from`..`to` (до 7 днів): версії,\nхеші, розміри. Дні без уроків у розкладі пакета не мають. Медіа — окремим списком з\nгоризонтом «сьогодні + завтра» (за часом школи) у межах діапазону. Учень — свого класу,\nвчитель — своїх класів, адмін — класів школи; батьки — ні. `class_id` — query-параметр.",
@@ -13009,11 +14171,13 @@
                   "date_to": "2026-11-15",
                   "media": [
                     {
+                      "attribution": "Автор: Addemf · CC0 · Wikimedia Commons",
                       "id": "0192f0a0-0000-7000-8000-000000000501",
                       "kind": "video",
                       "needed_on": "2026-11-09",
                       "sha256": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
                       "size_bytes": 7340032,
+                      "source_url": "https://commons.wikimedia.org/wiki/File:Triangle.gif",
                       "subtitles_id": "0192f0a0-0000-7000-8000-000000000502",
                       "url": "/media/video/0192f0a0-0000-7000-8000-000000000501-3f9a.mp4"
                     }
@@ -15390,7 +16554,7 @@
     },
     "/tests/{test_id}/questions": {
       "post": {
-        "description": "Нове питання змінює максимум балів: наявні спроби переоцінюються (Celery).",
+        "description": "Нове питання змінює максимум балів: наявні спроби переоцінюються (Celery). Типи:\n`single`, `multiple`, `text`, `match` — формат полів у схемі `QuestionCreate`.",
         "operationId": "create_question_tests__test_id__questions_post",
         "parameters": [
           {
@@ -15495,6 +16659,119 @@
           }
         ],
         "summary": "Create Question",
+        "tags": [
+          "lessons"
+        ]
+      }
+    },
+    "/tests/{test_id}/questions/order": {
+      "put": {
+        "description": "Новий порядок питань тесту: позиції 1..n у порядку `ids` (усі питання тесту, кожне\nраз). Ідемпотентно. Оцінка спроб від порядку не залежить.",
+        "operationId": "reorder_questions_tests__test_id__questions_order_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "test_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Test Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ItemOrder"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/QuestionOut"
+                  },
+                  "title": "Response Reorder Questions Tests  Test Id  Questions Order Put",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Не автентифіковано"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Недостатньо прав"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Не знайдено"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "LESSON_PUBLISHED"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "ORDER_MISMATCH: `ids` не збігаються з поточним набором; `details` — `missing` (бракує), `unknown` (чужі чи видалені), `duplicates` (повтори)"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Reorder Questions",
         "tags": [
           "lessons"
         ]

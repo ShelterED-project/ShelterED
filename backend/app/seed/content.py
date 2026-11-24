@@ -1215,3 +1215,90 @@ LESSONS: list[dict[str, Any]] = [
         },
     },
 ]
+
+# Медіа демо-уроків (`app/seed/media/`, картки — у `lessons_extra.json`): файл → (автор,
+# ліцензія, сторінка на Wikimedia Commons або None для власних). Підпис іде в
+# `media_asset.attribution`; повні відомості й зміни — `app/seed/media/CREDITS.md`.
+OWN_MEDIA = ("ShelterED team", "CC BY 4.0", None)
+_COMMONS = "https://commons.wikimedia.org/wiki/File:"
+MEDIA: dict[str, tuple[str, str, str | None]] = {
+    "5-nat-melting-ice.mp4": (
+        "Always Shooting",
+        "CC BY 2.0",
+        _COMMONS + "Melting_Ice_time_lapse.webm",
+    ),
+    "7-phys-iss-earth.mp4": (
+        "NASA Johnson Space Center",
+        "Public domain",
+        _COMMONS + "ISS074-E-42588-43581-20251214-Day_-_2025-12-14_ISS074_994_Day.webm",
+    ),
+    "7-geom-angle-sum-proof.mp4": (
+        "Addemf",
+        "CC0",
+        _COMMONS + "Animation_of_Proof_that_Triangle_Angles_Sum_to_180.gif",
+    ),
+    "5-ukr-narbut-letter-a.jpg": (
+        "Георгій Нарбут",
+        "Public domain",
+        _COMMONS + "Нарбут_Г.І._Літера_А_1919_р.jpg",
+    ),
+    "5-math-abacus.jpg": (
+        "Syced",
+        "CC0",
+        _COMMONS + "Abacus_actually_in_use_at_kimono_shop_in_Otaru.jpg",
+    ),
+    "5-math-fraction-circles.png": ("Zapotz", "CC0", _COMMONS + "Fraction_Circles_Shaded.png"),
+    "5-math-cake-quarters.png": ("R. S. Shaw", "Public domain", _COMMONS + "Cake_quarters.svg"),
+    "5-hist-trypillia-pottery.jpg": (
+        "Ismoon",
+        "CC BY-SA 4.0",
+        _COMMONS + "Two_painted_pottery_jar._Cucuteni-Tripolje_culture._Neues_Museum.jpg",
+    ),
+    "5-hist-peresopnytsia-gospel.jpg": (
+        "Федуско із Самбора",
+        "Public domain",
+        _COMMONS + "Peresopnytske_Gospel_04.jpg",
+    ),
+    "5-hist-excavation-poltava.jpg": (
+        "Badiamand",
+        "CC BY 4.0",
+        _COMMONS + "Archaeological_excavations_in_the_Poltava_region.jpg",
+    ),
+    "5-hist-roman-numerals-clock.jpg": (
+        "Ales Krivec",
+        "CC0",
+        _COMMONS + "Roman_numerals_on_alarm_clock_(Unsplash).jpg",
+    ),
+    "7-ukr-autumn-leaf.jpg": (
+        "池田正樹 (Masaki Ikeda)",
+        "Public domain",
+        _COMMONS + "Autumn_Leaf_08Nov17.jpg",
+    ),
+    "7-hist-zlatniks.jpg": (
+        "Петров Эдуард",
+        "CC0",
+        _COMMONS + "Zlatniks_of_prince_Vladimir.jpg",
+    ),
+    "7-hist-desiatynna-foundation.jpg": (
+        "Світлана Фалілєєва (Lanaphoto)",
+        "CC BY-SA 4.0",
+        _COMMONS + "Десятинна_церква,_фундамент,_Київ.jpg",
+    ),
+    "7-eng-football.jpg": (
+        "Kenneth Paik, U.S. National Archives and Records Administration",
+        "Public domain",
+        _COMMONS + "PLAYING_FOOTBALL_AT_MULKY_SQUARE_PARK,_A_CITY_FACILITY_-_NARA_-_553512.jpg",
+    ),
+    "7-alg-balance-anim.mp4": OWN_MEDIA,
+    "5-ukr-vowels.png": OWN_MEDIA,
+    "5-math-number-classes.png": OWN_MEDIA,
+    "5-math-number-ray.png": OWN_MEDIA,
+    "5-hist-timeline.png": OWN_MEDIA,
+    "5-nat-water-cycle.png": OWN_MEDIA,
+    "5-eng-clock-times.png": OWN_MEDIA,
+    "5-inf-linear-flowchart.png": OWN_MEDIA,
+    "7-alg-balance.png": OWN_MEDIA,
+    "7-geom-exterior-angle.png": OWN_MEDIA,
+    "7-eng-ed-endings.png": OWN_MEDIA,
+    "7-inf-branching-flowchart.png": OWN_MEDIA,
+}

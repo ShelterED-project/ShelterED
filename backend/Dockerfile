@@ -14,6 +14,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     ENVIRONMENT=prod \
     MEDIA_ROOT=/app/media
 
+# ffmpeg: стиснення відео сервером (Celery-задача `media.process_video`).
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN useradd --create-home --uid 1000 app
 
 WORKDIR /app

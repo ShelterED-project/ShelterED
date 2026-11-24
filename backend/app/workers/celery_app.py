@@ -44,6 +44,7 @@ celery_app = Celery(
         "app.workers.wellbeing",
         "app.workers.retention",
         "app.workers.outbox",
+        "app.workers.media",
     ],
 )
 
@@ -53,7 +54,7 @@ celery_app.conf.update(
     accept_content=["json"],
     timezone="UTC",
     enable_utc=True,
-    task_queues=[Queue("default"), Queue("push"), Queue("sync")],
+    task_queues=[Queue("default"), Queue("push"), Queue("sync"), Queue("media")],
     task_default_queue="default",
     # Задача підтверджується після виконання, а не при отриманні: якщо воркер
     # упаде посеред задачі, вона повернеться в чергу («нічого не губимо»).

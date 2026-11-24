@@ -22,13 +22,15 @@ app/
 |---|---|---|
 | `auth` | вхід, JWT (access + refresh), OAuth 2.0 PKCE, ролі й перевірка доступу | B3, B15.3 |
 | `school` | школи, класи, користувачі, членство, розклад | B2.1, B2.3, B5.1, B5.2 |
-| `lessons` | предмети, уроки, модулі, картки, тести, медіа, тест із вікном | B2.2, B5.3, B5.4, B11 |
+| `lessons` | предмети, уроки, модулі, картки, тести, медіа, тест із вікном, порядок і копія уроку | B2.2, B5.3, B5.4, B11 |
 | `packs` | пакети знань «Рюкзак»: збірка, маніфест, завантаження | B2.4, B6 |
 | `sync` | прийом подій `POST /sync/events`, `GET /sync/changes`, агрегати | B2.5, B9, B10 |
 | `rollcall` | сесії й статуси переклички | B2.6, B12 |
 | `alerts` | тривоги: опитування API тривог, ручна тривога, журнал | B2.6, B7 |
 
 Також `push` (Web Push, B8) і `tutor` (проксі до AI-сервісу, B13). Ендпоінти `tutor` поки заглушки контракту (B4, `app/api/stub.py`): перевіряють автентифікацію й роль і відповідають `501 NOT_IMPLEMENTED`; успішні відповіді описані в OpenAPI з прикладами.
+
+Спільні модулі без власного домену: `services/idempotency.py` (створення з клієнтським id), `services/grading.py` (перевірка відповіді на питання тесту за типом `single`/`multiple`/`text`/`match`; нею користуються `sync` і агрегати `stats`).
 
 Залежності між шарами йдуть в один бік: `api → services → models`. Роутер не звертається до БД напряму, а сервіс нічого не знає про HTTP.
 
@@ -102,7 +104,7 @@ Redis для розробки піднімається в Docker на порту
 
 ```
 docker compose -f docker-compose.dev.yml up -d redis
-celery -A app.workers.celery_app worker -Q default,push,sync -l info --pool=solo
+celery -A app.workers.celery_app worker -Q default,push,sync,media -l info --pool=solo
 ```
 
 `--pool=solo` потрібен лише на Windows (там Celery не підтримує стандартний prefork-пул); у Docker і на Linux цей прапорець не потрібен.
@@ -126,7 +128,7 @@ celery -A app.workers.celery_app beat -l info
 
 - API: команда за замовчуванням (`uvicorn ... --proxy-headers`), порт 8000, перевірка `GET /health` (живий) і `GET /health/ready` (БД і Redis);
 - міграції перед стартом API: `alembic upgrade head` (потрібен `DATABASE_URL_DIRECT`);
-- воркер: `celery -A app.workers.celery_app worker -Q default,push,sync -l info`;
+- воркер: `celery -A app.workers.celery_app worker -Q default,push,sync -l info` і окремий для стиснення відео: `-Q media --concurrency=1`;
 - beat (рівно один): `celery -A app.workers.celery_app beat -l info -s /tmp/celerybeat-schedule`.
 
 Обов'язкові змінні: `DATABASE_URL`, `DATABASE_URL_DIRECT` (для міграцій), `JWT_SECRET`, `REDIS_URL`, `REDIS_RESULT_URL`, `RATE_LIMIT_REDIS_URL` (усі три Redis-URL за замовчуванням дивляться на `localhost:6380`, у контейнері їх треба задати), для push — `VAPID_*`. `FORWARDED_ALLOW_IPS` — IP чи підмережа Nginx. Медіа пишуться в `/app/media` — туди монтується том, який роздає Nginx. `.env` в образ не потрапляє (`.dockerignore`).
@@ -136,6 +138,14 @@ celery -A app.workers.celery_app beat -l info
 ## Медіа
 
 `PUT /media/{id}` пише файл у том (`MEDIA_ROOT`, у контейнері `/app/media`) під ключем `<kind>/<id>-<random>.<ext>`; URL — `MEDIA_URL_PREFIX` + ключ. Зображення зберігаються як WebP (≤ 1280 px, без EXIF/GPS), тож `mime_type` зображення зазвичай `image/webp`. Однаковий вміст зберігається один раз: кілька записів можуть посилатися на один файл.
+
+Субтитри до відео не обов'язкові: урок без них публікується, а `LessonOut.warnings` містить попередження `video_subtitles` (`module_id`, `card_id`, `media_asset_id`).
+
+**Стиснення відео сервером.** Браузер вчителя зазвичай стискає відео сам (WebCodecs, MP4 H.264 ≤ 720p, ≤ 30 МБ). Браузер без WebCodecs шле оригінал: `PUT /media/{id}?kind=video_source` (`video/mp4`, `video/webm`, `video/quicktime`, `video/ogg`, `image/gif`; ≤ `MEDIA_MAX_VIDEO_SOURCE_BYTES`, 300 МБ, потоком у `video_source/…`). Запис — `kind: video` з `processing_status: processing`; Celery-задача `media.process_video` (черга `default`, `app/services/video.py`) запускає ffmpeg (`FFMPEG_PATH`; у Docker-образі встановлено): H.264 main ≤ 720p (пропорції, парні сторони), CRF 28 / maxrate 1,2 Мбіт/с, AAC 96 кбіт/с, `+faststart`, без метаданих. Успіх — `ready`, новий ключ `video/…mp4`, розмір, sha256, тривалість, оригінал видаляється. Результат > `MEDIA_MAX_VIDEO_BYTES` — `failed` з `processing_error: too_large` (також `invalid_video`, `timeout`, `source_missing`). Задача ідемпотентна. Урок із відео не в стані `ready` не публікується (`video_processing`, `video_failed`), а такі відео не рахуються в розмір уроку.
+
+**Імпорт з Wikimedia Commons.** `POST /media/import/commons` `{"id", "url"}` (сторінка файла, `upload.wikimedia.org` або `File:Назва`) — `app/services/commons.py`. Лише суспільне надбання, CC0, CC BY, CC BY-SA (інакше 422 `LICENSE_NOT_ALLOWED`); підпис («Автор: … · ліцензія · Wikimedia Commons») — у `attribution`, сторінка — `source_url`, обидва є в маніфесті пакета. Зображення (і SVG/TIFF як мініатюра) — мініатюра 1280 px через звичайний шлях зображень; відео й GIF — через стиснення сервером. Запити лише на `https://*.wikimedia.org` (кожен редирект перевіряється), User-Agent — `COMMONS_USER_AGENT` без контактів людей, ліміт `RATE_LIMIT_COMMONS_IMPORT` на вчителя.
+
+**Nginx.** Тіло `PUT /media/{id}` (оригінал відео до 300 МБ) має пройти проксі: у `location /api/` потрібні `client_max_body_size 300m;` (за замовчуванням Nginx — 1 МБ) і бажано `proxy_request_buffering off;` та довший `proxy_read_timeout`.
 
 **Для DevOps (Nginx).** URL медіа незмінні: кожен файл має унікальний ключ і ніколи не перезаписується (нова версія — новий ключ). Тому `location /media/` можна кешувати назавжди (`immutable`) і обов'язково лишити Range-запити (докачування після обриву мережі; у Nginx для статики вони ввімкнені за замовчуванням, `max_ranges` не обмежувати). Готовий блок (шлях `alias` — куди в контейнер Nginx змонтовано той самий том):
 
@@ -175,7 +185,7 @@ python -m app.cli seed
 
 - Школа в Києві (`region_code` 31), класи **5-А** (код `KYIV5A26`) і **7-Б** (`KYIV7B26`), по 12 учнів, PIN усіх учнів `1234` (вхід: код класу + ім'я й прізвище з `app/seed/content.py`, наприклад «Марія Бондаренко» в 5-А).
 - Дорослі: `demo.admin@example.com`, `demo.teacher5a@example.com`, `demo.teacher7b@example.com`, `demo.parent1..4@example.com` (батьки Марії Бондаренко, Івана Петренка — 5-А; Олександра Гончаренка, Михайла Бойка — 7-Б). Пароль спільний: зі змінної `SEED_PASSWORD` (≥ 8 символів, застосовується до всіх, у кого він інший, з відкликанням токенів) або згенерований і надрукований один раз при створенні акаунтів; у репозиторії його немає. Повторний запуск без `SEED_PASSWORD` паролі не змінює.
-- Предмети, розклад Пн–Пт (5–6 уроків з 08:30), 15 опублікованих уроків за модельними програмами НУШ (8 для 5 класу, 7 для 7 класу; укриття + основна частина, 2–3 модулі, тест), із них 4 тести з вікном (24/48 год), решта тренувальні. Уроки призначені на поточний і наступний тиждень, пакети «Рюкзака» обох класів перезбираються на 7 днів.
+- Предмети, розклад Пн–Пт (5–6 уроків з 08:30), 15 опублікованих уроків за модельними програмами НУШ (8 для 5 класу, 7 для 7 класу; укриття + основна частина, 2–4 модулі, тест), із них 4 тести з вікном (24/48 год), решта тренувальні. Доповнення уроків — `app/seed/lessons_extra.json` (нові модулі, картки з медіа й підписами, пояснення до питань, питання `text`/`match`); 31 медіафайл (~4,7 МБ) — `app/seed/media/`, автори й ліцензії — `app/seed/media/CREDITS.md` і `MEDIA` у `content.py` (власні схеми — ShelterED team, CC BY 4.0). Медіа завантажуються звичайним шляхом (`services/media.upload`, WebP) у сховище `MEDIA_ROOT` від імені вчителя класу, з `attribution`; файл, якого не стало у сховищі, записується знову. Уроки призначені на поточний і наступний тиждень, пакети «Рюкзака» обох класів перезбираються на 7 днів.
 - Закрита тренувальна тривога 5-А за попередній навчальний день і перекличка з 7 відмітками. Відповідей «Як ти зараз?» немає.
 
 ## Тести

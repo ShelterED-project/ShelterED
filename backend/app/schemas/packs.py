@@ -6,7 +6,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.schemas.lessons import ModuleOut, Option
+from app.schemas.lessons import ModuleOut, Option, QuestionKind
 from app.schemas.school import ScheduleItem
 
 CLASS_ID = "0192f0a0-0000-7000-8000-000000000001"
@@ -42,6 +42,10 @@ class MediaManifestItem(BaseModel):
     sha256: str
     subtitles_id: uuid.UUID | None = Field(description="VTT-субтитри до відео")
     needed_on: dt.date = Field(description="Перший день, на який файл потрібен")
+    attribution: str | None = Field(
+        None, description="Автор і ліцензія (показувати учневі під медіа); `null` — немає"
+    )
+    source_url: str | None = Field(None, description="Сторінка джерела (Wikimedia Commons)")
 
 
 class PackManifestOut(BaseModel):
@@ -80,6 +84,8 @@ class PackManifestOut(BaseModel):
                             "sha256": HASH,
                             "subtitles_id": "0192f0a0-0000-7000-8000-000000000502",
                             "needed_on": "2026-11-09",
+                            "attribution": "Автор: Addemf · CC0 · Wikimedia Commons",
+                            "source_url": "https://commons.wikimedia.org/wiki/File:Triangle.gif",
                         }
                     ],
                 }
@@ -89,17 +95,26 @@ class PackManifestOut(BaseModel):
 
 
 class PackQuestion(BaseModel):
-    """Питання тесту в пакеті. `answer_key` (id правильних варіантів) є лише в тренувальному
-    тесті (`window_enabled = false`) для миттєвої перевірки офлайн; в оцінюваному тесті з
-    вікном поля немає зовсім — оцінює сервер після синхронізації."""
+    """Питання тесту в пакеті (формат за `kind` — як у `QuestionCreate`). `answer_key` і
+    `explanation` (розбір помилки) є лише в тренувальному тесті (`window_enabled = false`) для
+    миттєвої перевірки й розбору офлайн; в оцінюваному тесті з вікном цих полів немає зовсім —
+    оцінює сервер після синхронізації. Поля, яких немає, у JSON відсутні (не `null`)."""
 
     id: uuid.UUID
     position: int
-    kind: Literal["single", "multiple"]
+    kind: QuestionKind
     prompt: str
-    options: list[Option]
+    options: list[Option] = Field(description="Варіанти; для `match` — ліві елементи")
+    right_options: list[Option] | None = Field(
+        default=None,
+        exclude_if=lambda v: v is None,
+        description="Лише `match`: праві елементи",
+    )
     points: int
-    answer_key: list[str] | None = Field(default=None, exclude_if=lambda v: v is None)
+    answer_key: list[str] | dict[str, str] | None = Field(
+        default=None, exclude_if=lambda v: v is None
+    )
+    explanation: str | None = Field(default=None, exclude_if=lambda v: v is None)
 
 
 class PackTest(BaseModel):

@@ -7,8 +7,9 @@ from sqlalchemy import func, select
 from app import cli
 from app.core.config import get_settings
 from app.core.security import verify_secret
+from app.core.storage import LocalMediaStorage
 from app.models.alerts import AlertEvent
-from app.models.lessons import Card, Lesson, Module, Question, Subject, Test
+from app.models.lessons import Card, Lesson, MediaAsset, Module, Question, Subject, Test
 from app.models.packs import KnowledgePack
 from app.models.push import PushSubscription
 from app.models.rollcall import RollCallSession, RollCallStatus
@@ -28,6 +29,23 @@ from app.services.lessons import publish_problems
 
 pytestmark = pytest.mark.anyio
 
+
+@pytest.fixture(autouse=True)
+def seed_storage(tmp_path, monkeypatch) -> LocalMediaStorage:
+    """Медіа сіду пишуться в тимчасовий каталог тесту, а не в MEDIA_ROOT."""
+    from app.seed import runner
+
+    storage = LocalMediaStorage(tmp_path / "seed-media", "/media")
+    original = runner.seed
+
+    async def seed_with_storage(*args, **kwargs):
+        kwargs.setdefault("storage", storage)
+        return await original(*args, **kwargs)
+
+    monkeypatch.setitem(globals(), "seed", seed_with_storage)
+    return storage
+
+
 MODELS = [
     School,
     SchoolClass,
@@ -41,6 +59,7 @@ MODELS = [
     Card,
     Test,
     Question,
+    MediaAsset,
     LessonAssignment,
     AlertEvent,
     RollCallSession,
@@ -115,13 +134,13 @@ async def test_seeded_content_shape_and_publish_checks(db_session) -> None:
         modules = (
             await db_session.scalars(select(Module).where(Module.lesson_id == lesson.id))
         ).all()
-        assert 2 <= len(modules) <= 3
+        assert 2 <= len(modules) <= 4
         assert all(3 <= m.duration_min <= 5 for m in modules)
         test = await db_session.scalar(select(Test).where(Test.lesson_id == lesson.id))
         n = await db_session.scalar(
             select(func.count()).select_from(Question).where(Question.test_id == test.id)
         )
-        assert 4 <= n <= 6
+        assert 6 <= n <= 8
         windowed += test.window_enabled
     assert per_grade[5] >= 6 and per_grade[7] >= 6
     assert windowed >= 2
@@ -241,3 +260,75 @@ async def test_lesson_for_a_date_does_not_depend_on_seed_week(db_session) -> Non
         sid("lesson", lesson["key"]) for lesson in content.LESSONS if lesson["subject"] == "math"
     }
     assert len(math) == 2 and len(math & set(before.values())) == 2
+
+
+async def test_seed_media_and_extra_content(db_session, seed_storage, monkeypatch) -> None:
+    """Медіа демо-уроків: через справжнє сховище, з підписом, VTT, без дублів на повторі."""
+    import datetime as dt
+
+    from app.seed.runner import MEDIA_DIR, lessons_extra
+    from app.services import packs as packs_service
+
+    settings = get_settings()
+    today = dt.date(2026, 11, 24)  # вівторок
+    monkeypatch.setattr(
+        packs_service, "_now", lambda: dt.datetime(2026, 11, 24, 6, 0, tzinfo=dt.UTC)
+    )
+    result = await seed(db_session, settings, today=today, password="demo-password-42")
+    assert result.problems == {}
+    sources = sorted(p.name for p in MEDIA_DIR.iterdir() if p.suffix != ".md")
+    media = (await db_session.scalars(select(MediaAsset))).all()
+    assert sorted(m.id for m in media) == sorted(sid("media", name) for name in sources)
+    files = {p.name for p in seed_storage.root.rglob("*") if p.is_file()}
+    assert len(files) == len(sources)
+    teachers = {sid("user", "teacher5a"), sid("user", "teacher7b")}
+    by_id = {m.id: m for m in media}
+    for m in media:
+        assert m.uploaded_by in teachers and m.processing_status == "ready" and m.attribution
+    # Зображення перекодовані у WebP (або лишились меншим оригіналом), відео з субтитрами.
+    abacus = by_id[sid("media", "5-math-abacus.jpg")]
+    assert abacus.mime_type == "image/webp"
+    assert abacus.attribution == "Автор: Syced · CC0 · Wikimedia Commons"
+    assert abacus.source_url.startswith("https://commons.wikimedia.org/wiki/File:")
+    own = by_id[sid("media", "7-alg-balance.png")]
+    assert own.attribution == "Автор: ShelterED team · CC BY 4.0" and own.source_url is None
+    iss = by_id[sid("media", "7-phys-iss-earth.mp4")]
+    assert iss.kind == "video" and iss.subtitles_id == sid("media", "7-phys-iss-earth.vtt")
+
+    # Нові модулі, картки з медіа, пояснення й питання text/match.
+    fractions = sid("lesson", "5-math-fractions")
+    titles = (
+        await db_session.scalars(
+            select(Module.title)
+            .where(Module.lesson_id == fractions, Module.part == "main")
+            .order_by(Module.position)
+        )
+    ).all()
+    assert titles[-1] == "Частина від числа"
+    media_cards = await db_session.scalar(
+        select(func.count()).select_from(Card).where(Card.media_asset_id.is_not(None))
+    )
+    expected = sum(
+        1 for v in lessons_extra().values() for card in v["cards"] if card["kind"] != "text"
+    )
+    assert media_cards == expected
+    kinds = set((await db_session.scalars(select(Question.kind))).all())
+    assert kinds == {"single", "multiple", "text", "match"}
+    explained = await db_session.scalar(
+        select(func.count()).select_from(Question).where(Question.explanation.is_not(None))
+    )
+    assert explained == await db_session.scalar(select(func.count()).select_from(Question))
+
+    # Маніфест «Рюкзака» несе підпис медіа (медіа — на сьогодні й завтра).
+    klass = await db_session.get(SchoolClass, sid("class", "7b"))
+    manifest = await packs_service.manifest(db_session, klass, None, None, seed_storage)
+    assert manifest.media and all(item.attribution for item in manifest.media)
+
+    # Повтор: нічого не дублюється, файл, якого не стало у сховищі, відновлюється.
+    before = await counts(db_session)
+    lost = seed_storage.local_path(abacus.storage_key)
+    lost.unlink()
+    await seed(db_session, settings, today=today, password="demo-password-42")
+    assert await counts(db_session) == before
+    assert lost.is_file()
+    assert len({p.name for p in seed_storage.root.rglob("*") if p.is_file()}) == len(sources)

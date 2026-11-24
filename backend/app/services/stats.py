@@ -62,6 +62,7 @@ from app.schemas.stats import (
     StudyTime,
     TestStatusCounts,
 )
+from app.services.grading import is_correct
 from app.services.school import scheduled_lessons, school_tz
 
 STUDY_DAYS = 7
@@ -299,7 +300,9 @@ async def recompute_class(
 
     questions = (
         await session.execute(
-            select(Question.id, Question.test_id, Question.answer_key, Test.lesson_id)
+            select(
+                Question.id, Question.test_id, Question.kind, Question.answer_key, Test.lesson_id
+            )
             .join(Test, Test.id == Question.test_id)
             .where(Test.lesson_id.in_(lesson_ids))
         )
@@ -316,7 +319,6 @@ async def recompute_class(
     question_rows = []
     for q in questions:
         answers = credited.get(q.test_id, [])
-        key = set(q.answer_key or [])
         question_rows.append(
             {
                 "class_id": class_id,
@@ -324,7 +326,7 @@ async def recompute_class(
                 "test_id": q.test_id,
                 "lesson_id": q.lesson_id,
                 "answered": len(answers),
-                "correct": sum(bool(key) and set(a.get(str(q.id), [])) == key for a in answers),
+                "correct": sum(is_correct(q.kind, q.answer_key, a.get(str(q.id))) for a in answers),
                 "computed_at": now,
             }
         )

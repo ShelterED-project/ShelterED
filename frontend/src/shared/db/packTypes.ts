@@ -2,11 +2,14 @@
 
 export interface MediaManifestItem {
   id: string
-  kind: string
+  kind: 'video' | 'image' | 'subtitles'
+  /** Перший день, на який файл потрібен, YYYY-MM-DD */
   needed_on: string
   sha256: string
   size_bytes: number
+  /** VTT-субтитри до відео (окремий елемент маніфесту з kind 'subtitles') */
   subtitles_id: string | null
+  /** Відносний URL файла (/media/...), його кешує Service Worker */
   url: string
 }
 
@@ -47,8 +50,12 @@ export interface PackCard {
   id: string
   module_id: string
   position: number
+  /** text, image або video */
   kind: string
-  /** Форма залежить від kind (наприклад, {text} для текстової картки) */
+  /**
+   * Форма залежить від kind: body.text — простий Markdown (shared/ui/Markdown), body.caption —
+   * підпис медіа звичайним текстом.
+   */
   body: Record<string, unknown>
   media_asset_id: string | null
 }
@@ -69,18 +76,31 @@ export interface PackOption {
   text: string
 }
 
+export type QuestionKind = 'single' | 'multiple' | 'text' | 'match'
+
+/**
+ * Ключ відповіді: id правильних варіантів (single/multiple), прийнятні відповіді (text)
+ * або пари {id лівого: id правого} (match).
+ */
+export type AnswerKey = string[] | Record<string, string>
+
 export interface PackQuestion {
   id: string
-  kind: string
+  kind: QuestionKind
   prompt: string
+  /** Варіанти; для match — ліві елементи; для text — порожній */
   options: PackOption[]
+  /** Лише match: праві елементи (можуть бути зайві) */
+  right_options?: PackOption[] | null
   points: number
   position: number
   /**
    * Лише для тренувальних вправ. В оцінюваних тестах (з вікном) сервер поле не надсилає,
    * щоб учень не бачив відповідей, тому перевіряти треба `== null` (і null, і відсутність).
    */
-  answer_key?: string[] | null
+  answer_key?: AnswerKey | null
+  /** Розбір помилки, лише в тренувальному тесті */
+  explanation?: string | null
 }
 
 export interface PackTest {
@@ -121,6 +141,6 @@ export interface Pack {
   schedule: ScheduleItem[]
   lessons: PackLesson[]
   explanations: PackExplanation[]
-  /** Елементи в схемі не описані; медіа поки не використовуємо */
-  media: unknown[]
+  /** id медіа уроків пакета разом із субтитрами; URL файлів — у маніфесті (таблиця media) */
+  media: string[]
 }

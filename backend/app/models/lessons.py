@@ -35,6 +35,8 @@ class Lesson(TimestampMixin, Base):
         CheckConstraint("status IN ('draft', 'published')", name="status"),
         # «Мої уроки» вчителя.
         Index("ix_lesson_author_id", "author_id"),
+        # ON DELETE SET NULL при видаленні уроку-джерела.
+        Index("ix_lesson_copied_from_id", "copied_from_id"),
     )
 
     id: Mapped[uuid.UUID] = uuid_pk()
@@ -48,6 +50,11 @@ class Lesson(TimestampMixin, Base):
     version: Mapped[int] = mapped_column(Integer, server_default=text("1"))
     published_at: Mapped[dt.datetime | None]
     grade: Mapped[int | None] = mapped_column(SmallInteger)
+    # Урок-джерело, якщо урок створено копіюванням (`POST /lessons/{id}/copy`); за ним повтор
+    # копіювання з тим самим id розпізнається як той самий.
+    copied_from_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("lesson.id", ondelete="SET NULL")
+    )
 
 
 class Module(TimestampMixin, Base):
@@ -72,6 +79,9 @@ class MediaAsset(TimestampMixin, Base):
     __tablename__ = "media_asset"
     __table_args__ = (
         CheckConstraint("kind IN ('video', 'image', 'subtitles')", name="kind"),
+        CheckConstraint(
+            "processing_status IN ('processing', 'ready', 'failed')", name="processing_status"
+        ),
         # Пошук уже збереженого файла з тим самим вмістом (дедуплікація при завантаженні).
         Index("ix_media_asset_sha256", "sha256"),
     )
@@ -87,9 +97,18 @@ class MediaAsset(TimestampMixin, Base):
     sha256: Mapped[str]
     source_sha256: Mapped[str]
     duration_s: Mapped[int | None]
-    # VTT до відео; публікація відео без субтитрів заборонена (перевіряє сервіс).
+    # VTT до відео; без субтитрів урок публікується з попередженням (перевіряє сервіс).
     subtitles_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("media_asset.id"))
     uploaded_by: Mapped[uuid.UUID] = mapped_column(ForeignKey("app_user.id"))
+    # Відео, яке стискає сервер (оригінал від браузера без WebCodecs чи з Wikimedia Commons):
+    # `processing` — у черзі Celery (`storage_key` — оригінал), `ready` — готове, `failed` —
+    # не вдалося (`processing_error`). Решта медіа — одразу `ready`.
+    processing_status: Mapped[str] = mapped_column(server_default="ready")
+    processing_error: Mapped[str | None]
+    # Підпис автора й ліцензії («Автор: … · CC BY-SA 4.0 · Wikimedia Commons») і сторінка
+    # джерела; для власних файлів вчителя — NULL.
+    attribution: Mapped[str | None]
+    source_url: Mapped[str | None]
 
 
 class Card(TimestampMixin, Base):
@@ -128,7 +147,9 @@ class Test(TimestampMixin, Base):
 class Question(TimestampMixin, Base):
     __tablename__ = "question"
     __table_args__ = (
-        CheckConstraint("kind IN ('single', 'multiple')", name="kind"),
+        CheckConstraint("kind IN ('single', 'multiple', 'text', 'match')", name="kind"),
+        # Праві елементи є лише в питанні на відповідність (`match`).
+        CheckConstraint("(kind = 'match') = (right_options IS NOT NULL)", name="right_options"),
         UniqueConstraint("test_id", "position", name="uq_question_test_position"),
     )
 
@@ -137,8 +158,13 @@ class Question(TimestampMixin, Base):
     position: Mapped[int] = mapped_column(SmallInteger)
     kind: Mapped[str]
     prompt: Mapped[str]
-    # [{"id": "a", "text": "..."}]
+    # [{"id": "a", "text": "..."}]; `text` — порожній список, `match` — ліві елементи.
     options: Mapped[Any] = mapped_column(JSONB)
-    # Правильні id варіантів; перевірку робить сервер.
+    # Лише `match`: праві елементи [{"id": "x", "text": "..."}].
+    right_options: Mapped[Any | None] = mapped_column(JSONB(none_as_null=True))
+    # `single`/`multiple` — id правильних варіантів; `text` — прийнятні відповіді;
+    # `match` — {id лівого: id правого}. Перевірку робить сервер (services/grading).
     answer_key: Mapped[Any] = mapped_column(JSONB)
     points: Mapped[int] = mapped_column(SmallInteger, server_default=text("1"))
+    # Пояснення для розбору помилок; у пакет — лише для тренувального тесту.
+    explanation: Mapped[str | None]

@@ -1,6 +1,14 @@
 import Dexie, { type EntityTable, type Table } from 'dexie'
 import type { Pack } from './packTypes'
-import type { CardAnswer, LessonProgressRecord, MetaRecord, OutboxEvent, StoredSession } from './types'
+import type {
+  CardAnswer,
+  EditorDraft,
+  LessonProgressRecord,
+  MediaRecord,
+  MetaRecord,
+  OutboxEvent,
+  StoredSession,
+} from './types'
 
 export const db = new Dexie('shelter-ed') as Dexie & {
   /** Ключ [user_id, id модуля чи тесту] */
@@ -10,6 +18,8 @@ export const db = new Dexie('shelter-ed') as Dexie & {
   session: EntityTable<StoredSession, 'id'>
   cardAnswers: EntityTable<CardAnswer, 'cardId'>
   meta: EntityTable<MetaRecord, 'key'>
+  media: EntityTable<MediaRecord, 'id'>
+  editorDrafts: EntityTable<EditorDraft, 'key'>
 }
 
 db.version(1).stores({
@@ -68,4 +78,15 @@ db.version(6)
 // Стара таблиця без user_id більше не потрібна (дані перенесено у version 6).
 db.version(7).stores({
   progress: null,
+})
+
+// Медіа «Рюкзака»: URL файлів і субтитрів з маніфесту та позначка, чи файл уже в кеші SW.
+db.version(8).stores({
+  media: 'id',
+})
+
+// Редактор уроків вчителя: ще не збережені на сервері правки (текст, питання), щоб обрив мережі
+// чи закрита вкладка їх не загубили. Запис зникає, щойно сервер підтвердив збереження.
+db.version(9).stores({
+  editorDrafts: 'key',
 })

@@ -24,6 +24,11 @@ class MediaStorage(ABC):
     def url(self, key: str) -> str:
         """Публічний URL об'єкта (його кешує Service Worker)."""
 
+    def local_path(self, key: str) -> Path:
+        """Шлях до файла на диску для зовнішніх програм (ffmpeg). Об'єктному сховищу
+        знадобиться завантаження в тимчасовий файл — тоді метод перевизначається інакше."""
+        raise NotImplementedError
+
 
 class LocalMediaStorage(MediaStorage):
     def __init__(self, root: str | Path, url_prefix: str) -> None:
@@ -67,3 +72,6 @@ class LocalMediaStorage(MediaStorage):
 
     def url(self, key: str) -> str:
         return f"{self.url_prefix}/{key}"
+
+    def local_path(self, key: str) -> Path:
+        return self._path(key)

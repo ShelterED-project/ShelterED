@@ -229,13 +229,16 @@ async def test_publish_checks_and_edit_cycle(
     assert failed.status_code == 422
     err = failed.json()["error"]
     assert err["code"] == "LESSON_NOT_PUBLISHABLE"
-    # Усі провалені перевірки разом.
-    assert {d["check"] for d in err["details"]} == {"shelter_part", "video_subtitles"}
-    sub_detail = next(d for d in err["details"] if d["check"] == "video_subtitles")
-    assert sub_detail["card_id"] == card["id"] and sub_detail["media_asset_id"] == video["id"]
+    # Відео без субтитрів не блокує публікацію — лише попередження в уроці.
+    assert {d["check"] for d in err["details"]} == {"shelter_part"}
+    draft = (await client.get(f"/lessons/{lid}", headers=h)).json()
+    (sub_warning,) = draft["warnings"]
+    assert sub_warning["check"] == "video_subtitles"
+    assert sub_warning["card_id"] == card["id"] and sub_warning["media_asset_id"] == video["id"]
 
     vtt = (await upload(client, world.teacher_a, "subtitles", "text/vtt", VTT)).json()
     await client.patch(f"/media/{video['id']}", json={"subtitles_id": vtt["id"]}, headers=h)
+    assert (await client.get(f"/lessons/{lid}", headers=h)).json()["warnings"] == []
     await client.patch(f"/lessons/{lid}", json={"shelter_part": "Переглянь відео"}, headers=h)
     published = await client.post(f"/lessons/{lid}/publish", headers=h)
     assert published.status_code == 200, published.text
@@ -250,10 +253,14 @@ async def test_publish_checks_and_edit_cycle(
     assert (await add_module(client, world.teacher_a, lid, 2)).status_code == 409
     assert (await client.delete(f"/cards/{card['id']}", headers=h)).status_code == 409
     assert (await client.delete(f"/lessons/{lid}", headers=h)).status_code == 409
-    # Відв'язати субтитри від відео опублікованого уроку не можна.
-    assert (
-        await client.patch(f"/media/{video['id']}", json={"subtitles_id": None}, headers=h)
-    ).status_code == 409
+    # Субтитри не обов'язкові: відв'язати їх можна й від відео опублікованого уроку
+    # (пакети перезбираються), урок лишається опублікованим із попередженням.
+    unbound = await client.patch(f"/media/{video['id']}", json={"subtitles_id": None}, headers=h)
+    assert unbound.status_code == 200 and unbound.json()["subtitles_id"] is None
+    still = (await client.get(f"/lessons/{lid}", headers=h)).json()
+    assert still["status"] == "published"
+    assert [w["check"] for w in still["warnings"]] == ["video_subtitles"]
+    await client.patch(f"/media/{video['id']}", json={"subtitles_id": vtt["id"]}, headers=h)
 
     # Зняти з публікації → правка → нова публікація = нова версія.
     assert (await client.post(f"/lessons/{lid}/unpublish", headers=h)).json()["status"] == "draft"

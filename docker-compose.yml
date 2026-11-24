@@ -47,6 +47,8 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-shelter_db}
       REDIS_URL: redis://redis:6379/0
       ENVIRONMENT: ${APP_ENV:-production}
+    volumes:
+      - media_data:/app/media
     deploy:
       resources:
         limits:
@@ -58,7 +60,7 @@ services:
       dockerfile: Dockerfile
     container_name: shelter_celery
     restart: unless-stopped
-    command: ["celery", "-A", "app.worker.celery_app", "worker", "--concurrency=1", "--loglevel=info"]
+    command: ["celery", "-A", "app.workers.celery_app", "worker", "-Q", "default,push,sync", "--concurrency=1", "--loglevel=info"]
     profiles: ["cloud"]
     depends_on:
       redis:
@@ -68,10 +70,38 @@ services:
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-shelter_db}
       REDIS_URL: redis://redis:6379/0
+    # Спільне сховище медіа: задачі пакетів читають розміри файлів.
+    volumes:
+      - media_data:/app/media
     deploy:
       resources:
         limits:
           memory: 150M
+
+  # Окремий воркер для стиснення відео (ffmpeg, до 25 хв): не блокує push, синхронізацію й тривоги.
+  celery_media:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: shelter_celery_media
+    restart: unless-stopped
+    command: ["celery", "-A", "app.workers.celery_app", "worker", "-Q", "media", "--concurrency=1", "--loglevel=info"]
+    profiles: ["cloud"]
+    depends_on:
+      redis:
+        condition: service_healthy
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-shelter_db}
+      REDIS_URL: redis://redis:6379/0
+    volumes:
+      - media_data:/app/media
+    deploy:
+      resources:
+        limits:
+          # ffmpeg (720p) потребує ~200–300 МБ.
+          memory: 512M
 
   frontend:
     build:
@@ -84,6 +114,9 @@ services:
       - "443:443"
     depends_on:
       - backend
+    # Nginx віддає медіа уроків напряму зі спільного тому.
+    volumes:
+      - media_data:/srv/media:ro
     deploy:
       resources:
         limits:
@@ -91,3 +124,4 @@ services:
 
 volumes:
   postgres_data:
+  media_data:

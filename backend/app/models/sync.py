@@ -113,7 +113,7 @@ class Attempt(SyncChangeMixin, Base):
     )
     student_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("app_user.id", ondelete="CASCADE"))
     test_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("test.id"))
-    # {"<question_id>": ["a"]}
+    # {"<question_id>": ["a"]}; для `match` — {"<question_id>": {"<лівий id>": "<правий id>"}}
     answers: Mapped[Any] = mapped_column(JSONB)
     # Для вікна тесту рахується саме він.
     completed_at_client: Mapped[dt.datetime]

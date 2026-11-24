@@ -5,25 +5,25 @@ import iconBook from '@/assets/student/book.svg'
 import iconArrowLeft from '@/assets/student/lesson-arrow-left.svg'
 import iconVideo from '@/assets/student/lesson-video.svg'
 import { useAppSelector } from '@/app/hooks'
+import { PackCardContent } from '@/features/lessons/CardContent'
+import { cardField, plainText } from '@/features/lessons/cardField'
 import { completeModule } from '@/features/lessons/completeStep'
+import LessonIntro from '@/features/lessons/LessonIntro'
 import type { LessonStep } from '@/features/lessons/lessonSteps'
 import { useShelterLesson } from '@/features/lessons/useShelterLesson'
 import { TaskFrame } from '@/pages/shelter/sections/TaskCard'
+import type { FinishedTest } from '@/pages/shelter/sections/TaskCard'
 import TestResults from '@/pages/shelter/sections/TestResults'
+import TestReviewTask from '@/pages/shelter/sections/TestReviewTask'
 import TestTask from '@/pages/shelter/sections/TestTask'
 import { task } from '@/pages/shelter/content'
-import type { PackCard, PackModule } from '@/shared/db/packTypes'
+import type { PackModule } from '@/shared/db/packTypes'
 import { lessonPage as texts, navRoutes } from '../content'
 
 const buttonBase =
   'flex h-14 items-center justify-center gap-2 rounded-[10px] text-base leading-6 focus-visible:outline-none disabled:opacity-50'
 const outlineButton = `${buttonBase} border border-line-strong px-6 font-semibold text-parchment hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent/40`
 const primaryButton = `${buttonBase} bg-accent px-7 font-bold text-oil focus-visible:ring-2 focus-visible:ring-parchment/60`
-
-function cardText(card: PackCard, field: 'text' | 'caption'): string {
-  const value = card.body[field]
-  return typeof value === 'string' ? value : ''
-}
 
 /** Що буде далі: наступна картка модуля, а на останній — наступний крок уроку. */
 function NextPreview({ meta, title, video }: { meta: string; title: string; video: boolean }) {
@@ -46,6 +46,7 @@ function ModulePlayer({
   module,
   number,
   nextStep,
+  intro,
 }: {
   userId: string
   lessonId: string
@@ -53,6 +54,8 @@ function ModulePlayer({
   /** Номер модуля в уроці, з 1 */
   number: number
   nextStep: LessonStep | null
+  /** Вступ вчителя до уроку над першою карткою; порожній, коли урок уже почато */
+  intro: string
 }) {
   const cards = [...module.cards].sort((a, b) => a.position - b.position)
   const [index, setIndex] = useState(0)
@@ -77,8 +80,6 @@ function ModulePlayer({
   }
 
   const kind = card ? (texts.kinds[card.kind] ?? card.kind) : ''
-  const text = card ? cardText(card, 'text') : ''
-  const caption = card ? cardText(card, 'caption') : ''
 
   return (
     <>
@@ -115,11 +116,14 @@ function ModulePlayer({
         >
           {module.title}
         </h2>
-        {text && <p className="mt-4 max-w-[680px] text-lg leading-7 whitespace-pre-line text-muted">{text}</p>}
-        {card && card.kind !== 'text' && (
-          <div className="mt-4 rounded-2xl border border-line bg-surface-2 p-5">
-            {caption && <p className="text-[15px] leading-[22.5px] font-semibold text-parchment">{caption}</p>}
-            <p className="text-sm leading-5 text-dim">{texts.mediaPending}</p>
+        {index === 0 && intro && (
+          <div className="mt-4 max-w-[680px]">
+            <LessonIntro text={intro} />
+          </div>
+        )}
+        {card && (
+          <div className="mt-4 max-w-[680px]">
+            <PackCardContent key={card.id} card={card} />
           </div>
         )}
       </article>
@@ -128,7 +132,7 @@ function ModulePlayer({
         <NextPreview
           meta={texts.nextCard(index + 2)}
           // У картки немає заголовка: підпис медіа або початок тексту (обрізається в один рядок).
-          title={cardText(nextCard, 'caption') || cardText(nextCard, 'text') || (texts.kinds[nextCard.kind] ?? nextCard.kind)}
+          title={cardField(nextCard, 'caption') || plainText(cardField(nextCard, 'text')) || (texts.kinds[nextCard.kind] ?? nextCard.kind)}
           video={nextCard.kind === 'video'}
         />
       ) : (
@@ -161,8 +165,12 @@ function ModulePlayer({
 export default function LessonPlayer() {
   const { lesson, steps, currentStep, records } = useShelterLesson()
   const userId = useAppSelector((s) => s.auth.session?.user.id)
+  const [finished, setFinished] = useState<FinishedTest | null>(null)
 
   if (!lesson || !userId) return <TaskFrame title={task.empty} />
+  if (finished && finished.lessonId === lesson.lesson.id) {
+    return <TestReviewTask test={finished.test} answers={finished.answers} onContinue={() => setFinished(null)} />
+  }
   if (!currentStep) {
     return (
       <TaskFrame title={task.allDone}>
@@ -170,8 +178,18 @@ export default function LessonPlayer() {
       </TaskFrame>
     )
   }
+  const lessonId = lesson.lesson.id
   if (currentStep.kind === 'test') {
-    return <TestTask key={currentStep.id} userId={userId} lessonId={lesson.lesson.id} test={currentStep.test} />
+    const { test } = currentStep
+    return (
+      <TestTask
+        key={currentStep.id}
+        userId={userId}
+        lessonId={lessonId}
+        test={test}
+        onFinished={(answers) => setFinished({ lessonId, test, answers })}
+      />
+    )
   }
 
   const moduleSteps = steps.filter((step) => step.kind === 'module')
@@ -185,6 +203,8 @@ export default function LessonPlayer() {
       module={currentStep.module}
       number={moduleSteps.indexOf(currentStep) + 1}
       nextStep={nextStep}
+      // Вступ вчителя — лише поки урок не почато.
+      intro={steps.some((step) => step.done) ? '' : lesson.lesson.shelter_part}
     />
   )
 }

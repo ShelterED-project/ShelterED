@@ -30,7 +30,8 @@ function todayKey(): string {
   return new Date().toLocaleDateString('sv-SE')
 }
 
-function useOnline(): boolean {
+/** Браузер бачить мережу (navigator.onLine), оновлюється за подіями online/offline. */
+export function useOnline(): boolean {
   const [online, setOnline] = useState(() => navigator.onLine)
   useEffect(() => {
     const update = () => setOnline(navigator.onLine)
