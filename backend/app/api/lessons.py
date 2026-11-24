@@ -205,8 +205,9 @@ async def delete_lesson(lesson: EditableLesson, session: Session) -> Response:
                                     "message": "Lesson has no shelter part (shelter_part)",
                                 },
                                 {
-                                    "check": "video_subtitles",
-                                    "message": "Video has no VTT subtitles",
+                                    "check": "video_processing",
+                                    "message": "Video is still being compressed",
+                                    "module_id": "0192f0a0-0000-7000-8000-000000000311",
                                     "card_id": "0192f0a0-0000-7000-8000-000000000321",
                                     "media_asset_id": "0192f0a0-0000-7000-8000-000000000501",
                                 },
@@ -227,9 +228,11 @@ async def delete_lesson(lesson: EditableLesson, session: Session) -> Response:
 async def publish_lesson(
     lesson: OwnLesson, session: Session, settings: SettingsDep, storage: Storage
 ) -> LessonOut:
-    """Публікація після серверних перевірок: є укриттєва частина, у кожного відео є VTT-субтитри,
-    урок і пакети днів, де він уже стоїть, — у межах ліміту. Повторна публікація після правок
-    збільшує `version`. Ідемпотентно. Пакети класів, де урок стоїть, перезбирає Celery."""
+    """Публікація після серверних перевірок: є укриттєва частина й модулі, тести мають питання,
+    усі відео стиснуті (`video_processing` — ще стискаються, `video_failed` — не вдалося), урок і
+    пакети днів, де він уже стоїть, — у межах ліміту. Відео без VTT-субтитрів не блокує
+    публікацію: це попередження `video_subtitles` у `warnings` уроку. Повторна публікація після
+    правок збільшує `version`. Ідемпотентно. Пакети класів, де урок стоїть, перезбирає Celery."""
     lesson = await service.publish(session, lesson, settings)
     await enqueue_rebuild_for_lesson(lesson.id)
     return await service.lesson_out(session, lesson, storage, settings)

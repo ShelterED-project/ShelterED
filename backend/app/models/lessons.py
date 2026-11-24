@@ -79,6 +79,9 @@ class MediaAsset(TimestampMixin, Base):
     __tablename__ = "media_asset"
     __table_args__ = (
         CheckConstraint("kind IN ('video', 'image', 'subtitles')", name="kind"),
+        CheckConstraint(
+            "processing_status IN ('processing', 'ready', 'failed')", name="processing_status"
+        ),
         # Пошук уже збереженого файла з тим самим вмістом (дедуплікація при завантаженні).
         Index("ix_media_asset_sha256", "sha256"),
     )
@@ -94,9 +97,18 @@ class MediaAsset(TimestampMixin, Base):
     sha256: Mapped[str]
     source_sha256: Mapped[str]
     duration_s: Mapped[int | None]
-    # VTT до відео; публікація відео без субтитрів заборонена (перевіряє сервіс).
+    # VTT до відео; без субтитрів урок публікується з попередженням (перевіряє сервіс).
     subtitles_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("media_asset.id"))
     uploaded_by: Mapped[uuid.UUID] = mapped_column(ForeignKey("app_user.id"))
+    # Відео, яке стискає сервер (оригінал від браузера без WebCodecs чи з Wikimedia Commons):
+    # `processing` — у черзі Celery (`storage_key` — оригінал), `ready` — готове, `failed` —
+    # не вдалося (`processing_error`). Решта медіа — одразу `ready`.
+    processing_status: Mapped[str] = mapped_column(server_default="ready")
+    processing_error: Mapped[str | None]
+    # Підпис автора й ліцензії («Автор: … · CC BY-SA 4.0 · Wikimedia Commons») і сторінка
+    # джерела; для власних файлів вчителя — NULL.
+    attribution: Mapped[str | None]
+    source_url: Mapped[str | None]
 
 
 class Card(TimestampMixin, Base):

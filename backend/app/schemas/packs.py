@@ -42,6 +42,10 @@ class MediaManifestItem(BaseModel):
     sha256: str
     subtitles_id: uuid.UUID | None = Field(description="VTT-субтитри до відео")
     needed_on: dt.date = Field(description="Перший день, на який файл потрібен")
+    attribution: str | None = Field(
+        None, description="Автор і ліцензія (показувати учневі під медіа); `null` — немає"
+    )
+    source_url: str | None = Field(None, description="Сторінка джерела (Wikimedia Commons)")
 
 
 class PackManifestOut(BaseModel):
@@ -80,6 +84,8 @@ class PackManifestOut(BaseModel):
                             "sha256": HASH,
                             "subtitles_id": "0192f0a0-0000-7000-8000-000000000502",
                             "needed_on": "2026-11-09",
+                            "attribution": "Автор: Addemf · CC0 · Wikimedia Commons",
+                            "source_url": "https://commons.wikimedia.org/wiki/File:Triangle.gif",
                         }
                     ],
                 }

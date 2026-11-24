@@ -549,6 +549,8 @@ async def manifest(
                 sha256=a.sha256,
                 subtitles_id=a.subtitles_id,
                 needed_on=needed_on[a.id],
+                attribution=a.attribution,
+                source_url=a.source_url,
             )
             for a in sorted(assets.values(), key=lambda a: (needed_on[a.id], str(a.id)))
         ]

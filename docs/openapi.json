@@ -645,16 +645,32 @@
         "description": "Медіа картки для редактора: файл і (для відео) його субтитри.",
         "examples": [
           {
+            "attribution": "Автор: Addemf · CC0 · Wikimedia Commons",
+            "duration_s": 95,
             "id": "0192f0a0-0000-7000-8000-000000000501",
             "kind": "video",
             "mime_type": "video/mp4",
+            "processing_status": "ready",
             "sha256": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
             "size_bytes": 7340032,
+            "source_url": "https://commons.wikimedia.org/wiki/File:Triangle.gif",
             "subtitles_id": "0192f0a0-0000-7000-8000-000000000502",
             "url": "/media/video/0192f0a0-0000-7000-8000-000000000501-3f9a.mp4"
           }
         ],
         "properties": {
+          "attribution": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Автор і ліцензія («Автор: … · CC BY-SA 4.0 · Wikimedia Commons»); показувати під медіа. `null` — власний файл вчителя",
+            "title": "Attribution"
+          },
           "duration_s": {
             "anyOf": [
               {
@@ -685,6 +701,29 @@
             "title": "Mime Type",
             "type": "string"
           },
+          "processing_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Чому не вдалося стиснути відео (для вчителя)",
+            "title": "Processing Error"
+          },
+          "processing_status": {
+            "default": "ready",
+            "description": "Відео, яке стискає сервер: `processing` (у черзі; `url`, `size_bytes`, `sha256` — ще оригіналу), `ready`, `failed` (причина — `processing_error`). Урок із відео не в стані `ready` не публікується. Решта медіа — одразу `ready`.",
+            "enum": [
+              "processing",
+              "ready",
+              "failed"
+            ],
+            "title": "Processing Status",
+            "type": "string"
+          },
           "sha256": {
             "description": "sha256 збереженого файла (того, що за `url`)",
             "title": "Sha256",
@@ -693,6 +732,18 @@
           "size_bytes": {
             "title": "Size Bytes",
             "type": "integer"
+          },
+          "source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Сторінка джерела (Wikimedia Commons)",
+            "title": "Source Url"
           },
           "subtitles": {
             "anyOf": [
@@ -1361,6 +1412,35 @@
           }
         },
         "title": "ClassUpdate",
+        "type": "object"
+      },
+      "CommonsImport": {
+        "description": "Імпорт файла з Wikimedia Commons під клієнтським `id`.",
+        "examples": [
+          {
+            "id": "0192f0a0-0000-7000-8000-000000000501",
+            "url": "https://commons.wikimedia.org/wiki/File:Fraction_Circles_Shaded.png"
+          }
+        ],
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "url": {
+            "description": "Сторінка файла `https://commons.wikimedia.org/wiki/File:…`, пряме посилання `https://upload.wikimedia.org/…` або назва `File:…`",
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "url"
+        ],
+        "title": "CommonsImport",
         "type": "object"
       },
       "CurrentLessonOut": {
@@ -2080,7 +2160,16 @@
             "tests": [],
             "title": "Звичайні дроби",
             "updated_at": "2026-11-05T10:00:00Z",
-            "version": 1
+            "version": 1,
+            "warnings": [
+              {
+                "card_id": "0192f0a0-0000-7000-8000-000000000321",
+                "check": "video_subtitles",
+                "media_asset_id": "0192f0a0-0000-7000-8000-000000000501",
+                "message": "Video has no VTT subtitles",
+                "module_id": "0192f0a0-0000-7000-8000-000000000311"
+              }
+            ]
           }
         ],
         "properties": {
@@ -2191,6 +2280,16 @@
           "version": {
             "title": "Version",
             "type": "integer"
+          },
+          "warnings": {
+            "default": [],
+            "description": "Зауваження, які не блокують публікацію (формат — як у `details` помилки `LESSON_NOT_PUBLISHABLE`): `video_subtitles` — відео без VTT-субтитрів (`module_id`, `card_id`, `media_asset_id`)",
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Warnings",
+            "type": "array"
           }
         },
         "required": [
@@ -2486,6 +2585,18 @@
       "MediaManifestItem": {
         "description": "Медіафайл для кешу Service Worker (окремий URL, кешується незалежно від пакета).",
         "properties": {
+          "attribution": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Автор і ліцензія (показувати учневі під медіа); `null` — немає",
+            "title": "Attribution"
+          },
           "id": {
             "format": "uuid",
             "title": "Id",
@@ -2513,6 +2624,18 @@
           "size_bytes": {
             "title": "Size Bytes",
             "type": "integer"
+          },
+          "source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Сторінка джерела (Wikimedia Commons)",
+            "title": "Source Url"
           },
           "subtitles_id": {
             "anyOf": [
@@ -2547,16 +2670,32 @@
       "MediaOut": {
         "examples": [
           {
+            "attribution": "Автор: Addemf · CC0 · Wikimedia Commons",
+            "duration_s": 95,
             "id": "0192f0a0-0000-7000-8000-000000000501",
             "kind": "video",
             "mime_type": "video/mp4",
+            "processing_status": "ready",
             "sha256": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
             "size_bytes": 7340032,
+            "source_url": "https://commons.wikimedia.org/wiki/File:Triangle.gif",
             "subtitles_id": "0192f0a0-0000-7000-8000-000000000502",
             "url": "/media/video/0192f0a0-0000-7000-8000-000000000501-3f9a.mp4"
           }
         ],
         "properties": {
+          "attribution": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Автор і ліцензія («Автор: … · CC BY-SA 4.0 · Wikimedia Commons»); показувати під медіа. `null` — власний файл вчителя",
+            "title": "Attribution"
+          },
           "duration_s": {
             "anyOf": [
               {
@@ -2587,6 +2726,29 @@
             "title": "Mime Type",
             "type": "string"
           },
+          "processing_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Чому не вдалося стиснути відео (для вчителя)",
+            "title": "Processing Error"
+          },
+          "processing_status": {
+            "default": "ready",
+            "description": "Відео, яке стискає сервер: `processing` (у черзі; `url`, `size_bytes`, `sha256` — ще оригіналу), `ready`, `failed` (причина — `processing_error`). Урок із відео не в стані `ready` не публікується. Решта медіа — одразу `ready`.",
+            "enum": [
+              "processing",
+              "ready",
+              "failed"
+            ],
+            "title": "Processing Status",
+            "type": "string"
+          },
           "sha256": {
             "description": "sha256 збереженого файла (того, що за `url`)",
             "title": "Sha256",
@@ -2595,6 +2757,18 @@
           "size_bytes": {
             "title": "Size Bytes",
             "type": "integer"
+          },
+          "source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Сторінка джерела (Wikimedia Commons)",
+            "title": "Source Url"
           },
           "subtitles_id": {
             "anyOf": [
@@ -3260,11 +3434,13 @@
             "date_to": "2026-11-15",
             "media": [
               {
+                "attribution": "Автор: Addemf · CC0 · Wikimedia Commons",
                 "id": "0192f0a0-0000-7000-8000-000000000501",
                 "kind": "video",
                 "needed_on": "2026-11-09",
                 "sha256": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
                 "size_bytes": 7340032,
+                "source_url": "https://commons.wikimedia.org/wiki/File:Triangle.gif",
                 "subtitles_id": "0192f0a0-0000-7000-8000-000000000502",
                 "url": "/media/video/0192f0a0-0000-7000-8000-000000000501-3f9a.mp4"
               }
@@ -12615,7 +12791,7 @@
     },
     "/lessons/{lesson_id}/publish": {
       "post": {
-        "description": "Публікація після серверних перевірок: є укриттєва частина, у кожного відео є VTT-субтитри,\nурок і пакети днів, де він уже стоїть, — у межах ліміту. Повторна публікація після правок\nзбільшує `version`. Ідемпотентно. Пакети класів, де урок стоїть, перезбирає Celery.",
+        "description": "Публікація після серверних перевірок: є укриттєва частина й модулі, тести мають питання,\nусі відео стиснуті (`video_processing` — ще стискаються, `video_failed` — не вдалося), урок і\nпакети днів, де він уже стоїть, — у межах ліміту. Відео без VTT-субтитрів не блокує\nпублікацію: це попередження `video_subtitles` у `warnings` уроку. Повторна публікація після\nправок збільшує `version`. Ідемпотентно. Пакети класів, де урок стоїть, перезбирає Celery.",
         "operationId": "publish_lesson_lessons__lesson_id__publish_post",
         "parameters": [
           {
@@ -12683,9 +12859,10 @@
                       },
                       {
                         "card_id": "0192f0a0-0000-7000-8000-000000000321",
-                        "check": "video_subtitles",
+                        "check": "video_processing",
                         "media_asset_id": "0192f0a0-0000-7000-8000-000000000501",
-                        "message": "Video has no VTT subtitles"
+                        "message": "Video is still being compressed",
+                        "module_id": "0192f0a0-0000-7000-8000-000000000311"
                       },
                       {
                         "check": "lesson_size",
@@ -12926,6 +13103,146 @@
         ]
       }
     },
+    "/media/import/commons": {
+      "post": {
+        "description": "Вчитель додає зображення чи відео з Wikimedia Commons за посиланням (сторінка файла,\n`upload.wikimedia.org` або `File:Назва`). Лише суспільне надбання, CC0, CC BY, CC BY-SA;\nпідпис автора й ліцензії — в `attribution` (показувати під медіа; він же в маніфесті пакета).\n\nЗображення (і SVG/TIFF як PNG/JPEG) — мініатюра 1280 px, далі як звичайне завантаження\n(WebP). Відео й GIF стискає сервер: відповідь із `processing_status: \"processing\"`, як у\n`PUT /media/{id}?kind=video_source`. Ідемпотентно за `id`. Ліміт —\n`RATE_LIMIT_COMMONS_IMPORT` запитів на вчителя за `RATE_LIMIT_COMMONS_IMPORT_WINDOW_S`.",
+        "operationId": "import_from_commons_media_import_commons_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CommonsImport"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Повтор із тим самим файлом під тим самим id: наявний запис"
+          },
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MediaOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Не автентифіковано"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Недостатньо прав"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "COMMONS_FILE_NOT_FOUND"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "ID_CONFLICT: інший файл під цим id"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "MEDIA_TOO_LARGE"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "UNSUPPORTED_MEDIA_TYPE (аудіо, PDF…)"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "INVALID_COMMONS_URL; LICENSE_NOT_ALLOWED (`details.license`); INVALID_MEDIA, INVALID_IMAGE"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RATE_LIMITED (з `Retry-After`)"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "COMMONS_UNAVAILABLE: Commons не відповів"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Import From Commons",
+        "tags": [
+          "media"
+        ]
+      }
+    },
     "/media/{media_id}": {
       "get": {
         "operationId": "get_media_media__media_id__get",
@@ -13121,7 +13438,7 @@
         ]
       },
       "put": {
-        "description": "Вчитель завантажує файл потоком. `id` генерує клієнт; повтор ідемпотентний.\n\nДозволено: відео `video/mp4`, `video/webm` (≤ 30 МБ); зображення `image/jpeg`, `image/png`,\n`image/webp` (≤ 2 МБ); субтитри `text/vtt` у UTF-8 (≤ 200 КБ). Вміст перевіряється за\nсигнатурою. Зображення зберігаються як WebP (довша сторона ≤ 1280 px, без EXIF/GPS), якщо\nтак менше або в оригіналі є метадані: `mime_type`, `size_bytes`, `sha256` і `url` у відповіді\nописують збережений файл. Відео без субтитрів не пройде публікацію уроку: прив'яжіть VTT через\n`PATCH /media/{id}`.",
+        "description": "Вчитель завантажує файл потоком. `id` генерує клієнт; повтор ідемпотентний.\n\nДозволено: відео `video/mp4`, `video/webm` (≤ 30 МБ); зображення `image/jpeg`, `image/png`,\n`image/webp` (≤ 2 МБ); субтитри `text/vtt` у UTF-8 (≤ 200 КБ). Вміст перевіряється за\nсигнатурою. Зображення зберігаються як WebP (довша сторона ≤ 1280 px, без EXIF/GPS), якщо\nтак менше або в оригіналі є метадані: `mime_type`, `size_bytes`, `sha256` і `url` у відповіді\nописують збережений файл. Субтитри до відео прив'язуються через `PATCH /media/{id}`; без них\nурок публікується з попередженням `video_subtitles`.\n\n`kind=video_source` — оригінал відео, який стисне сервер (для браузерів без WebCodecs):\n`video/mp4`, `video/webm`, `video/quicktime`, `video/ogg`, `image/gif` (≤ 300 МБ). Запис\nстворюється як `kind: \"video\"` з `processing_status: \"processing\"`; стан видно в\n`GET /media/{id}` і в картці уроку (`ready` — стиснуте MP4 ≤ 30 МБ, `failed` — причина в\n`processing_error`: `too_large`, `invalid_video`, `timeout`, `source_missing`). Картку з таким\nвідео можна створити одразу, але урок не опублікується, доки відео не `ready`.",
         "operationId": "upload_media_media__media_id__put",
         "parameters": [
           {
@@ -13142,7 +13459,8 @@
               "enum": [
                 "video",
                 "image",
-                "subtitles"
+                "subtitles",
+                "video_source"
               ],
               "title": "Kind",
               "type": "string"
@@ -13183,6 +13501,18 @@
         ],
         "requestBody": {
           "content": {
+            "application/ogg": {
+              "schema": {
+                "format": "binary",
+                "type": "string"
+              }
+            },
+            "image/gif": {
+              "schema": {
+                "format": "binary",
+                "type": "string"
+              }
+            },
             "image/jpeg": {
               "schema": {
                 "format": "binary",
@@ -13208,6 +13538,18 @@
               }
             },
             "video/mp4": {
+              "schema": {
+                "format": "binary",
+                "type": "string"
+              }
+            },
+            "video/ogg": {
+              "schema": {
+                "format": "binary",
+                "type": "string"
+              }
+            },
+            "video/quicktime": {
               "schema": {
                 "format": "binary",
                 "type": "string"
@@ -13815,11 +14157,13 @@
                   "date_to": "2026-11-15",
                   "media": [
                     {
+                      "attribution": "Автор: Addemf · CC0 · Wikimedia Commons",
                       "id": "0192f0a0-0000-7000-8000-000000000501",
                       "kind": "video",
                       "needed_on": "2026-11-09",
                       "sha256": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
                       "size_bytes": 7340032,
+                      "source_url": "https://commons.wikimedia.org/wiki/File:Triangle.gif",
                       "subtitles_id": "0192f0a0-0000-7000-8000-000000000502",
                       "url": "/media/video/0192f0a0-0000-7000-8000-000000000501-3f9a.mp4"
                     }

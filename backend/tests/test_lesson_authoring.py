@@ -636,10 +636,13 @@ async def test_publish_problem_has_module_locator(
     test = await add_test(client, world.teacher_a, draft["id"])
     failed = await client.post(f"/lessons/{draft['id']}/publish", headers=h)
     details = {d["check"]: d for d in failed.json()["error"]["details"]}
-    assert details["video_subtitles"]["module_id"] == module["id"]
-    assert details["video_subtitles"]["card_id"] == card["id"]
-    assert details["video_subtitles"]["media_asset_id"] == video["id"]
+    assert "video_subtitles" not in details
     assert details["test_questions"]["test_id"] == test["id"]
+    lesson = (await client.get(f"/lessons/{draft['id']}", headers=h)).json()
+    warnings = {w["check"]: w for w in lesson["warnings"]}
+    assert warnings["video_subtitles"]["module_id"] == module["id"]
+    assert warnings["video_subtitles"]["card_id"] == card["id"]
+    assert warnings["video_subtitles"]["media_asset_id"] == video["id"]
 
 
 # ---------- міграція ----------

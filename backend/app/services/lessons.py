@@ -358,6 +358,7 @@ async def lesson_out(
     ]
     out.size_bytes = await pack_size(session, {lesson.id})
     out.limit_bytes = (settings or get_settings()).pack_max_day_bytes
+    out.warnings = await publish_warnings(session, lesson)
     return out
 
 
@@ -762,9 +763,14 @@ async def media_size(session: AsyncSession, media_ids: Iterable[uuid.UUID] | Sel
     subtitle_ids = select(MediaAsset.subtitles_id).where(
         MediaAsset.id.in_(media_ids), MediaAsset.subtitles_id.is_not(None)
     )
+    # Відео, яке ще стискається (оригінал до 300 МБ) чи не стиснулось, не рахується: у пакет
+    # воно не потрапить, а урок із ним не опублікується (`video_processing`, `video_failed`).
     files = (
         select(func.max(MediaAsset.size_bytes).label("size_bytes"))
-        .where(or_(MediaAsset.id.in_(media_ids), MediaAsset.id.in_(subtitle_ids)))
+        .where(
+            or_(MediaAsset.id.in_(media_ids), MediaAsset.id.in_(subtitle_ids)),
+            MediaAsset.processing_status == "ready",
+        )
         .group_by(MediaAsset.storage_key)
         .subquery()
     )
@@ -789,6 +795,34 @@ async def pack_size(session: AsyncSession, lesson_ids: set[uuid.UUID]) -> int:
 
 
 # ---------- публікація ----------
+
+
+async def publish_warnings(session: AsyncSession, lesson: Lesson) -> list[dict[str, Any]]:
+    """Зауваження, які не блокують публікацію: відео без VTT-субтитрів (тихий режим краще з
+    субтитрами, але вчитель може не встигнути їх зробити)."""
+    subtitles = MediaAsset.__table__.alias("subtitles")
+    rows = await session.execute(
+        select(Card.id, Card.media_asset_id, Module.id)
+        .join(Module, Module.id == Card.module_id)
+        .join(MediaAsset, MediaAsset.id == Card.media_asset_id)
+        .outerjoin(subtitles, subtitles.c.id == MediaAsset.subtitles_id)
+        .where(
+            Module.lesson_id == lesson.id,
+            MediaAsset.kind == "video",
+            or_(subtitles.c.id.is_(None), subtitles.c.kind != "subtitles"),
+        )
+        .order_by(Card.id)
+    )
+    return [
+        {
+            "check": "video_subtitles",
+            "message": "Video has no VTT subtitles",
+            "module_id": str(module_id),
+            "card_id": str(card_id),
+            "media_asset_id": str(media_id),
+        }
+        for card_id, media_id, module_id in rows
+    ]
 
 
 async def publish_problems(
@@ -817,24 +851,21 @@ async def publish_problems(
             {"check": "test_questions", "message": "Test has no questions", "test_id": str(test_id)}
         )
 
-    subtitles = MediaAsset.__table__.alias("subtitles")
+    # Відео, яке ще стискає сервер або не стиснулось: файла для пакета немає.
     rows = await session.execute(
-        select(Card.id, Card.media_asset_id, Module.id)
+        select(Card.id, Card.media_asset_id, Module.id, MediaAsset.processing_status)
         .join(Module, Module.id == Card.module_id)
         .join(MediaAsset, MediaAsset.id == Card.media_asset_id)
-        .outerjoin(subtitles, subtitles.c.id == MediaAsset.subtitles_id)
-        .where(
-            Module.lesson_id == lesson.id,
-            MediaAsset.kind == "video",
-            or_(subtitles.c.id.is_(None), subtitles.c.kind != "subtitles"),
-        )
+        .where(Module.lesson_id == lesson.id, MediaAsset.processing_status != "ready")
         .order_by(Card.id)
     )
-    for card_id, media_id, module_id in rows:
+    for card_id, media_id, module_id, status in rows:
         problems.append(
             {
-                "check": "video_subtitles",
-                "message": "Video has no VTT subtitles",
+                "check": "video_processing" if status == "processing" else "video_failed",
+                "message": "Video is still being compressed"
+                if status == "processing"
+                else "Video could not be compressed",
                 "module_id": str(module_id),
                 "card_id": str(card_id),
                 "media_asset_id": str(media_id),

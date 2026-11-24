@@ -4,24 +4,37 @@
 лише тоді, коли дані справді змінилися), тож повторний запуск того самого дня нічого не змінює.
 Розклад і прив'язки уроків рахуються від «сьогодні» (поточний і наступний тиждень), пакети
 «Рюкзака» перезбираються на 7 днів. Облікові дані задаються лише при створенні акаунта.
+
+Уроки — `content.LESSONS` плюс доповнення з `lessons_extra.json` (нові модулі, картки з
+медіа, пояснення й нові питання тестів). Медіафайли з `app/seed/media/` проходять звичайне
+завантаження (`services/media.upload`: перевірка, WebP, дедуплікація) у справжнє сховище;
+повтор із тим самим id і вмістом нічого не пише. Файл, якого не стало у сховищі (новий том),
+записується знову.
 """
 
 import datetime as dt
+import hashlib
+import json
+import logging
 import secrets
 import uuid
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import AsyncIterator, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
+from functools import cache
+from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import func, or_, select
+import anyio
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
 from app.core.security import hash_secret_async, verify_secret_async
+from app.core.storage import LocalMediaStorage, MediaStorage
 from app.models.alerts import AlertEvent
-from app.models.lessons import Card, Lesson, Module, Question, Subject, Test
+from app.models.lessons import Card, Lesson, MediaAsset, Module, Question, Subject, Test
 from app.models.rollcall import RollCallSession, RollCallStatus
 from app.models.school import (
     ClassMembership,
@@ -34,13 +47,35 @@ from app.models.school import (
 )
 from app.models.sync import SyncEvent
 from app.seed import content as c
+from app.services import media as media_service
 from app.services import packs as packs_service
 from app.services.auth import name_key, revoke_all_sessions
 from app.services.lessons import publish_problems
 
+logger = logging.getLogger(__name__)
+
 # Простір імен демо-даних: однакові ключі → однакові id при кожному запуску.
 NAMESPACE = uuid.UUID("5e1d0a7a-2b6f-4c1e-9a43-0d3f5e8c7b21")
 OPTION_IDS = "abcdefghij"
+SEED_DIR = Path(__file__).resolve().parent
+MEDIA_DIR = SEED_DIR / "media"
+MEDIA_TYPES = {
+    ".mp4": ("video", "video/mp4"),
+    ".vtt": ("subtitles", "text/vtt"),
+    ".jpg": ("image", "image/jpeg"),
+    ".png": ("image", "image/png"),
+}
+# Позиції зсуваються за межі допустимих, перш ніж стати остаточними (UNIQUE не відкладений).
+POSITION_SHIFT = 2000
+
+
+@cache
+def lessons_extra() -> dict[str, Any]:
+    """Доповнення уроків (`lessons_extra.json`): ключ уроку → нові модулі, картки, пояснення,
+    питання."""
+    data = json.loads((SEED_DIR / "lessons_extra.json").read_text(encoding="utf-8"))
+    data.pop("_format", None)
+    return data
 
 
 def sid(*parts: object) -> uuid.UUID:
@@ -102,6 +137,107 @@ async def _insert_once(
         await session.execute(
             pg_insert(model).values(rows).on_conflict_do_nothing(index_elements=list(keys))
         )
+
+
+async def _free_positions(session: AsyncSession, model: Any, rows: list[dict[str, Any]]) -> None:
+    """Уже засіяні рядки, чия позиція змінюється (новий модуль посередині уроку), спершу
+    зсуваються за межі допустимих: UNIQUE (батько, позиція) перевіряється на кожному рядку."""
+    wanted = {r["id"]: r["position"] for r in rows}
+    current = await session.execute(
+        select(model.id, model.position).where(model.id.in_(list(wanted)))
+    )
+    moved = [i for i, pos in current if pos != wanted[i]]
+    if moved:
+        await session.execute(
+            update(model)
+            .where(model.id.in_(moved))
+            .values(position=model.position + POSITION_SHIFT)
+        )
+
+
+async def _once(data: bytes) -> AsyncIterator[bytes]:
+    yield data
+
+
+async def _seed_media(
+    session: AsyncSession,
+    storage: MediaStorage,
+    settings: Settings,
+    teachers: Mapping[str, uuid.UUID],
+) -> dict[str, uuid.UUID]:
+    """Медіа карток доповнень: файл → id `media_asset`. Власник — вчитель класу уроку; підпис
+    автора й ліцензії — з `content.MEDIA`; VTT прив'язуються до відео."""
+    owners: dict[str, uuid.UUID] = {}
+    subtitles: dict[str, str] = {}
+    for lesson in c.LESSONS:
+        for card in lessons_extra().get(lesson["key"], {}).get("cards", []):
+            for name in (card.get("media"), card.get("subtitles")):
+                if name:
+                    owners.setdefault(name, teachers[lesson["class"]])
+            if card.get("subtitles"):
+                subtitles[card["media"]] = card["subtitles"]
+    users = {
+        u.id: u for u in await session.scalars(select(User).where(User.id.in_(owners.values())))
+    }
+    ids: dict[str, uuid.UUID] = {}
+    for name in sorted(owners):
+        kind, mime = MEDIA_TYPES[Path(name).suffix]
+        author, license_name, source_url = c.MEDIA.get(name, c.OWN_MEDIA)
+        attribution = f"Автор: {author} · {license_name}"
+        if source_url is not None:
+            attribution += " · Wikimedia Commons"
+        data = (MEDIA_DIR / name).read_bytes()
+        media, _ = await media_service.upload(
+            session,
+            storage,
+            users[owners[name]],
+            media_id=sid("media", name),
+            kind=kind,
+            content_type=mime,
+            content_length=len(data),
+            chunks=_once(data),
+            settings=settings,
+            attribution=attribution,
+            source_url=source_url,
+        )
+        await _restore_file(storage, settings, media, data)
+        if (media.attribution, media.source_url) != (attribution, source_url):
+            media.attribution, media.source_url = attribution, source_url
+        ids[name] = media.id
+    for video, vtt in subtitles.items():
+        await session.execute(
+            update(MediaAsset)
+            .where(MediaAsset.id == ids[video], MediaAsset.subtitles_id.is_distinct_from(ids[vtt]))
+            .values(subtitles_id=ids[vtt])
+        )
+    return ids
+
+
+async def _restore_file(
+    storage: MediaStorage, settings: Settings, media: MediaAsset, data: bytes
+) -> None:
+    """Запис є, а файла у сховищі немає (сід у наявну БД з порожнім томом): записати знову той
+    самий вміст (зображення — тим самим перекодуванням), якщо хеш збігається."""
+    try:
+        path = storage.local_path(media.storage_key)
+    except NotImplementedError:
+        return
+    if await anyio.Path(path).is_file():
+        return
+    if media.kind == "image" and media.mime_type == "image/webp":
+        webp = await anyio.to_thread.run_sync(
+            media_service._to_webp,
+            data,
+            settings.media_image_max_side,
+            settings.media_image_webp_quality,
+            settings.media_image_max_pixels,
+            settings.media_image_max_pixels_full_decode,
+        )
+        data = webp or data
+    if hashlib.sha256(data).hexdigest() != media.sha256:
+        logger.warning("Seed media %s is missing in storage and differs, skipped", media.id)
+        return
+    await storage.save(media.storage_key, _once(data))
 
 
 def _time(value: str) -> dt.time:
@@ -168,9 +304,11 @@ async def seed(
     *,
     today: dt.date | None = None,
     password: str | None = None,
+    storage: MediaStorage | None = None,
 ) -> SeedResult:
     if settings.environment == "prod":
         raise SeedRefused("Seed data is not allowed when ENVIRONMENT=prod")
+    storage = storage or LocalMediaStorage(settings.media_root, settings.media_url_prefix)
     tz = ZoneInfo(c.SCHOOL["timezone"])
     today = today or dt.datetime.now(tz).date()
     start_year = academic_year_start(today)
@@ -304,9 +442,11 @@ async def seed(
     now = dt.datetime.now(dt.UTC)
     grades = {k["key"]: k["grade"] for k in c.CLASSES}
     teachers = {k["key"]: sid("user", k["teacher"]["key"]) for k in c.CLASSES}
+    media_ids = await _seed_media(session, storage, settings, teachers)
     for lesson in c.LESSONS:
         key = lesson["key"]
         lesson_id = sid("lesson", key)
+        extra = lessons_extra().get(key, {})
         lessons.append(
             {
                 "id": lesson_id,
@@ -320,10 +460,34 @@ async def seed(
                 "grade": grades[lesson["class"]],
             }
         )
+        # Модулі по порядку: (ключ для id, частина, назва, хвилини, картки). Ключ наявних —
+        # індекс у LESSONS (id не змінюються), нових модулів із доповнень — назва.
+        ordered: list[tuple[object, str, str, int, list[dict[str, Any]]]] = [
+            (m, part, title, minutes, [{"kind": "text", "body": {"text": t}} for t in texts])
+            for m, (part, title, minutes, texts) in enumerate(lesson["modules"])
+        ]
+        for new in extra.get("new_modules", []):
+            after = next(i for i, m in enumerate(ordered) if m[2] == new["after_module"])
+            ordered.insert(
+                after + 1,
+                (f"extra:{new['title']}", new["part"], new["title"], new["minutes"], []),
+            )
+        by_title = {m[2]: m[4] for m in ordered}
+        for card in extra.get("cards", []):
+            if card["kind"] == "text":
+                by_title[card["module"]].append({"kind": "text", "body": {"text": card["text"]}})
+            else:
+                by_title[card["module"]].append(
+                    {
+                        "kind": card["kind"],
+                        "body": {"caption": card["caption"]},
+                        "media_asset_id": media_ids[card["media"]],
+                    }
+                )
         positions: dict[str, int] = {}
-        for m, (part, title, minutes, texts) in enumerate(lesson["modules"]):
+        for ident, part, title, minutes, module_cards in ordered:
             positions[part] = positions.get(part, 0) + 1
-            module_id = sid("module", key, m)
+            module_id = sid("module", key, ident)
             modules.append(
                 {
                     "id": module_id,
@@ -336,14 +500,14 @@ async def seed(
             )
             cards += [
                 {
-                    "id": sid("card", key, m, j),
+                    "id": sid("card", key, ident, j),
                     "module_id": module_id,
                     "position": j + 1,
-                    "kind": "text",
-                    "body": {"text": text},
-                    "media_asset_id": None,
+                    "kind": card["kind"],
+                    "body": card["body"],
+                    "media_asset_id": card.get("media_asset_id"),
                 }
-                for j, text in enumerate(texts)
+                for j, card in enumerate(module_cards)
             ]
         test = lesson["test"]
         test_id = sid("test", key)
@@ -356,6 +520,12 @@ async def seed(
                 "window_hours": test["window_hours"],
             }
         )
+        explanations: dict[int, str] = {}
+        for e in extra.get("explanations", []):
+            # Звірка: пояснення належить тому самому питанню, що й у LESSONS.
+            if test["questions"][e["index"]][0] != e["question"]:
+                raise ValueError(f"Explanation does not match question {key}/{e['index']}")
+            explanations[e["index"]] = e["explanation"]
         for q, (prompt, options, correct) in enumerate(test["questions"]):
             questions.append(
                 {
@@ -365,14 +535,34 @@ async def seed(
                     "kind": "single" if len(correct) == 1 else "multiple",
                     "prompt": prompt,
                     "options": [{"id": OPTION_IDS[i], "text": t} for i, t in enumerate(options)],
+                    "right_options": None,
                     "answer_key": [OPTION_IDS[i] for i in correct],
                     "points": 1,
+                    "explanation": explanations.get(q),
+                }
+            )
+        for n, extra_q in enumerate(extra.get("new_questions", []), start=len(test["questions"])):
+            questions.append(
+                {
+                    "id": sid("question", key, n),
+                    "test_id": test_id,
+                    "position": n + 1,
+                    "kind": extra_q["kind"],
+                    "prompt": extra_q["prompt"],
+                    "options": extra_q["options"],
+                    "right_options": extra_q.get("right_options"),
+                    "answer_key": extra_q["answer_key"],
+                    "points": 1,
+                    "explanation": extra_q.get("explanation"),
                 }
             )
     await _upsert(session, Lesson, lessons, insert_only=("published_at",))
+    await _free_positions(session, Module, modules)
     await _upsert(session, Module, modules)
+    await _free_positions(session, Card, cards)
     await _upsert(session, Card, cards)
     await _upsert(session, Test, tests)
+    await _free_positions(session, Question, questions)
     await _upsert(session, Question, questions)
 
     # ---------- уроки в розкладі: поточний і наступний тиждень ----------

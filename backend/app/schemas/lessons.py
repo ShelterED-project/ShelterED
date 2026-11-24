@@ -106,6 +106,21 @@ class MediaOut(BaseModel):
     duration_s: int | None
     subtitles_id: uuid.UUID | None = Field(description="VTT-субтитри до відео")
     url: str = Field(description="URL файла (роздає Nginx)")
+    processing_status: Literal["processing", "ready", "failed"] = Field(
+        "ready",
+        description="Відео, яке стискає сервер: `processing` (у черзі; `url`, `size_bytes`, "
+        "`sha256` — ще оригіналу), `ready`, `failed` (причина — `processing_error`). Урок із "
+        "відео не в стані `ready` не публікується. Решта медіа — одразу `ready`.",
+    )
+    processing_error: str | None = Field(
+        None, description="Чому не вдалося стиснути відео (для вчителя)"
+    )
+    attribution: str | None = Field(
+        None,
+        description="Автор і ліцензія («Автор: … · CC BY-SA 4.0 · Wikimedia Commons»); "
+        "показувати під медіа. `null` — власний файл вчителя",
+    )
+    source_url: str | None = Field(None, description="Сторінка джерела (Wikimedia Commons)")
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -116,9 +131,13 @@ class MediaOut(BaseModel):
                     "mime_type": "video/mp4",
                     "size_bytes": 7340032,
                     "sha256": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
-                    "duration_s": None,
+                    "duration_s": 95,
                     "subtitles_id": "0192f0a0-0000-7000-8000-000000000502",
                     "url": "/media/video/0192f0a0-0000-7000-8000-000000000501-3f9a.mp4",
+                    "processing_status": "ready",
+                    "processing_error": None,
+                    "attribution": "Автор: Addemf · CC0 · Wikimedia Commons",
+                    "source_url": "https://commons.wikimedia.org/wiki/File:Triangle.gif",
                 }
             ]
         }
@@ -515,6 +534,12 @@ class LessonOut(LessonSummary):
     copied_from_id: uuid.UUID | None = Field(
         default=None, description="Урок-джерело, якщо урок створено копіюванням"
     )
+    warnings: list[dict[str, Any]] = Field(
+        default=[],
+        description="Зауваження, які не блокують публікацію (формат — як у `details` помилки "
+        "`LESSON_NOT_PUBLISHABLE`): `video_subtitles` — відео без VTT-субтитрів "
+        "(`module_id`, `card_id`, `media_asset_id`)",
+    )
 
     model_config = ConfigDict(
         from_attributes=True,
@@ -537,6 +562,15 @@ class LessonOut(LessonSummary):
                     "size_bytes": 1024,
                     "limit_bytes": 52428800,
                     "copied_from_id": None,
+                    "warnings": [
+                        {
+                            "check": "video_subtitles",
+                            "message": "Video has no VTT subtitles",
+                            "module_id": MODULE_ID,
+                            "card_id": CARD_ID,
+                            "media_asset_id": MEDIA_ID,
+                        }
+                    ],
                 }
             ]
         },
@@ -553,4 +587,27 @@ class MediaUpdate(BaseModel):
 
     model_config = ConfigDict(
         json_schema_extra={"examples": [{"subtitles_id": "0192f0a0-0000-7000-8000-000000000502"}]}
+    )
+
+
+class CommonsImport(BaseModel):
+    """Імпорт файла з Wikimedia Commons під клієнтським `id`."""
+
+    id: uuid.UUID
+    url: str = Field(
+        min_length=1,
+        max_length=2000,
+        description="Сторінка файла `https://commons.wikimedia.org/wiki/File:…`, пряме "
+        "посилання `https://upload.wikimedia.org/…` або назва `File:…`",
+    )
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {
+                    "id": MEDIA_ID,
+                    "url": "https://commons.wikimedia.org/wiki/File:Fraction_Circles_Shaded.png",
+                }
+            ]
+        }
     )

@@ -90,6 +90,13 @@ class Settings(BaseSettings):
     media_max_video_bytes: int = 30 * 1024 * 1024
     media_max_image_bytes: int = 2 * 1024 * 1024
     media_max_subtitles_bytes: int = 200 * 1024
+    # Оригінал відео, яке стискає сервер (`PUT /media/{id}?kind=video_source`, імпорт з
+    # Wikimedia Commons): браузер без WebCodecs не стисне сам. Результат стиснення має
+    # вкластися в MEDIA_MAX_VIDEO_BYTES, інакше — `failed`.
+    media_max_video_source_bytes: int = 300 * 1024 * 1024
+    # ffmpeg для стиснення (у Docker-образі backend встановлено); час на одне відео.
+    ffmpeg_path: str = "ffmpeg"
+    media_video_process_timeout_s: int = 1500
     # Зображення перекодовуються у WebP: довша сторона ≤ max_side, без EXIF/GPS.
     # Більше пікселів — відмова ще до декодування (захист від «декомпресійних бомб»).
     media_image_max_side: int = 1280
@@ -179,6 +186,17 @@ class Settings(BaseSettings):
     rate_limit_tutor_window_s: int = 600
     rate_limit_qr_relay: int = 120
     rate_limit_qr_relay_window_s: int = 600
+    # Імпорт медіа з Wikimedia Commons (`POST /media/import/commons`) — на вчителя.
+    rate_limit_commons_import: int = 30
+    rate_limit_commons_import_window_s: int = 600
+
+    # Wikimedia Commons: API і файли лише з https://*.wikimedia.org. User-Agent — назва
+    # проєкту без контактів людей (політика Wikimedia вимагає описовий UA).
+    commons_api_url: str = "https://commons.wikimedia.org/w/api.php"
+    commons_user_agent: str = "ShelterED/1.0 (https://github.com/ShelterED-project/ShelterED)"
+    commons_http_timeout_s: float = 20.0
+    # Найбільша відповідь API (JSON метаданих), байти.
+    commons_max_api_bytes: int = 1024 * 1024
 
     # Строки зберігання (B15.1, docs/data-inventory.md; щоденна задача `retention.purge`).
     # Журнал подій: payload стирається, відхилені події видаляються (рядки прийнятих лишаються

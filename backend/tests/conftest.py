@@ -46,6 +46,11 @@ os.environ["RATE_LIMIT_TUTOR"] = "20"
 os.environ["RATE_LIMIT_TUTOR_WINDOW_S"] = "600"
 os.environ["RATE_LIMIT_QR_RELAY"] = "120"
 os.environ["RATE_LIMIT_QR_RELAY_WINDOW_S"] = "600"
+os.environ["RATE_LIMIT_COMMONS_IMPORT"] = "30"
+os.environ["RATE_LIMIT_COMMONS_IMPORT_WINDOW_S"] = "600"
+os.environ["MEDIA_MAX_VIDEO_SOURCE_BYTES"] = str(300 * 1024 * 1024)
+os.environ["MEDIA_MAX_VIDEO_BYTES"] = str(30 * 1024 * 1024)
+os.environ["FFMPEG_PATH"] = "ffmpeg"
 # Web Push у тестах без ключів VAPID (тести, яким треба, підставляють свої).
 os.environ["VAPID_PUBLIC_KEY"] = ""
 os.environ["VAPID_PRIVATE_KEY"] = ""

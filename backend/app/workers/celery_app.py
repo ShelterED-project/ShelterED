@@ -44,6 +44,7 @@ celery_app = Celery(
         "app.workers.wellbeing",
         "app.workers.retention",
         "app.workers.outbox",
+        "app.workers.media",
     ],
 )
 
