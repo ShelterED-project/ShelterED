@@ -171,4 +171,9 @@ jobs:
               for i in $(seq 1 30); do docker exec shelter_backend python -c "import urllib.request as u; u.urlopen('http://localhost:8000/health')" >/dev/null 2>&1 && break; sleep 3; done
               docker exec -e SEED_PASSWORD="$SEED_PASSWORD" shelter_backend python -m app.cli seed --allow-prod
             fi
-            curl -fsS http://127.0.0.1:8000/health && echo
+            # Бекенд спершу застосовує міграції, тож чекаємо до ~2 хв, перш ніж вважати деплой невдалим.
+            for i in $(seq 1 40); do
+              if curl -fsS http://127.0.0.1:8000/health; then echo; exit 0; fi
+              sleep 3
+            done
+            echo "Backend is not healthy"; docker logs --tail 60 shelter_backend; exit 1

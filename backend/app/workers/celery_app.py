@@ -72,6 +72,8 @@ celery_app.conf.update(
     task_soft_time_limit=TASK_SOFT_TIME_LIMIT_S,
     task_time_limit=TASK_SOFT_TIME_LIMIT_S + 30,
     result_expires=3600,
+    # Результати задач не використовуються (лише побічні ефекти в БД).
+    task_ignore_result=True,
     broker_connection_retry_on_startup=True,
     # Періодичні задачі (процес `celery beat`). expires: прострочений запуск (воркер
     # лежав) не виконується пачкою — наступний однаково прийде за розкладом.
@@ -154,6 +156,9 @@ PUBLISH_RETRY_POLICY = {
 
 
 def _send(name: str, args: list[Any], queue: str, options: dict[str, Any]) -> None:
+    # Результати задач ніхто не читає. Без цього send_task підписується на канал результатів
+    # у Redis (pubsub не потокобезпечний): з пулу потоків це дає «Retry limit exceeded».
+    options.setdefault("ignore_result", True)
     options.setdefault("retry", True)
     options.setdefault("retry_policy", PUBLISH_RETRY_POLICY)
     celery_app.send_task(name, args=args, queue=queue, **options)
