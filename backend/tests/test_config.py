@@ -71,5 +71,7 @@ def test_database_url_gets_async_driver_and_auto_ssl(monkeypatch):
 
     monkeypatch.setenv("DATABASE_URL", "postgres://u:p@ep-x.eu-central-1.aws.neon.tech/db")
     assert Settings(_env_file=None).use_db_ssl is True  # Neon
+    monkeypatch.setenv("DATABASE_SSL", "")
+    assert Settings(_env_file=None).use_db_ssl is True  # порожнє — авто
     monkeypatch.setenv("DATABASE_SSL", "false")
     assert Settings(_env_file=None).use_db_ssl is False  # явне значення має пріоритет

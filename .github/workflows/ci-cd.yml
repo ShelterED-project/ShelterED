@@ -113,6 +113,8 @@ jobs:
       - name: Деплой на AWS EC2 по SSH
         uses: appleboy/ssh-action@v1
         env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DATABASE_URL_DIRECT: ${{ secrets.DATABASE_URL_DIRECT }}
           AI_SERVICE_URL: ${{ secrets.AI_SERVICE_URL }}
           AI_INTERNAL_KEY: ${{ secrets.AI_INTERNAL_KEY }}
           SEED_PASSWORD: ${{ secrets.SEED_PASSWORD }}
@@ -121,7 +123,7 @@ jobs:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
-          envs: AI_SERVICE_URL,AI_INTERNAL_KEY,SEED_PASSWORD,RUN_SEED
+          envs: DATABASE_URL,DATABASE_URL_DIRECT,AI_SERVICE_URL,AI_INTERNAL_KEY,SEED_PASSWORD,RUN_SEED
           script_stop: true
           script: |
             set -e
@@ -137,36 +139,14 @@ jobs:
               printf '%s=%s\n' "$1" "$2" >> .env.tmp
               mv .env.tmp .env && chmod 600 .env
             }
+            upsert DATABASE_URL "$DATABASE_URL"
+            upsert DATABASE_URL_DIRECT "$DATABASE_URL_DIRECT"
             upsert AI_SERVICE_URL "$AI_SERVICE_URL"
             upsert AI_INTERNAL_KEY "$AI_INTERNAL_KEY"
 
             docker compose -f docker-compose.prod.yml pull
 
-            # Одноразовий перехід PostgreSQL 15 → 17: дамп старого тому, відновлення в новий.
-            # Старий том (postgres_data) не видаляється — лишається резервною копією.
-            PROJECT=$(basename "$PWD")
-            DB_USER=$(grep -E '^POSTGRES_USER=' .env | cut -d= -f2- || true); DB_USER=${DB_USER:-postgres}
-            if docker volume inspect "${PROJECT}_postgres_data" >/dev/null 2>&1 && ! docker volume inspect "${PROJECT}_postgres17_data" >/dev/null 2>&1; then
-              echo "PostgreSQL 15 → 17: дамп старої БД"
-              docker stop shelter_db >/dev/null 2>&1 || true
-              docker run -d --rm --name pg15_dump -v "${PROJECT}_postgres_data:/var/lib/postgresql/data" postgres:15-alpine
-              for i in $(seq 1 30); do docker exec pg15_dump pg_isready -U "$DB_USER" >/dev/null 2>&1 && break; sleep 2; done
-              if ! docker exec pg15_dump pg_dumpall -U "$DB_USER" > ~/pg15-backup.sql; then
-                echo "Дамп не вдався: повертаю PostgreSQL 15, деплой зупинено"
-                docker stop pg15_dump; rm -f ~/pg15-backup.sql; docker start shelter_db; exit 1
-              fi
-              docker stop pg15_dump
-              ls -la ~/pg15-backup.sql
-            fi
-            if [ -s ~/pg15-backup.sql ]; then
-              docker compose -f docker-compose.prod.yml up -d db
-              for i in $(seq 1 30); do [ "$(docker inspect -f '{{.State.Health.Status}}' shelter_db)" = healthy ] && break; sleep 2; done
-              echo "PostgreSQL 17: відновлення з дампу"
-              docker exec -i shelter_db psql -q -U "$DB_USER" -d postgres < ~/pg15-backup.sql > /dev/null || true
-              mv ~/pg15-backup.sql ~/pg15-backup.restored.sql
-            fi
-
-            # Бекенд при старті сам застосовує міграції (backend/start.sh).
+            # Бекенд при старті сам застосовує міграції до Neon (backend/start.sh).
             docker compose -f docker-compose.prod.yml up -d --remove-orphans
             docker image prune -f
             sleep 10

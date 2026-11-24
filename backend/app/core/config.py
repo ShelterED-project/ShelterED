@@ -261,6 +261,12 @@ class Settings(BaseSettings):
                     return "postgresql+asyncpg://" + raw[len(prefix) :]
         return value
 
+    @field_validator("database_ssl", mode="before")
+    @classmethod
+    def _empty_ssl_is_auto(cls, value: object) -> object:
+        # `DATABASE_SSL=` (як у .env.example) — авто, а не помилка розбору bool.
+        return None if isinstance(value, str) and not value.strip() else value
+
     @property
     def use_db_ssl(self) -> bool:
         """TLS до БД: явний DATABASE_SSL або авто за хостом."""

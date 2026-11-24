@@ -1,7 +1,6 @@
-# Спільне для backend і Celery: решта налаштувань (JWT_SECRET, VAPID, AI_*, ...) — у .env поруч.
+# Спільне для backend і Celery. БД — Neon: DATABASE_URL (pooled) і DATABASE_URL_DIRECT (міграції)
+# беруться з .env поруч (деплой заповнює їх із GitHub Secrets), як і JWT, VAPID, AI_*.
 x-app-env: &app-env
-  # Драйвер asyncpg і TLS бекенд підбирає сам (postgresql:// → asyncpg; БД у контейнері — без TLS).
-  DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-shelter_db}
   REDIS_URL: redis://redis:6379/0
   RATE_LIMIT_REDIS_URL: redis://redis:6379/2
   ENVIRONMENT: ${APP_ENV:-prod}
@@ -14,29 +13,6 @@ x-logging: &logging
     max-file: "3"
 
 services:
-  db:
-    image: postgres:17-alpine
-    container_name: shelter_db
-    restart: unless-stopped
-    environment:
-      POSTGRES_DB: ${POSTGRES_DB:-shelter_db}
-      POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-    volumes:
-      # Новий том під PostgreSQL 17 (дані 15 несумісні). Старий том postgres_data не видаляється —
-      # лишається резервною копією; дамп і відновлення — див. README бекенду.
-      - postgres17_data:/var/lib/postgresql/data
-    deploy:
-      resources:
-        limits:
-          memory: 256M
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-shelter_db}"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-    logging: *logging
-
   redis:
     image: redis:7-alpine
     container_name: shelter_redis
@@ -56,12 +32,11 @@ services:
     image: ghcr.io/sheltered-project/sheltered/backend:latest
     container_name: shelter_backend
     restart: unless-stopped
-    # Під час старту застосовує міграції (alembic upgrade head), потім uvicorn — див. backend/start.sh.
+    # Під час старту застосовує міграції до Neon (alembic upgrade head через DATABASE_URL_DIRECT),
+    # потім uvicorn — див. backend/start.sh.
     env_file:
       - .env
     depends_on:
-      db:
-        condition: service_healthy
       redis:
         condition: service_healthy
     environment: *app-env
@@ -156,7 +131,4 @@ services:
     logging: *logging
 
 volumes:
-  # Дані PostgreSQL 15 (до переходу на 17) — не видаляти, доки не перевірено відновлення.
-  postgres_data:
-  postgres17_data:
   media_data:
