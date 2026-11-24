@@ -258,7 +258,7 @@ class Settings(BaseSettings):
         if isinstance(raw, str):
             for prefix in ("postgresql://", "postgres://"):
                 if raw.startswith(prefix):
-                    raw = "postgresql+asyncpg://" + raw[len(prefix) :]
+                    raw = "postgresql+asyncpg://" + raw.removeprefix(prefix)
             # Рядок з Neon Console містить ?sslmode=…&channel_binding=… — asyncpg їх не знає
             # (TLS вмикаємо через connect_args), тож прибираємо.
             parts = urlsplit(raw)
