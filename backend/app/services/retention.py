@@ -19,6 +19,8 @@
 - `parent_link_code`: через `RETENTION_PARENT_LINK_CODE_DAYS` (30) після закінчення строку
   (використаний чи ні).
 - `wellbeing_view_log`: `RETENTION_WELLBEING_VIEW_LOG_DAYS` (365).
+- `tutor_conversation` (розмови з ШІ-репетитором): через `RETENTION_TUTOR_CONVERSATION_DAYS`
+  (30) після останньої активності.
 - `task_outbox`: опубліковані задачі — через `OUTBOX_SENT_DAYS` (1) після публікації
   (неопубліковані лишаються, доки їх не опублікує `outbox.flush`).
 
@@ -35,6 +37,7 @@ from app.core.config import Settings
 from app.models.auth import AuthCode, ParentLinkCode, RefreshToken
 from app.models.outbox import TaskOutbox
 from app.models.sync import SyncEvent
+from app.models.tutor import TutorConversation
 from app.models.wellbeing import WellbeingViewLog
 
 SYNC_EVENT_BATCH = 5000
@@ -125,6 +128,12 @@ async def purge(
         )
     )
     counts["wellbeing_view_log"] = result.rowcount or 0
+    result = await session.execute(
+        delete(TutorConversation).where(
+            TutorConversation.updated_at < now - _days(settings.retention_tutor_conversation_days)
+        )
+    )
+    counts["tutor_conversations"] = result.rowcount or 0
     result = await session.execute(
         delete(TaskOutbox).where(TaskOutbox.sent_at < now - _days(OUTBOX_SENT_DAYS))
     )

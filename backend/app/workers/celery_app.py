@@ -45,6 +45,7 @@ celery_app = Celery(
         "app.workers.retention",
         "app.workers.outbox",
         "app.workers.media",
+        "app.workers.tutor",
     ],
 )
 
@@ -100,6 +101,12 @@ celery_app.conf.update(
             "task": "packs.refresh_all",
             "schedule": float(settings.packs_refresh_interval_s),
             "options": {"queue": "default", "expires": settings.packs_refresh_interval_s},
+        },
+        # Закешовані пояснення ШІ, які не вдалося згенерувати (AI-сервіс був вимкнений).
+        "tutor-explain-missing": {
+            "task": "tutor.explain_missing",
+            "schedule": float(settings.tutor_explanations_interval_s),
+            "options": {"queue": "default", "expires": settings.tutor_explanations_interval_s},
         },
         "stats-refresh": {
             "task": "stats.refresh_all",

@@ -365,6 +365,9 @@ async def test_publish_and_unpublish_enqueue_rebuild(
     assert (await client.post(f"/lessons/{lesson_id}/publish", headers=headers)).is_success
     assert tasks(enqueued, "packs.rebuild_for_lesson") == [[lesson_id], [lesson_id]]
     assert all(c.queue == "default" for c in enqueued if c.name.startswith("packs."))
+    # Публікація (не зняття) ставить і генерацію закешованих пояснень ШІ.
+    assert tasks(enqueued, "tutor.explain_lesson") == [[lesson_id]]
+    assert all(c.queue == "default" for c in enqueued if c.name.startswith("tutor."))
 
 
 async def test_schedule_change_enqueues_class_rebuild(

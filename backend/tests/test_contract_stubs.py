@@ -1,13 +1,10 @@
-"""Заглушки контракту B4: кожна зареєстрована, захищена роллю й відповідає 501."""
+"""Контракт B4: перевірка конверта синхронізації й схем payload (заглушок 501 більше немає)."""
 
 import uuid
-from collections.abc import Callable
 from types import SimpleNamespace
-from typing import Any
 
 import pytest
 from conftest import auth_header
-from fastapi import FastAPI
 from httpx import AsyncClient
 
 pytestmark = pytest.mark.anyio
@@ -28,63 +25,6 @@ def sync_body() -> dict:
             }
         ],
     }
-
-
-Path = Callable[[SimpleNamespace], str]
-Body = Callable[[SimpleNamespace], Any] | None
-
-# (метод, шаблон у OpenAPI, шлях, тіло, роль із доступом, роль без доступу або None)
-STUBS: list[tuple[str, str, Path, Body, str, str | None]] = [
-    (
-        "post",
-        "/tutor/ask",
-        lambda w: "/tutor/ask",
-        lambda w: {"request_id": str(uuid.uuid4()), "mode": "explain_again", "lesson_id": ANY_ID},
-        "student_a",
-        "teacher_a",
-    ),
-]
-
-
-async def _call(client: AsyncClient, method: str, url: str, body: Any, headers: dict) -> Any:
-    kwargs: dict[str, Any] = {"headers": headers}
-    if body is not None:
-        kwargs["json"] = body
-    return await client.request(method.upper(), url, **kwargs)
-
-
-@pytest.mark.parametrize(
-    ("method", "template", "path", "body", "allowed", "denied"),
-    STUBS,
-    ids=[f"{m.upper()} {t}" for m, t, *_ in STUBS],
-)
-async def test_stub_is_registered_protected_and_not_implemented(
-    client: AsyncClient,
-    app: FastAPI,
-    world: SimpleNamespace,
-    method: str,
-    template: str,
-    path: Path,
-    body: Body,
-    allowed: str,
-    denied: str | None,
-) -> None:
-    # Описана в OpenAPI: 501 і успішна відповідь із прикладом для моків.
-    operation = app.openapi()["paths"][template][method]
-    assert "501" in operation["responses"]
-    success = operation["responses"].get("201") or operation["responses"].get("200")
-    if method != "delete":
-        assert success["content"]["application/json"]["example"]
-
-    url = path(world)
-    data = body(world) if body else None
-    assert (await _call(client, method, url, data, {})).status_code == 401
-    if denied is not None:
-        forbidden = await _call(client, method, url, data, auth_header(getattr(world, denied)))
-        assert forbidden.status_code == 403, forbidden.text
-    response = await _call(client, method, url, data, auth_header(getattr(world, allowed)))
-    assert response.status_code == 501, response.text
-    assert response.json()["error"]["code"] == "NOT_IMPLEMENTED"
 
 
 async def test_sync_events_rejects_bad_envelope_but_not_unknown_type(

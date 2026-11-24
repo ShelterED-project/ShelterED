@@ -55,6 +55,7 @@ from app.services import lessons as service
 from app.workers.media import enqueue_process_video
 from app.workers.packs import enqueue_rebuild_for_lesson
 from app.workers.sync import enqueue_regrade_test
+from app.workers.tutor import enqueue_explain_lesson
 
 # Поля, від яких залежать оцінка й зарахування наявних спроб тесту.
 _GRADING_TEST_FIELDS = {"window_enabled", "window_hours"}
@@ -238,6 +239,8 @@ async def publish_lesson(
     правок збільшує `version`. Ідемпотентно. Пакети класів, де урок стоїть, перезбирає Celery."""
     lesson = await service.publish(session, lesson, settings)
     await enqueue_rebuild_for_lesson(lesson.id)
+    # Закешовані пояснення для офлайну; після них пакети перезберуться ще раз.
+    await enqueue_explain_lesson(lesson.id)
     return await service.lesson_out(session, lesson, storage, settings)
 
 

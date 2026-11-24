@@ -190,6 +190,19 @@ class Settings(BaseSettings):
     rate_limit_commons_import: int = 30
     rate_limit_commons_import_window_s: int = 600
 
+    # AI-сервіс (ШІ-репетитор, docs/ai-contract.md): `POST {AI_SERVICE_URL}/ai/v1/chat` із
+    # заголовком `X-Internal-Key`. Порожня адреса — репетитор вимкнений (503 AI_UNAVAILABLE,
+    # клієнт показує пояснення з пакета). Ключ не логується.
+    ai_service_url: str = ""
+    ai_internal_key: SecretStr = SecretStr("")
+    # Таймаут одного виклику, с; перевірка фото довша (спершу OCR, потім LLM).
+    ai_timeout_s: float = Field(default=30.0, gt=0)
+    ai_image_timeout_s: float = Field(default=45.0, gt=0)
+    # Фото зошита в `POST /tutor/ask` (JPEG/PNG), байти після декодування base64.
+    tutor_max_image_bytes: int = 4 * 1024 * 1024
+    # Як часто beat шукає опубліковані уроки без закешованих пояснень (AI був недоступний).
+    tutor_explanations_interval_s: int = 3600
+
     # Wikimedia Commons: API і файли лише з https://*.wikimedia.org. User-Agent — назва
     # проєкту без контактів людей (політика Wikimedia вимагає описовий UA).
     commons_api_url: str = "https://commons.wikimedia.org/w/api.php"
@@ -206,6 +219,8 @@ class Settings(BaseSettings):
     retention_auth_days: int = 7
     retention_parent_link_code_days: int = 30
     retention_wellbeing_view_log_days: int = 365
+    # Розмови з ШІ-репетитором (завдання, підказки, останні 8 реплік) — від останньої активності.
+    retention_tutor_conversation_days: int = 30
 
     # Web Push (B8): пара ключів VAPID (`python -m app.cli gen-vapid`) і контакт `mailto:` для
     # push-сервісів. Не задано — відправка пропускається з попередженням у лог.
@@ -273,6 +288,15 @@ class Settings(BaseSettings):
             and self.vapid_private_key.get_secret_value()
             and self.vapid_subject
         )
+
+    @property
+    def ai_enabled(self) -> bool:
+        return bool(self.ai_service_url)
+
+    @property
+    def tutor_max_body_bytes(self) -> int:
+        """Ліміт тіла `POST /tutor/ask`: фото в base64 (+1/3) і запас на решту полів."""
+        return self.tutor_max_image_bytes * 4 // 3 + 64 * 1024
 
     @property
     def alerts_polling_enabled(self) -> bool:

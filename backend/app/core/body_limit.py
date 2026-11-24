@@ -10,7 +10,8 @@
   з буфера; на перевищенні читання зупиняється.
 
 Завантаження медіа (`PUT /media/{id}`) іде потоком і має власні ліміти за типом файла
-(`MEDIA_MAX_*_BYTES`), тож тут пропускається. Основний ліміт на краю — `client_max_body_size`
+(`MEDIA_MAX_*_BYTES`), тож тут пропускається. `POST /tutor/ask` може нести фото зошита в base64,
+тож має власний, більший ліміт (`tutor_max_bytes`). Основний ліміт на краю — `client_max_body_size`
 у Nginx; цей — захист самого застосунку.
 """
 
@@ -23,25 +24,31 @@ from app.core.errors import error_response
 
 # Шляхи з власним лімітом (потокове завантаження медіа). `root_path` може стояти попереду.
 _EXEMPT = re.compile(r"(^|/)media/[^/]+$")
+# Запит до ШІ-репетитора з фото (ліміт `tutor_max_bytes`).
+_TUTOR = re.compile(r"(^|/)tutor/ask$")
 
 
 class BodySizeLimitMiddleware:
-    def __init__(self, app: ASGIApp, *, max_bytes: int) -> None:
+    def __init__(self, app: ASGIApp, *, max_bytes: int, tutor_max_bytes: int | None = None) -> None:
         self.app = app
         self.max_bytes = max_bytes
+        self.tutor_max_bytes = tutor_max_bytes or max_bytes
 
-    def _too_large(self) -> JSONResponse:
+    def _too_large(self, max_bytes: int) -> JSONResponse:
         return error_response(
             413,
             "PAYLOAD_TOO_LARGE",
             "Request body is too large",
-            details={"max_bytes": self.max_bytes},
+            details={"max_bytes": max_bytes},
         )
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http" or (scope["method"] == "PUT" and _EXEMPT.search(scope["path"])):
             await self.app(scope, receive, send)
             return
+        max_bytes = self.max_bytes
+        if scope["method"] == "POST" and _TUTOR.search(scope["path"]):
+            max_bytes = max(self.max_bytes, self.tutor_max_bytes)
         length = None
         for name, value in scope["headers"]:
             if name == b"content-length":
@@ -51,8 +58,8 @@ class BodySizeLimitMiddleware:
                     length = None
                 break
         if length is not None:
-            if length > self.max_bytes:
-                await self._too_large()(scope, receive, send)
+            if length > max_bytes:
+                await self._too_large(max_bytes)(scope, receive, send)
                 return
             await self.app(scope, receive, send)
             return
@@ -66,8 +73,8 @@ class BodySizeLimitMiddleware:
             if message["type"] != "http.request":
                 break
             size += len(message.get("body", b""))
-            if size > self.max_bytes:
-                await self._too_large()(scope, receive, send)
+            if size > max_bytes:
+                await self._too_large(max_bytes)(scope, receive, send)
                 return
             if not message.get("more_body", False):
                 break

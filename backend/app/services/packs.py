@@ -1,7 +1,8 @@
 """Пакети знань «Рюкзак» (B6): збірка, версії, маніфест, вміст.
 
 Пакет = клас + дата: розклад дня, опубліковані уроки дня (модулі, картки, тести без ключа
-відповідей), закешовані пояснення ШІ (поки порожні: сховища пояснень немає, B13.3).
+відповідей), закешовані пояснення ШІ до модулів уроків (B13.3, `tutor_explanation` тієї
+версії уроку, що в пакеті).
 Медіа в пакет не вкладаються: їх URL і розміри — у маніфесті, Service Worker кешує окремо.
 
 Збірка детермінована: хеш — sha256 канонічного JSON (сортовані ключі, без пробілів) вмісту без
@@ -43,6 +44,7 @@ from app.schemas.packs import (
 from app.schemas.school import ScheduleItem
 from app.services import lessons as lessons_service
 from app.services import school as school_service
+from app.services import tutor as tutor_service
 from app.services.schedule import ResolvedItem, local_date
 from app.workers.push import enqueue_push
 
@@ -241,8 +243,8 @@ async def build_content(
         "timezone": tz.key,
         "schedule": schedule,
         "lessons": pack_lessons,
-        # Закешовані пояснення ШІ (B13.3): сховища ще немає.
-        "explanations": [],
+        # Закешовані пояснення ШІ (B13.3): поява пояснення змінює хеш — нова версія пакета.
+        "explanations": await tutor_service.pack_explanations(session, versions),
         # Медіа й субтитри: заміна субтитрів відео змінює хеш, а отже й версію пакета.
         "media": sorted(str(m) for m in media),
     }
