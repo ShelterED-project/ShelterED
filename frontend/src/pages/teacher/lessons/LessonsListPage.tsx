@@ -2,7 +2,7 @@ import { useState } from 'react'
 import type { FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router'
 import { errorMessage, useCreateLessonMutation } from '@/features/teacher/lessonEditorApi'
-import { useLessonsQuery, useSubjectsQuery } from '@/features/teacher/teacherApi'
+import { useLessonsQuery, useSchoolLessonsQuery, useSubjectsQuery } from '@/features/teacher/teacherApi'
 import { generateId } from '@/shared/lib/uuid'
 import Spinner from '@/shared/ui/Spinner'
 import TeacherHeader from '../sections/TeacherHeader'
@@ -101,6 +101,7 @@ function NewLessonForm({ onCancel }: { onCancel: () => void }) {
 export default function LessonsListPage() {
   const lessons = useLessonsQuery()
   const { data: subjects } = useSubjectsQuery()
+  const { data: colleagues } = useSchoolLessonsQuery()
   const [creating, setCreating] = useState(false)
   const copy = useCopyLesson()
   const subjectName = new Map((subjects ?? []).map((s) => [s.id, s.name]))
@@ -129,6 +130,7 @@ export default function LessonsListPage() {
             <section className="flex flex-col gap-4 rounded-[22px] border border-accent/40 bg-surface p-5 md:p-6">
               <h2 className="font-heading text-xl leading-7 text-parchment">{lessonsList.emptyTitle}</h2>
               <p className="text-sm text-muted">{lessonsList.emptyText}</p>
+              {colleagues && colleagues.length > 0 && <p className="text-sm text-muted">{lessonsList.emptyColleagues}</p>}
               <ol className="grid gap-3 md:grid-cols-3">
                 {guideSteps.map((step, i) => (
                   <li key={step.title} className="flex flex-col gap-1 rounded-2xl border border-line-soft bg-surface-2 p-4">
@@ -190,6 +192,42 @@ export default function LessonsListPage() {
                 </li>
               ))}
             </ul>
+          )}
+
+          {colleagues && colleagues.length > 0 && (
+            <section className="flex flex-col gap-3">
+              <div className="flex flex-col gap-1">
+                <h2 className="font-heading text-xl leading-7 text-parchment">{lessonsList.colleaguesTitle}</h2>
+                <p className="text-sm text-dim">{lessonsList.colleaguesHint}</p>
+              </div>
+              <ul className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                {colleagues.map((lesson) => (
+                  <li key={lesson.id} className="flex flex-col rounded-2xl border border-line bg-surface">
+                    <div className="flex flex-1 flex-col gap-2 p-4">
+                      <span className="truncate text-xs text-dim">{subjectName.get(lesson.subject_id) ?? '—'}</span>
+                      <span className="text-[15px] leading-[22.5px] font-semibold text-parchment">{lesson.title}</span>
+                    </div>
+                    <div className="flex items-center justify-end gap-2 border-t border-line-soft px-2 py-1">
+                      {copy.error?.id === lesson.id && (
+                        <p role="alert" className="flex-1 px-2 text-xs font-semibold text-accent">
+                          {copy.error.message}
+                        </p>
+                      )}
+                      <button
+                        type="button"
+                        title={lessonsList.copyHint}
+                        disabled={copy.busyId !== null}
+                        onClick={() => void copy.run(lesson)}
+                        className="inline-flex min-h-10 items-center gap-2 rounded-[10px] px-3 text-sm font-semibold text-muted hover:text-parchment focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:outline-none disabled:opacity-50"
+                      >
+                        {copy.busyId === lesson.id && <Spinner />}
+                        {copy.busyId === lesson.id ? lessonsList.copying : lessonsList.copy}
+                      </button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </section>
           )}
         </main>
       </div>

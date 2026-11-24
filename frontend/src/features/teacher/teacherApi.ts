@@ -213,6 +213,11 @@ export const teacherApi = baseApi.injectEndpoints({
       query: () => '/lessons',
       providesTags: ['LessonList'],
     }),
+    /** Опубліковані уроки колег зі школи вчителя (без власних) */
+    schoolLessons: build.query<LessonSummary[], void>({
+      query: () => '/lessons?scope=school',
+      providesTags: ['LessonList'],
+    }),
   }),
 })
 
@@ -227,4 +232,5 @@ export const {
   useClassScheduleQuery,
   useSubjectsQuery,
   useLessonsQuery,
+  useSchoolLessonsQuery,
 } = teacherApi
