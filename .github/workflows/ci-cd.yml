@@ -164,11 +164,12 @@ jobs:
 
             # Бекенд при старті сам застосовує міграції до Neon (backend/start.sh).
             docker compose -f docker-compose.prod.yml up -d --remove-orphans
-            # Redis, створений до зміни мережі compose, міг лишитися в старій мережі: тоді
-            # backend і Celery не бачать хост `redis`. Перестворюємо його в мережі бекенду.
+            # Redis, створений до зміни мережі compose, міг лишитися без DNS-імені `redis` у мережі
+            # проєкту: тоді backend і Celery його не бачать. Перестворюємо його.
             nets() { docker inspect -f '{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}' "$1" 2>/dev/null; }
-            if [ "$(nets shelter_redis)" != "$(nets shelter_backend)" ]; then
-              echo "Redis is on another network: recreating"
+            sleep 5
+            if [ "$(nets shelter_redis)" != "$(nets shelter_backend)" ] || ! docker exec shelter_backend getent hosts redis >/dev/null 2>&1; then
+              echo "Redis is not reachable by name: recreating"
               docker compose -f docker-compose.prod.yml up -d --force-recreate redis
               docker compose -f docker-compose.prod.yml restart backend celery_worker celery_media celery_beat
             fi
