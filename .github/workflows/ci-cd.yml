@@ -164,6 +164,14 @@ jobs:
 
             # Бекенд при старті сам застосовує міграції до Neon (backend/start.sh).
             docker compose -f docker-compose.prod.yml up -d --remove-orphans
+            # Redis, створений до зміни мережі compose, міг лишитися в старій мережі: тоді
+            # backend і Celery не бачать хост `redis`. Перестворюємо його в мережі бекенду.
+            nets() { docker inspect -f '{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}' "$1" 2>/dev/null; }
+            if [ "$(nets shelter_redis)" != "$(nets shelter_backend)" ]; then
+              echo "Redis is on another network: recreating"
+              docker compose -f docker-compose.prod.yml up -d --force-recreate redis
+              docker compose -f docker-compose.prod.yml restart backend celery_worker celery_media celery_beat
+            fi
             docker image prune -f
             sleep 10
             docker compose -f docker-compose.prod.yml ps
@@ -175,7 +183,13 @@ jobs:
             fi
             # Бекенд спершу застосовує міграції, тож чекаємо до ~2 хв, перш ніж вважати деплой невдалим.
             for i in $(seq 1 40); do
-              if curl -fsS http://127.0.0.1:8000/health; then echo; exit 0; fi
+              if curl -fsS http://127.0.0.1:8000/health; then
+                echo
+                # Коротка діагностика фонових задач (без секретів): видно, чи Celery працює.
+                echo "--- networks: redis=[$(nets shelter_redis)] backend=[$(nets shelter_backend)]"
+                for c in shelter_celery shelter_celery_beat; do echo "--- $c"; docker logs --tail 25 "$c" 2>&1 | tail -25; done
+                exit 0
+              fi
               sleep 3
             done
             echo "Backend is not healthy"; docker logs --tail 60 shelter_backend; exit 1
