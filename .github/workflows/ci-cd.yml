@@ -187,7 +187,13 @@ jobs:
                 echo
                 # Коротка діагностика фонових задач (без секретів): видно, чи Celery працює.
                 echo "--- networks: redis=[$(nets shelter_redis)] backend=[$(nets shelter_backend)]"
-                for c in shelter_celery shelter_celery_beat; do echo "--- $c"; docker logs --tail 25 "$c" 2>&1 | tail -25; done
+                sleep 20
+                for c in shelter_celery shelter_celery_media shelter_celery_beat; do
+                  echo "--- $c: $(docker inspect -f 'status={{.State.Status}} oom={{.State.OOMKilled}} restarts={{.RestartCount}} exit={{.State.ExitCode}}' "$c")"
+                  docker logs --tail 20 "$c" 2>&1 | tail -20
+                done
+                echo "--- redis from backend:"
+                docker exec shelter_backend python -c "from app.core.config import get_settings as g; import redis; print(redis.Redis.from_url(g().redis_url, socket_timeout=3).ping())" 2>&1 | tail -3
                 exit 0
               fi
               sleep 3
