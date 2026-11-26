@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     MODEL_EXPLAIN: str | None = None   # explain і check для text (інакше MODELS)
     MODEL_FAST: str | None = None      # practice: завдання й підказки (інакше MODELS)
     LLM_TIMEOUT: float = 12.0           # секунди
+    LLM_ANALYSIS_TIMEOUT: float = 60.0  # один виклик LLM в /ai/v1/test-analysis (довгий JSON)
     MODEL_OCR: str | None = None
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")

@@ -1,9 +1,12 @@
 # ShelterED AI-сервіс
 
-Stateless FastAPI-сервіс без бази даних. Ендпоінти: `POST /ai/v1/chat`, `GET /health`.
+Stateless FastAPI-сервіс без бази даних. Ендпоінти: `POST /ai/v1/chat` (репетитор),
+`POST /ai/v1/test-analysis` (аналіз тесту класу), `GET /health`.
 
 - Контракт: [`contracts/openapi.yaml`](../contracts/openapi.yaml)
-- Інструкція для backend: [`docs/backend-quickstart.md`](../docs/backend-quickstart.md)
+- Інструкція для backend: [`docs/backend-quickstart.md`](../docs/backend-quickstart.md),
+  аналіз тестів: [`docs/backend-test-analysis.md`](../docs/backend-test-analysis.md)
+- Тести: `pip install pytest` і `pytest -q` з папки `ai-service` (LLM не викликається)
 
 ## Запуск
 
@@ -34,6 +37,7 @@ curl -X POST localhost:8000/ai/v1/chat \
 | `MOCK_LLM` | `true` повертає заглушку без LLM і OCR |
 | `MODEL_EXPLAIN`, `MODEL_FAST`, `MODEL_OCR` | необов'язкові, інакше `MODELS` (OCR — `rukopys-ocr`) |
 | `LLM_TIMEOUT` | таймаут одного виклику LLM, с (12) |
+| `LLM_ANALYSIS_TIMEOUT` | таймаут одного виклику LLM в аналізі тесту, с (60) |
 
 ## Запуск на своєму ПК і доступ для backend
 

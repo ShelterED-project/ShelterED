@@ -3,11 +3,18 @@
 import hmac
 import logging
 
+from app.analysis import InvalidTestError, analyze
 from app.config import settings
 from app.graph import app_graph
 from app.llm import LLMError
 from app.ocr import InvalidImageError
-from app.schemas import ChatRequest, ChatResponse, IntentEnum
+from app.schemas import (
+    ChatRequest,
+    ChatResponse,
+    IntentEnum,
+    TestAnalysisRequest,
+    TestAnalysisResponse,
+)
 from fastapi import FastAPI, Header, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -59,6 +66,11 @@ async def validation_error_handler(request: Request, exc: RequestValidationError
 @app.exception_handler(InvalidImageError)
 async def invalid_image_handler(request: Request, exc: InvalidImageError):
     return _error(422, "invalid_image", "image_base64 is not a valid image", None, request)
+
+
+@app.exception_handler(InvalidTestError)
+async def invalid_test_handler(request: Request, exc: InvalidTestError):
+    return _error(422, "invalid_test", str(exc), None, request)
 
 
 @app.exception_handler(LLMError)
@@ -130,3 +142,16 @@ async def chat(
     )
     headers = {"X-Request-ID": x_request_id} if x_request_id else {}
     return JSONResponse(content=response.model_dump(mode="json"), headers=headers)
+
+
+@app.post("/ai/v1/test-analysis", response_model=TestAnalysisResponse)
+async def test_analysis(
+    req: TestAnalysisRequest,
+    x_internal_key: str | None = Header(default=None),
+    x_request_id: str | None = Header(default=None),
+):
+    """Аналіз тесту всього класу. Підрахунки — код, формулювання — LLM (без даних учнів)."""
+    auth(x_internal_key)
+    result = await analyze(req)
+    headers = {"X-Request-ID": x_request_id} if x_request_id else {}
+    return JSONResponse(content=result.model_dump(mode="json"), headers=headers)

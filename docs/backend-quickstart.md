@@ -4,6 +4,11 @@ AI-сервіс — окремий FastAPI на ПК AI-розробника, д
 Backend звертається до нього одним HTTP-запитом.
 Повна схема: [`contracts/openapi.yaml`](../contracts/openapi.yaml), або Swagger: `<AI_SERVICE_URL>/docs`.
 
+Ендпоінти:
+- `POST /ai/v1/chat` — AI-репетитор (ця інструкція);
+- `POST /ai/v1/test-analysis` — аналіз тесту класу: висновок вчителю, фідбек учню й батькам
+  ([`backend-test-analysis.md`](backend-test-analysis.md)).
+
 ## 1. Налаштування
 
 `.env` backend:
@@ -36,13 +41,13 @@ from app.core.errors import AppError
 logger = logging.getLogger(__name__)
 
 
-async def ask_ai(payload: dict, timeout: float = 30) -> dict:
-    """POST /ai/v1/chat. Будь-яка проблема з AI → 503 AI_UNAVAILABLE."""
+async def ask_ai(payload: dict, timeout: float = 30, path: str = "/ai/v1/chat") -> dict:
+    """POST до AI-сервісу. Будь-яка проблема з AI → 503 AI_UNAVAILABLE."""
     s = get_settings()
     try:
         async with httpx.AsyncClient(timeout=timeout) as client:
             r = await client.post(
-                f"{s.ai_service_url}/ai/v1/chat",
+                f"{s.ai_service_url}{path}",
                 json=payload,
                 headers={"X-Internal-Key": s.ai_internal_key.get_secret_value()},
             )
@@ -66,7 +71,7 @@ Backend сам бере з БД клас, предмет, назву модул�
 data = await ask_ai({
     "action": "explain",                 # необов'язково: без нього вирішить роутер
     "grade": lesson.grade,
-    "subject": subject.code,             # "math"
+    "subject": subject.name,             # «Математика»
     "topic": module.title,
     "topic_id": str(module.id),
     "message": f"Поясни цей матеріал іншими словами, з одним прикладом:\n{card_text[:3000]}",

@@ -16,18 +16,20 @@ info:
     **Приватність**: у запит не передаються ім'я, email, школа. `user_id` — лише псевдонім
     (HMAC від id користувача з секретом backend).
 
-    Коротка інструкція для backend: `docs/backend-quickstart.md`.
+    Коротка інструкція для backend: `docs/backend-quickstart.md`,
+    аналіз тестів: `docs/backend-test-analysis.md`.
 servers:
   - url: https://{tunnel}
-    description: Сервіс на ПК AI-розробника через тунель (адресу дає AI-розробник)
+    description: Сервіс на ПК AI-розробника через ngrok (постійну адресу дає AI-розробник)
     variables:
       tunnel:
-        default: example.trycloudflare.com
+        default: example.ngrok-free.dev
   - url: http://localhost:8000
     description: Локально
 
 tags:
   - name: chat
+  - name: analysis
   - name: system
 
 paths:
@@ -282,6 +284,141 @@ paths:
               schema: { $ref: '#/components/schemas/Error' }
               example: { code: model_unavailable, message: LLM request failed, details: null }
 
+  /ai/v1/test-analysis:
+    post:
+      tags: [analysis]
+      operationId: testAnalysis
+      summary: Аналіз тесту всього класу — висновок для вчителя, фідбек учню й батькам
+      description: |
+        Backend надсилає тест (питання з ключами) і відповіді всіх учнів, які його написали.
+        Сервіс повертає:
+        - `class_summary` — висновок і рекомендації для вчителя, середній бал, хто потребує підтримки;
+        - `skills` — вміння класу від найслабшого до найсильнішого;
+        - `questions` — статистика кожного питання: які хибні варіанти обирали й хто;
+        - `misconceptions` — типові помилки (однакове хибне уявлення в кількох учнів,
+          об'єднане між питаннями) зі списком учнів;
+        - `students` — для кожного учня: бал, слабкі й сильні вміння, тексти `feedback`
+          для вчителя, учня й батьків (Markdown).
+
+        **Як рахується.** Оцінки, групи й типові помилки рахує код — так само, як backend:
+        питання зараховане, лише якщо множина обраних варіантів дорівнює `answer_key`.
+        LLM отримує тільки знеособлену статистику класу (без `student_id`) і формулює слова:
+        назви вмінь, висновок, пояснення помилок, поради.
+
+        **LLM недоступна** — відповідь однаково `200`: статистика ціла, тексти шаблонні,
+        `llm_used: false`. `503` цей ендпоінт не повертає.
+
+        **Тривалість:** 10–60 с (кілька паралельних викликів LLM). Таймаут клієнта — 90 с.
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+      security:
+        - InternalKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TestAnalysisRequest' }
+            examples:
+              class_5_fractions:
+                summary: 5 клас, дроби, 8 питань, 24 учні
+                externalValue: ./examples/test_analysis.json
+              minimal:
+                summary: Мінімальний запит
+                value:
+                  grade: 5
+                  questions:
+                    - id: 7f1c0a52-0000-4000-8000-000000000001
+                      prompt: 1/5 + 2/5 = ?
+                      options: [{ id: a, text: 3/10 }, { id: b, text: 3/5 }]
+                      answer_key: [b]
+                  students:
+                    - { student_id: stu_01, answers: { 7f1c0a52-0000-4000-8000-000000000001: [b] } }
+                    - { student_id: stu_02, answers: { 7f1c0a52-0000-4000-8000-000000000001: [a] } }
+      responses:
+        '200':
+          description: Аналіз готовий (у тому числі без LLM — див. `llm_used`)
+          headers:
+            X-Request-ID: { $ref: '#/components/headers/RequestId' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TestAnalysisResponse' }
+              example:
+                class_summary:
+                  students_total: 24
+                  average_score_pct: 65.1
+                  passed_count: 15
+                  pass_score_pct: 60
+                  needs_support_ids: [stu_17, stu_19, stu_21]
+                  overview: >-
+                    Клас добре розуміє віднімання дробів (79%), але половина учнів (12 з 24) додає
+                    знаменники разом із чисельниками — ця помилка повторюється в питаннях 1, 5 і 6.
+                    Третина класу плутає чисельник і знаменник. Почніть наступний урок із наочної моделі.
+                  recommendations:
+                    - Розберіть 1/5 + 2/5 на смужці паперу, поділеній на 5 частин.
+                    - Попросіть учнів своїми словами пояснити, що показує знаменник.
+                skills:
+                  - { skill: Додавання дробів, question_ids: [q1, q6], correct_pct: 58.3, status: attention }
+                  - { skill: Віднімання дробів, question_ids: [q2], correct_pct: 79.2, status: ok }
+                questions:
+                  - question_id: q1
+                    position: 1
+                    skill: Додавання дробів
+                    correct_pct: 50.0
+                    correct_count: 12
+                    answered_count: 24
+                    status: attention
+                    wrong_answers:
+                      - { option_ids: [a], option_text: 3/10, count: 12, student_ids: [stu_09, stu_10, stu_21] }
+                misconceptions:
+                  - id: m1
+                    title: Додають знаменники разом із чисельниками
+                    explanation: >-
+                      Учні переносять правило додавання натуральних чисел на дроби. Покажіть на моделі,
+                      що розмір частинок (знаменник) не змінюється.
+                    question_ids: [q1, q5, q6]
+                    student_ids: [stu_09, stu_10, stu_21]
+                    share_pct: 50.0
+                    evidence:
+                      - { question_id: q1, option_ids: [a], option_text: 3/10, count: 12 }
+                      - { question_id: q5, option_ids: [a], option_text: 5/16, count: 8 }
+                students:
+                  - student_id: stu_10
+                    score_pct: 62.5
+                    passed: true
+                    status: ok
+                    correct_question_ids: [q2, q3, q4, q7, q8]
+                    wrong_question_ids: [q1, q5, q6]
+                    strong_skills: [Віднімання дробів, Зміст чисельника і знаменника]
+                    weak_skills: [Додавання дробів, Задачі на дроби]
+                    misconception_ids: [m1]
+                    feedback:
+                      teacher: "**62%** (5/8). Помилки в питаннях: 1, 5, 6. Типові помилки: Додають знаменники разом із чисельниками. Слабкі місця: Додавання дробів, Задачі на дроби."
+                      student: "Правильних відповідей: **5 з 8**.\nДобре виходить: Віднімання дробів, Зміст чисельника і знаменника. 👍\n\nВарто повторити:\n- **Додавання дробів** — Знаменник показує, на скільки частин поділили ціле, тому під час додавання він не змінюється.\n- **Задачі на дроби**\n\nЯкщо щось незрозуміло, спитай AI-репетитора: він пояснить інакше. Ти впораєшся! 💪"
+                      parent: "Тест «Дроби: перевір себе»: правильних відповідей **5 з 8** (62%).\nДобре виходить: Віднімання дробів.\nВарто повторити разом: Додавання дробів, Задачі на дроби.\n\nЯк допомогти вдома:\n- Поріжте яблуко на 4 рівні частини й порахуйте разом: одна частина й ще дві — скільки четвертин?"
+                llm_used: true
+        '401':
+          description: Відсутній або невірний `X-Internal-Key`
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { code: unauthorized, message: Invalid or missing X-Internal-Key, details: null }
+        '422':
+          description: |
+            `code`:
+            - `validation_error` — тіло не відповідає схемі (немає учнів, >60 учнів, >50 питань тощо);
+            - `invalid_test` — тест суперечливий: `answer_key` не з варіантів, дублікати id
+              питань / варіантів / учнів, у `single` не рівно один правильний варіант.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { code: invalid_test, message: "question q3: answer_key is not among options", details: null }
+        '500':
+          description: Непередбачена помилка сервісу
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { code: internal_error, message: Internal server error, details: null }
+
 components:
   securitySchemes:
     InternalKey:
@@ -464,6 +601,167 @@ components:
         code:
           type: string
           description: Машиночитний код. Нові коди можуть з'являтися.
-          examples: [unauthorized, validation_error, task_required, topic_required, invalid_image, model_unavailable, internal_error]
+          examples: [unauthorized, validation_error, task_required, topic_required, invalid_image, invalid_test, model_unavailable, internal_error]
         message: { type: string, description: Для логів, не для учня }
         details: { description: Додаткові дані (для validation_error — список полів) }
+
+    # ---------- /ai/v1/test-analysis ----------
+
+    TAOption:
+      type: object
+      required: [id, text]
+      properties:
+        id: { type: string, minLength: 1, maxLength: 16 }
+        text: { type: string, maxLength: 500 }
+
+    TAQuestion:
+      type: object
+      required: [id, prompt, options, answer_key]
+      description: Питання тесту як у таблиці `question` backend.
+      properties:
+        id: { type: string, minLength: 1, maxLength: 64, description: '`question.id`' }
+        prompt: { type: string, minLength: 1, maxLength: 2000 }
+        kind: { type: string, enum: [single, multiple], default: single }
+        options: { type: array, minItems: 2, maxItems: 10, items: { $ref: '#/components/schemas/TAOption' } }
+        answer_key: { type: array, minItems: 1, maxItems: 10, items: { type: string }, description: id правильних варіантів }
+        points: { type: integer, minimum: 1, maximum: 100, default: 1 }
+
+    TAStudent:
+      type: object
+      required: [student_id]
+      properties:
+        student_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+          description: Псевдонім учня (той самий, що backend потім зіставить зі своїм id). Не ім'я.
+        answers:
+          type: object
+          additionalProperties: { type: array, items: { type: string } }
+          description: '`attempt.answers` як є: `{"<question_id>": ["a"]}`. Немає питання або `[]` — неправильно.'
+
+    TestAnalysisRequest:
+      type: object
+      required: [grade, questions, students]
+      properties:
+        grade: { type: integer, minimum: 1, maximum: 11 }
+        subject: { type: [string, 'null'], maxLength: 100 }
+        lesson_title: { type: [string, 'null'], maxLength: 200, description: Тема для контексту LLM і тексту батькам }
+        test_title: { type: [string, 'null'], maxLength: 200 }
+        pass_score_pct: { type: number, minimum: 0, maximum: 100, default: 60, description: '= STATS_PASS_SCORE backend' }
+        questions: { type: array, minItems: 1, maxItems: 50, items: { $ref: '#/components/schemas/TAQuestion' } }
+        students:
+          type: array
+          minItems: 1
+          maxItems: 60
+          description: Лише зараховані спроби (`credit_status = credited`), по одній на учня
+          items: { $ref: '#/components/schemas/TAStudent' }
+
+    TAStatus:
+      type: string
+      enum: [ok, attention, critical]
+      description: "`critical` < 50% правильних, `attention` < 75%, інакше `ok`"
+
+    TAWrongAnswer:
+      type: object
+      required: [option_ids, option_text, count, student_ids]
+      properties:
+        option_ids: { type: array, items: { type: string }, description: '`[]` — питання пропущене' }
+        option_text: { type: string }
+        count: { type: integer }
+        student_ids: { type: array, items: { type: string } }
+
+    TAQuestionStat:
+      type: object
+      required: [question_id, position, skill, correct_pct, correct_count, answered_count, status, wrong_answers]
+      properties:
+        question_id: { type: string }
+        position: { type: integer, description: Номер питання в запиті, з 1 }
+        skill: { type: string, description: Назва вміння від LLM або «Питання N» }
+        correct_pct: { type: number }
+        correct_count: { type: integer }
+        answered_count: { type: integer }
+        status: { $ref: '#/components/schemas/TAStatus' }
+        wrong_answers: { type: array, items: { $ref: '#/components/schemas/TAWrongAnswer' }, description: Від найчастішої }
+
+    TASkill:
+      type: object
+      required: [skill, question_ids, correct_pct, status]
+      properties:
+        skill: { type: string }
+        question_ids: { type: array, items: { type: string } }
+        correct_pct: { type: number, description: Зважено за балами питань }
+        status: { $ref: '#/components/schemas/TAStatus' }
+
+    TAEvidence:
+      type: object
+      required: [question_id, option_ids, option_text, count]
+      properties:
+        question_id: { type: string }
+        option_ids: { type: array, items: { type: string } }
+        option_text: { type: string }
+        count: { type: integer }
+
+    TAMisconception:
+      type: object
+      required: [id, title, explanation, question_ids, student_ids, share_pct, evidence]
+      description: |
+        Однаковий хибний варіант у ≥ 2 учнів і ≥ 10% класу. Помилки з однією причиною в різних
+        питаннях об'єднані (тоді кілька `evidence`).
+      properties:
+        id: { type: string, description: 'Унікальний у межах відповіді (m1, m2…)' }
+        title: { type: string, description: Суть хибного уявлення }
+        explanation: { type: string, description: Для вчителя — чому так помиляються і як розібрати }
+        question_ids: { type: array, items: { type: string } }
+        student_ids: { type: array, items: { type: string } }
+        share_pct: { type: number }
+        evidence: { type: array, items: { $ref: '#/components/schemas/TAEvidence' } }
+
+    TAFeedback:
+      type: object
+      required: [teacher, student, parent]
+      description: Markdown. Кожен текст — лише для своєї ролі; порівнянь з іншими учнями немає.
+      properties:
+        teacher: { type: string }
+        student: { type: string }
+        parent: { type: string }
+
+    TAStudentResult:
+      type: object
+      required: [student_id, score_pct, passed, status, correct_question_ids, wrong_question_ids, strong_skills, weak_skills, misconception_ids, feedback]
+      properties:
+        student_id: { type: string }
+        score_pct: { type: number, description: Як `attempt.score` backend }
+        passed: { type: boolean }
+        status: { type: string, enum: [strong, ok, needs_support], description: "`strong` ≥ 85%, `needs_support` < pass_score_pct" }
+        correct_question_ids: { type: array, items: { type: string } }
+        wrong_question_ids: { type: array, items: { type: string } }
+        strong_skills: { type: array, items: { type: string } }
+        weak_skills: { type: array, items: { type: string } }
+        misconception_ids: { type: array, items: { type: string } }
+        feedback: { $ref: '#/components/schemas/TAFeedback' }
+
+    TAClassSummary:
+      type: object
+      required: [students_total, average_score_pct, passed_count, pass_score_pct, needs_support_ids, overview, recommendations]
+      properties:
+        students_total: { type: integer }
+        average_score_pct: { type: number }
+        passed_count: { type: integer }
+        pass_score_pct: { type: number }
+        needs_support_ids: { type: array, items: { type: string } }
+        overview: { type: string, description: Висновок для вчителя (3–5 речень) }
+        recommendations: { type: array, items: { type: string }, description: 2–4 дії на наступний урок }
+
+    TestAnalysisResponse:
+      type: object
+      required: [class_summary, skills, questions, misconceptions, students, llm_used]
+      properties:
+        class_summary: { $ref: '#/components/schemas/TAClassSummary' }
+        skills: { type: array, items: { $ref: '#/components/schemas/TASkill' }, description: Від найслабшого }
+        questions: { type: array, items: { $ref: '#/components/schemas/TAQuestionStat' } }
+        misconceptions: { type: array, items: { $ref: '#/components/schemas/TAMisconception' }, description: Від найпоширенішої }
+        students: { type: array, items: { $ref: '#/components/schemas/TAStudentResult' } }
+        llm_used:
+          type: boolean
+          description: "`false` — LLM недоступна, тексти шаблонні (статистика однаково точна)"
