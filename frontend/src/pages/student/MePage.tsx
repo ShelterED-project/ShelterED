@@ -1,6 +1,7 @@
 import { useCurrentUser } from '@/features/auth/useCurrentUser'
 import type { StudentProgress, StudentTest, StudentTestStatus } from '@/features/student/studentApi'
 import { useStudentProgress } from '@/features/student/useStudentProgress'
+import TestFeedbackCard from '@/features/test-analysis/TestFeedbackCard'
 import { mePage } from './content'
 import PageHeader, { MobileTitle } from './sections/PageHeader'
 import StudentSidebar from './sections/StudentSidebar'
@@ -156,13 +157,15 @@ export default function MePage() {
         <main className="flex flex-col gap-5 px-5 pt-6 pb-24 md:px-8 md:pb-8 xl:gap-6 xl:px-10 xl:py-8">
           <MobileTitle title={user?.fullName ?? mePage.title} subtitle={status} />
           {isOffline && progress && <p className="text-sm text-dim">{mePage.offline}</p>}
+          {!progress && !isLoading && <TestFeedbackCard studentId={user?.id ?? null} audience="student" />}
           {progress && (
             <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:gap-6">
               <div className="flex flex-col gap-5 xl:w-[400px] xl:shrink-0 xl:gap-6">
                 <StudyCard study={progress.study} />
                 <TestsCard tests={progress.tests} />
               </div>
-              <div className="xl:min-w-0 xl:flex-1">
+              <div className="flex flex-col gap-5 xl:min-w-0 xl:flex-1 xl:gap-6">
+                <TestFeedbackCard studentId={user?.id ?? null} audience="student" />
                 <LessonsCard lessons={progress.lessons} />
               </div>
             </div>

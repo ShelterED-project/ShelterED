@@ -46,6 +46,7 @@ celery_app = Celery(
         "app.workers.outbox",
         "app.workers.media",
         "app.workers.tutor",
+        "app.workers.test_analysis",
     ],
 )
 

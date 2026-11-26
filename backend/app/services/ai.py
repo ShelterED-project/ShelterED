@@ -1,7 +1,8 @@
 """Клієнт AI-сервісу (контракт: docs/ai-contract.md → `contracts/openapi.yaml` AI-сервісу).
 
-Один виклик — `POST {AI_SERVICE_URL}/ai/v1/chat` із заголовком `X-Internal-Key`. Сервіс
-stateless: завдання, підказки й історію зберігає backend (services/tutor.py).
+Виклики — `POST {AI_SERVICE_URL}/ai/v1/chat` (репетитор) і `POST /ai/v1/test-analysis`
+(аналіз тесту класу, services/test_analysis.py) із заголовком `X-Internal-Key`. Сервіс
+stateless: завдання, підказки, історію й аналізи зберігає backend.
 
 Помилки для учня:
 - адреса не задана, з'єднання/таймаут, 5xx, 401, 404 тунелю, непридатна відповідь →
@@ -28,6 +29,7 @@ from app.core.logging import request_id_var
 logger = logging.getLogger(__name__)
 
 CHAT_PATH = "/ai/v1/chat"
+TEST_ANALYSIS_PATH = "/ai/v1/test-analysis"
 INTENTS = ("explain", "practice", "check", "safety")
 
 
@@ -65,12 +67,14 @@ class AIClient:
         *,
         timeout_s: float = 30.0,
         image_timeout_s: float = 45.0,
+        analysis_timeout_s: float = 120.0,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self._key = internal_key
         self.timeout_s = timeout_s
         self.image_timeout_s = image_timeout_s
+        self.analysis_timeout_s = analysis_timeout_s
         self._transport = transport
 
     @classmethod
@@ -82,6 +86,7 @@ class AIClient:
             settings.ai_internal_key.get_secret_value(),
             timeout_s=settings.ai_timeout_s,
             image_timeout_s=settings.ai_image_timeout_s,
+            analysis_timeout_s=settings.ai_analysis_timeout_s,
             transport=transport,
         )
 
@@ -93,12 +98,7 @@ class AIClient:
         if not self.enabled:
             raise ai_unavailable()
         timeout = self.image_timeout_s if payload.get("image_base64") else self.timeout_s
-        headers = {"X-Internal-Key": self._key}
-        # Наскрізний id запиту для логів обох сервісів (у Celery-задачі — свій або немає).
-        request_id = request_id_var.get()
-        if request_id:
-            headers["X-Request-ID"] = request_id
-        response = await self._post(payload, headers, timeout)
+        response = await self._post(CHAT_PATH, payload, self._headers(), timeout)
         if response.status_code == 200:
             try:
                 return AIChatResponse.model_validate(response.json())
@@ -117,10 +117,48 @@ class AIClient:
             logger.warning("AI service error: status=%d code=%s", response.status_code, code)
         raise ai_unavailable()
 
+    async def test_analysis(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Аналіз тесту класу. Відповідь повертається як є (dict): backend лише підміняє
+        псевдоніми учнів і зберігає її в `test_analysis.result`.
+
+        Помилки: вимкнено/недоступно/5xx/непридатна відповідь → `AI_UNAVAILABLE`;
+        422 (запит не за схемою, напр. `invalid_test`) → `AI_BAD_REQUEST`."""
+        if not self.enabled:
+            raise ai_unavailable()
+        response = await self._post(
+            TEST_ANALYSIS_PATH, payload, self._headers(), self.analysis_timeout_s
+        )
+        if response.status_code == 200:
+            try:
+                body = response.json()
+            except ValueError:
+                body = None
+            if isinstance(body, dict) and isinstance(body.get("students"), list):
+                return body
+            logger.warning("AI service returned an unusable test-analysis body")
+            raise ai_unavailable()
+        code = _error_code(response)
+        if response.status_code == 401:
+            logger.error("AI service rejected the internal key (check AI_INTERNAL_KEY)")
+        elif response.status_code == 422:
+            logger.warning("AI service rejected test-analysis: status=422 code=%s", code)
+            raise AppError("AI_BAD_REQUEST", "AI service rejected the request", status_code=502)
+        else:
+            logger.warning("AI service error: status=%d code=%s", response.status_code, code)
+        raise ai_unavailable()
+
+    def _headers(self) -> dict[str, str]:
+        headers = {"X-Internal-Key": self._key}
+        # Наскрізний id запиту для логів обох сервісів (у Celery-задачі — свій або немає).
+        request_id = request_id_var.get()
+        if request_id:
+            headers["X-Request-ID"] = request_id
+        return headers
+
     async def _post(
-        self, payload: dict[str, Any], headers: dict[str, str], timeout: float
+        self, path: str, payload: dict[str, Any], headers: dict[str, str], timeout: float
     ) -> httpx.Response:
-        url = f"{self.base_url}{CHAT_PATH}"
+        url = f"{self.base_url}{path}"
         for attempt in (1, 2):
             try:
                 async with httpx.AsyncClient(timeout=timeout, transport=self._transport) as http:

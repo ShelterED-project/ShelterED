@@ -207,6 +207,12 @@ class Settings(BaseSettings):
     # Версія промпту пояснень: входить у ключ кешу пояснень (`tutor_explanation.cache_key`),
     # тож зміна генерує пояснення заново, а старі ключі стають невикористаними й прибираються.
     tutor_prompt_version: str = "1"
+    # AI-аналіз тесту класу (`POST /classes/{id}/tests/{id}/analysis`): мінімум зарахованих
+    # спроб; таймаут виклику AI, с (довгий JSON, кілька паралельних викликів LLM усередині);
+    # аналіз у `processing` довше за `AI_ANALYSIS_STALE_S` вважається завислим → `failed`.
+    ai_analysis_min_attempts: int = Field(default=3, ge=1)
+    ai_analysis_timeout_s: float = Field(default=120.0, gt=0)
+    ai_analysis_stale_s: int = Field(default=180, gt=0)
 
     # Wikimedia Commons: API і файли лише з https://*.wikimedia.org. User-Agent — назва
     # проєкту без контактів людей (політика Wikimedia вимагає описовий UA).

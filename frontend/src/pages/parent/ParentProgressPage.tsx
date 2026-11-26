@@ -1,6 +1,7 @@
 import { useChildDashboard, useChildWellbeing } from '@/features/parent/useChildDashboard'
 import type { WellbeingParent } from '@/features/parent/parentApi'
 import { childName, useParentChildren } from '@/features/parent/useParentChildren'
+import TestFeedbackCard from '@/features/test-analysis/TestFeedbackCard'
 import type { KnowledgeMap, StudentProgress, StudentTestStatus } from '@/features/student/studentApi'
 import { dateTimeLabel, shortDateLabel } from '@/shared/lib/date'
 import { loading, offline, progressPage as t, testStatus } from './content'
@@ -189,6 +190,7 @@ export default function ParentProgressPage() {
               <div className="flex flex-col gap-5 md:gap-6 xl:min-w-0 xl:flex-1">
                 <LessonsCard progress={dashboard.progress} />
                 <TestsCard progress={dashboard.progress} />
+                <TestFeedbackCard studentId={childId} audience="parent" />
               </div>
               <div className="flex flex-col gap-5 md:gap-6 xl:w-[400px] xl:shrink-0">
                 <MapCard knowledgeMap={dashboard.knowledgeMap} />

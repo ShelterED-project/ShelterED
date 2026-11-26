@@ -1,5 +1,7 @@
+import { useState } from 'react'
+import TestAnalysisPanel from '@/features/test-analysis/TestAnalysisPanel'
 import { useClassResults } from '@/features/teacher/useClassResults'
-import type { ClassGaps, ClassProgress, ClassTests, TestResultStatus } from '@/features/teacher/teacherApi'
+import type { ClassGaps, ClassProgress, ClassTest, ClassTests, TestResultStatus } from '@/features/teacher/teacherApi'
 import { classMap, testStatus } from './content'
 import TeacherHeader from './sections/TeacherHeader'
 import TeacherSidebar from './sections/TeacherSidebar'
@@ -68,7 +70,64 @@ const statusColor: Record<TestResultStatus, string> = {
   pending: 'text-dim',
 }
 
-function TestsSection({ tests }: { tests: ClassTests | null }) {
+function TestCard({ test, classId }: { test: ClassTest; classId: string | undefined }) {
+  const t = classMap.tests
+  const [open, setOpen] = useState(false)
+  return (
+    <details
+      className="rounded-2xl border border-line-soft p-4"
+      onToggle={(e) => setOpen(e.currentTarget.open)}
+    >
+      <summary className="cursor-pointer list-none focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:outline-none">
+        <p className="text-[15px] leading-[22.5px] font-medium text-parchment">
+          {test.lesson_title}: {test.title}
+        </p>
+        <p className="text-xs text-dim">
+          {test.window_hours ? t.window(test.window_hours) : t.noWindow} · {testStatus.passed} {test.counts.passed} ·{' '}
+          {testStatus.not_passed} {test.counts.not_passed} · {testStatus.closing_soon} {test.counts.closing_soon} ·{' '}
+          {testStatus.pending} {test.counts.pending}
+        </p>
+      </summary>
+      <div className="mt-3 overflow-x-auto">
+        <table className="w-full border-collapse text-left">
+          <thead>
+            <tr className="text-xs text-dim">
+              <th scope="col" className="pb-2 font-semibold">Учень</th>
+              <th scope="col" className="pb-2 font-semibold">Статус</th>
+              <th scope="col" className="pb-2 text-right font-semibold">Оцінка</th>
+            </tr>
+          </thead>
+          <tbody>
+            {test.students.map((student) => (
+              <tr key={student.student_id} className="border-t border-line-soft align-top">
+                <td className="py-2 pr-3 text-sm text-parchment">
+                  {[student.display_name, student.last_name].filter(Boolean).join(' ')}
+                  {student.is_suspicious && (
+                    <span className="block text-xs font-semibold text-accent">{t.suspicious}</span>
+                  )}
+                </td>
+                <td className={`py-2 pr-3 text-sm font-semibold ${statusColor[student.status]}`}>
+                  {testStatus[student.status]}
+                  {student.deadline && student.status !== 'passed' && (
+                    <span className="block text-xs font-normal text-dim">{t.deadline(dateTimeLabel(student.deadline))}</span>
+                  )}
+                </td>
+                <td className="py-2 text-right text-sm text-muted">
+                  {student.score !== null ? `${Math.round(student.score)}%` : '—'}
+                  {student.attempts > 0 && <span className="block text-xs text-dim">{t.attempts(student.attempts)}</span>}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {/* AI-аналіз тесту: запит до backend лише коли картку відкрито. */}
+      {open && classId && <TestAnalysisPanel classId={classId} test={test} />}
+    </details>
+  )
+}
+
+function TestsSection({ tests, classId }: { tests: ClassTests | null; classId: string | undefined }) {
   const t = classMap.tests
   const list = tests?.tests ?? []
   return (
@@ -81,51 +140,7 @@ function TestsSection({ tests }: { tests: ClassTests | null }) {
         <p className="text-sm text-muted">{t.empty}</p>
       ) : (
         list.map((test) => (
-          <details key={test.test_id} className="rounded-2xl border border-line-soft p-4">
-            <summary className="cursor-pointer list-none focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:outline-none">
-              <p className="text-[15px] leading-[22.5px] font-medium text-parchment">
-                {test.lesson_title}: {test.title}
-              </p>
-              <p className="text-xs text-dim">
-                {test.window_hours ? t.window(test.window_hours) : t.noWindow} · {testStatus.passed} {test.counts.passed} ·{' '}
-                {testStatus.not_passed} {test.counts.not_passed} · {testStatus.closing_soon} {test.counts.closing_soon} ·{' '}
-                {testStatus.pending} {test.counts.pending}
-              </p>
-            </summary>
-            <div className="mt-3 overflow-x-auto">
-              <table className="w-full border-collapse text-left">
-                <thead>
-                  <tr className="text-xs text-dim">
-                    <th scope="col" className="pb-2 font-semibold">Учень</th>
-                    <th scope="col" className="pb-2 font-semibold">Статус</th>
-                    <th scope="col" className="pb-2 text-right font-semibold">Оцінка</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {test.students.map((student) => (
-                    <tr key={student.student_id} className="border-t border-line-soft align-top">
-                      <td className="py-2 pr-3 text-sm text-parchment">
-                        {[student.display_name, student.last_name].filter(Boolean).join(' ')}
-                        {student.is_suspicious && (
-                          <span className="block text-xs font-semibold text-accent">{t.suspicious}</span>
-                        )}
-                      </td>
-                      <td className={`py-2 pr-3 text-sm font-semibold ${statusColor[student.status]}`}>
-                        {testStatus[student.status]}
-                        {student.deadline && student.status !== 'passed' && (
-                          <span className="block text-xs font-normal text-dim">{t.deadline(dateTimeLabel(student.deadline))}</span>
-                        )}
-                      </td>
-                      <td className="py-2 text-right text-sm text-muted">
-                        {student.score !== null ? `${Math.round(student.score)}%` : '—'}
-                        {student.attempts > 0 && <span className="block text-xs text-dim">{t.attempts(student.attempts)}</span>}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </details>
+          <TestCard key={test.test_id} test={test} classId={classId} />
         ))
       )}
     </section>
@@ -172,7 +187,7 @@ function GapsSection({ gaps }: { gaps: ClassGaps | null }) {
 }
 
 export default function ClassMapPage() {
-  const { progress, tests, gaps, isLoading, isOffline } = useClassResults()
+  const { teacherClass, progress, tests, gaps, isLoading, isOffline } = useClassResults()
 
   return (
     <div className="flex min-h-screen">
@@ -193,7 +208,7 @@ export default function ClassMapPage() {
           </div>
           <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:gap-6">
             <div className="flex flex-col gap-5 xl:min-w-0 xl:flex-1 xl:gap-6">
-              <TestsSection tests={tests} />
+              <TestsSection tests={tests} classId={teacherClass?.id} />
               <ProgressSection progress={progress} />
             </div>
             <div className="flex flex-col gap-5 xl:w-[420px] xl:shrink-0 xl:gap-6">

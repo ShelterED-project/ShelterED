@@ -17,6 +17,7 @@ from app.api import (
     school,
     stats,
     sync,
+    test_analysis,
     tutor,
     wellbeing,
 )
@@ -86,6 +87,7 @@ def create_app() -> FastAPI:
     app.include_router(alerts.router)
     app.include_router(push.router)
     app.include_router(tutor.router)
+    app.include_router(test_analysis.router)
     app.include_router(wellbeing.router)
     app.include_router(privacy.router)
     return app

@@ -388,6 +388,74 @@
         "title": "AlertStudyOut",
         "type": "object"
       },
+      "AnalysisError": {
+        "properties": {
+          "code": {
+            "description": "AI_UNAVAILABLE / AI_BAD_REQUEST / AI_TIMEOUT",
+            "title": "Code",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code"
+        ],
+        "title": "AnalysisError",
+        "type": "object"
+      },
+      "AnalysisStudentOut": {
+        "additionalProperties": true,
+        "description": "Елемент `result.students[]` після правки.",
+        "examples": [
+          {
+            "correct_question_ids": [],
+            "feedback": {
+              "parent": "Варто разом повторити додавання дробів з однаковими знаменниками.",
+              "student": "Ти добре стараєшся! Повтори правило: знаменник лишається тим самим.",
+              "teacher": "Додає чисельники й знаменники окремо."
+            },
+            "feedback_edited": false,
+            "misconception_ids": [
+              "m1"
+            ],
+            "passed": false,
+            "score_pct": 50.0,
+            "status": "needs_support",
+            "strong_skills": [],
+            "student_id": "0192f0a0-0000-7000-8000-0000000000cc",
+            "weak_skills": [
+              "Додавання дробів"
+            ],
+            "wrong_question_ids": [
+              "0192f0a0-0000-7000-8000-000000000401"
+            ]
+          }
+        ],
+        "properties": {
+          "feedback": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Feedback",
+            "type": "object"
+          },
+          "feedback_edited": {
+            "title": "Feedback Edited",
+            "type": "boolean"
+          },
+          "student_id": {
+            "format": "uuid",
+            "title": "Student Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "student_id",
+          "feedback",
+          "feedback_edited"
+        ],
+        "title": "AnalysisStudentOut",
+        "type": "object"
+      },
       "AssignmentOut": {
         "examples": [
           {
@@ -1791,6 +1859,43 @@
           "pack_day_bytes"
         ],
         "title": "ExtraLessonOut",
+        "type": "object"
+      },
+      "FeedbackEditIn": {
+        "additionalProperties": false,
+        "description": "Обидва поля необов'язкові: відсутнє — без змін, `null` — повернути текст AI.",
+        "examples": [
+          {
+            "student": "Новий текст для учня"
+          }
+        ],
+        "properties": {
+          "parent": {
+            "anyOf": [
+              {
+                "maxLength": 3000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent"
+          },
+          "student": {
+            "anyOf": [
+              {
+                "maxLength": 3000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Student"
+          }
+        },
+        "title": "FeedbackEditIn",
         "type": "object"
       },
       "GapQuestion": {
@@ -6471,6 +6576,176 @@
         "title": "SyncEventsResponse",
         "type": "object"
       },
+      "TestAnalysisOut": {
+        "examples": [
+          {
+            "attempts_count": 24,
+            "class_id": "0192f0a0-0000-7000-8000-000000000001",
+            "completed_at": "2026-12-08T10:15:41Z",
+            "created_at": "2026-12-08T10:15:02Z",
+            "created_by": "0192f0a0-0000-7000-8000-0000000000aa",
+            "id": "0192f0a0-0000-7000-8000-000000000a01",
+            "result": {
+              "class_summary": {
+                "average_score_pct": 68.5,
+                "needs_support_ids": [
+                  "0192f0a0-0000-7000-8000-0000000000cc"
+                ],
+                "overview": "Клас загалом засвоїв тему…",
+                "pass_score_pct": 60,
+                "passed_count": 17,
+                "recommendations": [
+                  "Повторити правило додавання дробів"
+                ],
+                "students_total": 24
+              },
+              "llm_used": true,
+              "misconceptions": [],
+              "questions": [],
+              "skills": [],
+              "students": [
+                {
+                  "correct_question_ids": [],
+                  "feedback": {
+                    "parent": "Варто разом повторити додавання дробів з однаковими знаменниками.",
+                    "student": "Ти добре стараєшся! Повтори правило: знаменник лишається тим самим.",
+                    "teacher": "Додає чисельники й знаменники окремо."
+                  },
+                  "feedback_edited": false,
+                  "misconception_ids": [
+                    "m1"
+                  ],
+                  "passed": false,
+                  "score_pct": 50.0,
+                  "status": "needs_support",
+                  "strong_skills": [],
+                  "student_id": "0192f0a0-0000-7000-8000-0000000000cc",
+                  "weak_skills": [
+                    "Додавання дробів"
+                  ],
+                  "wrong_question_ids": [
+                    "0192f0a0-0000-7000-8000-000000000401"
+                  ]
+                }
+              ]
+            },
+            "status": "draft",
+            "test_id": "0192f0a0-0000-7000-8000-000000000301"
+          }
+        ],
+        "properties": {
+          "attempts_count": {
+            "description": "Зараховані спроби класу на момент запуску",
+            "title": "Attempts Count",
+            "type": "integer"
+          },
+          "class_id": {
+            "format": "uuid",
+            "title": "Class Id",
+            "type": "string"
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "created_by": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AnalysisError"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Лише при `failed`"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "published_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published At"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Відповідь AI зі справжніми id учнів і правками вчителя; null, поки `processing` чи `failed`",
+            "title": "Result"
+          },
+          "status": {
+            "enum": [
+              "processing",
+              "draft",
+              "published",
+              "failed"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "test_id": {
+            "format": "uuid",
+            "title": "Test Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "class_id",
+          "test_id",
+          "status",
+          "attempts_count",
+          "created_at",
+          "created_by",
+          "completed_at",
+          "published_at",
+          "error",
+          "result"
+        ],
+        "title": "TestAnalysisOut",
+        "type": "object"
+      },
       "TestCreate": {
         "examples": [
           {
@@ -6520,6 +6795,116 @@
           "title"
         ],
         "title": "TestCreate",
+        "type": "object"
+      },
+      "TestFeedbackItem": {
+        "properties": {
+          "analysis_id": {
+            "format": "uuid",
+            "title": "Analysis Id",
+            "type": "string"
+          },
+          "correct_count": {
+            "title": "Correct Count",
+            "type": "integer"
+          },
+          "lesson_title": {
+            "title": "Lesson Title",
+            "type": "string"
+          },
+          "published_at": {
+            "format": "date-time",
+            "title": "Published At",
+            "type": "string"
+          },
+          "questions_total": {
+            "title": "Questions Total",
+            "type": "integer"
+          },
+          "score_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score Pct"
+          },
+          "subject": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subject"
+          },
+          "test_id": {
+            "format": "uuid",
+            "title": "Test Id",
+            "type": "string"
+          },
+          "test_title": {
+            "title": "Test Title",
+            "type": "string"
+          },
+          "text": {
+            "description": "Учню — текст для учня, батькам — для батьків (Markdown)",
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "analysis_id",
+          "test_id",
+          "test_title",
+          "lesson_title",
+          "subject",
+          "score_pct",
+          "correct_count",
+          "questions_total",
+          "text",
+          "published_at"
+        ],
+        "title": "TestFeedbackItem",
+        "type": "object"
+      },
+      "TestFeedbackOut": {
+        "examples": [
+          {
+            "items": [
+              {
+                "analysis_id": "0192f0a0-0000-7000-8000-000000000a01",
+                "correct_count": 5,
+                "lesson_title": "Додавання дробів з однаковими знаменниками",
+                "published_at": "2026-12-08T10:21:30Z",
+                "questions_total": 8,
+                "score_pct": 62.5,
+                "subject": "Математика",
+                "test_id": "0192f0a0-0000-7000-8000-000000000301",
+                "test_title": "Дроби: перевір себе",
+                "text": "Правильних відповідей: **5 з 8**…"
+              }
+            ]
+          }
+        ],
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/TestFeedbackItem"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "TestFeedbackOut",
         "type": "object"
       },
       "TestOut": {
@@ -11704,6 +12089,323 @@
         ]
       }
     },
+    "/classes/{class_id}/tests/{test_id}/analysis": {
+      "get": {
+        "description": "Останній аналіз тесту в класі (будь-який статус). 404 `ANALYSIS_NOT_FOUND` — тест ще\nне аналізували. Поки `processing`, клієнт опитує кожні 3 с.",
+        "operationId": "get_analysis_classes__class_id__tests__test_id__analysis_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "test_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Test Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "class_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Class Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "attempts_count": 24,
+                  "class_id": "0192f0a0-0000-7000-8000-000000000001",
+                  "completed_at": "2026-12-08T10:15:41Z",
+                  "created_at": "2026-12-08T10:15:02Z",
+                  "created_by": "0192f0a0-0000-7000-8000-0000000000aa",
+                  "id": "0192f0a0-0000-7000-8000-000000000a01",
+                  "result": {
+                    "class_summary": {
+                      "average_score_pct": 68.5,
+                      "needs_support_ids": [
+                        "0192f0a0-0000-7000-8000-0000000000cc"
+                      ],
+                      "overview": "Клас загалом засвоїв тему…",
+                      "pass_score_pct": 60,
+                      "passed_count": 17,
+                      "recommendations": [
+                        "Повторити правило додавання дробів"
+                      ],
+                      "students_total": 24
+                    },
+                    "llm_used": true,
+                    "misconceptions": [],
+                    "questions": [],
+                    "skills": [],
+                    "students": [
+                      {
+                        "correct_question_ids": [],
+                        "feedback": {
+                          "parent": "Варто разом повторити додавання дробів з однаковими знаменниками.",
+                          "student": "Ти добре стараєшся! Повтори правило: знаменник лишається тим самим.",
+                          "teacher": "Додає чисельники й знаменники окремо."
+                        },
+                        "feedback_edited": false,
+                        "misconception_ids": [
+                          "m1"
+                        ],
+                        "passed": false,
+                        "score_pct": 50.0,
+                        "status": "needs_support",
+                        "strong_skills": [],
+                        "student_id": "0192f0a0-0000-7000-8000-0000000000cc",
+                        "weak_skills": [
+                          "Додавання дробів"
+                        ],
+                        "wrong_question_ids": [
+                          "0192f0a0-0000-7000-8000-000000000401"
+                        ]
+                      }
+                    ]
+                  },
+                  "status": "draft",
+                  "test_id": "0192f0a0-0000-7000-8000-000000000301"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/TestAnalysisOut"
+                }
+              }
+            },
+            "description": "Успішна відповідь"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Не автентифіковано"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Недостатньо прав"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Не знайдено"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Analysis",
+        "tags": [
+          "test-analysis"
+        ]
+      },
+      "post": {
+        "description": "Запускає AI-аналіз тесту за зарахованими спробами учнів класу. Лише вчитель класу.\n\n409 `NOT_ENOUGH_ATTEMPTS` (`details: {attempts, required}`) — замало спроб;\n409 `TEST_NOT_ANALYZABLE` — у тесті немає питань з вибором. Повторний запуск після\n`draft`/`published`/`failed` створює новий аналіз (старі лишаються).",
+        "operationId": "start_analysis_classes__class_id__tests__test_id__analysis_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "test_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Test Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "class_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Class Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Аналіз цього тесту вже йде — повернуто його"
+          },
+          "202": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "attempts_count": 24,
+                  "class_id": "0192f0a0-0000-7000-8000-000000000001",
+                  "completed_at": "2026-12-08T10:15:41Z",
+                  "created_at": "2026-12-08T10:15:02Z",
+                  "created_by": "0192f0a0-0000-7000-8000-0000000000aa",
+                  "id": "0192f0a0-0000-7000-8000-000000000a01",
+                  "result": {
+                    "class_summary": {
+                      "average_score_pct": 68.5,
+                      "needs_support_ids": [
+                        "0192f0a0-0000-7000-8000-0000000000cc"
+                      ],
+                      "overview": "Клас загалом засвоїв тему…",
+                      "pass_score_pct": 60,
+                      "passed_count": 17,
+                      "recommendations": [
+                        "Повторити правило додавання дробів"
+                      ],
+                      "students_total": 24
+                    },
+                    "llm_used": true,
+                    "misconceptions": [],
+                    "questions": [],
+                    "skills": [],
+                    "students": [
+                      {
+                        "correct_question_ids": [],
+                        "feedback": {
+                          "parent": "Варто разом повторити додавання дробів з однаковими знаменниками.",
+                          "student": "Ти добре стараєшся! Повтори правило: знаменник лишається тим самим.",
+                          "teacher": "Додає чисельники й знаменники окремо."
+                        },
+                        "feedback_edited": false,
+                        "misconception_ids": [
+                          "m1"
+                        ],
+                        "passed": false,
+                        "score_pct": 50.0,
+                        "status": "needs_support",
+                        "strong_skills": [],
+                        "student_id": "0192f0a0-0000-7000-8000-0000000000cc",
+                        "weak_skills": [
+                          "Додавання дробів"
+                        ],
+                        "wrong_question_ids": [
+                          "0192f0a0-0000-7000-8000-000000000401"
+                        ]
+                      }
+                    ]
+                  },
+                  "status": "draft",
+                  "test_id": "0192f0a0-0000-7000-8000-000000000301"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/TestAnalysisOut"
+                }
+              }
+            },
+            "description": "Аналіз запущено (`processing`)"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Не автентифіковано"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Недостатньо прав"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Не знайдено"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Конфлікт стану"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Start Analysis",
+        "tags": [
+          "test-analysis"
+        ]
+      }
+    },
     "/deletion-requests": {
       "get": {
         "description": "Адміністрація — запити своєї школи (`?status=pending` — черга на рішення); батьки —\nзапити щодо своїх дітей (і створені школою чи другим із батьків) та власні. Автора\nвидно лише за роллю (`requested_by_role`).",
@@ -15975,6 +16677,111 @@
         ]
       }
     },
+    "/students/{student_id}/test-feedback": {
+      "get": {
+        "description": "Опубліковані відгуки вчителя за тестами: учень — про себе, батьки — про свою дитину.\n`text` — версія для того, хто питає.",
+        "operationId": "student_test_feedback_students__student_id__test_feedback_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "student_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Student Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "items": [
+                    {
+                      "analysis_id": "0192f0a0-0000-7000-8000-000000000a01",
+                      "correct_count": 5,
+                      "lesson_title": "Додавання дробів з однаковими знаменниками",
+                      "published_at": "2026-12-08T10:21:30Z",
+                      "questions_total": 8,
+                      "score_pct": 62.5,
+                      "subject": "Математика",
+                      "test_id": "0192f0a0-0000-7000-8000-000000000301",
+                      "test_title": "Дроби: перевір себе",
+                      "text": "Правильних відповідей: **5 з 8**…"
+                    }
+                  ]
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/TestFeedbackOut"
+                }
+              }
+            },
+            "description": "Успішна відповідь"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Не автентифіковано"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Недостатньо прав"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Не знайдено"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Student Test Feedback",
+        "tags": [
+          "test-analysis"
+        ]
+      }
+    },
     "/students/{student_id}/wellbeing": {
       "get": {
         "description": "Учень бачить свої картинки за 14 днів і `show_support`; батьки — лише тижневе зведення\nсловами (без днів і чисел), кожен перегляд батьків пишеться в журнал. Вчитель (навіть\nсвого класу), адмін, інші батьки й учні — 403.",
@@ -16482,6 +17289,301 @@
         "summary": "Post Events",
         "tags": [
           "sync"
+        ]
+      }
+    },
+    "/test-analyses/{analysis_id}/publish": {
+      "post": {
+        "description": "Надсилає фідбек учням і батькам. Ідемпотентно. 409 `ANALYSIS_NOT_READY` — аналіз ще\n`processing` або `failed`.",
+        "operationId": "publish_analysis_test_analyses__analysis_id__publish_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "analysis_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Analysis Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "attempts_count": 24,
+                  "class_id": "0192f0a0-0000-7000-8000-000000000001",
+                  "completed_at": "2026-12-08T10:15:41Z",
+                  "created_at": "2026-12-08T10:15:02Z",
+                  "created_by": "0192f0a0-0000-7000-8000-0000000000aa",
+                  "id": "0192f0a0-0000-7000-8000-000000000a01",
+                  "result": {
+                    "class_summary": {
+                      "average_score_pct": 68.5,
+                      "needs_support_ids": [
+                        "0192f0a0-0000-7000-8000-0000000000cc"
+                      ],
+                      "overview": "Клас загалом засвоїв тему…",
+                      "pass_score_pct": 60,
+                      "passed_count": 17,
+                      "recommendations": [
+                        "Повторити правило додавання дробів"
+                      ],
+                      "students_total": 24
+                    },
+                    "llm_used": true,
+                    "misconceptions": [],
+                    "questions": [],
+                    "skills": [],
+                    "students": [
+                      {
+                        "correct_question_ids": [],
+                        "feedback": {
+                          "parent": "Варто разом повторити додавання дробів з однаковими знаменниками.",
+                          "student": "Ти добре стараєшся! Повтори правило: знаменник лишається тим самим.",
+                          "teacher": "Додає чисельники й знаменники окремо."
+                        },
+                        "feedback_edited": false,
+                        "misconception_ids": [
+                          "m1"
+                        ],
+                        "passed": false,
+                        "score_pct": 50.0,
+                        "status": "needs_support",
+                        "strong_skills": [],
+                        "student_id": "0192f0a0-0000-7000-8000-0000000000cc",
+                        "weak_skills": [
+                          "Додавання дробів"
+                        ],
+                        "wrong_question_ids": [
+                          "0192f0a0-0000-7000-8000-000000000401"
+                        ]
+                      }
+                    ]
+                  },
+                  "status": "draft",
+                  "test_id": "0192f0a0-0000-7000-8000-000000000301"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/TestAnalysisOut"
+                }
+              }
+            },
+            "description": "Успішна відповідь"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Не автентифіковано"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Недостатньо прав"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Не знайдено"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Конфлікт стану"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Publish Analysis",
+        "tags": [
+          "test-analysis"
+        ]
+      }
+    },
+    "/test-analyses/{analysis_id}/students/{student_id}": {
+      "patch": {
+        "description": "Правка тексту для учня та/або батьків (Markdown, ≤ 3000 символів). Відсутнє поле — без\nзмін, `null` — повернути текст AI. Лише чернетка (409 `ANALYSIS_NOT_DRAFT`).",
+        "operationId": "edit_student_feedback_test_analyses__analysis_id__students__student_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "analysis_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Analysis Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "student_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Student Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FeedbackEditIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "correct_question_ids": [],
+                  "feedback": {
+                    "parent": "Варто разом повторити додавання дробів з однаковими знаменниками.",
+                    "student": "Ти добре стараєшся! Повтори правило: знаменник лишається тим самим.",
+                    "teacher": "Додає чисельники й знаменники окремо."
+                  },
+                  "feedback_edited": false,
+                  "misconception_ids": [
+                    "m1"
+                  ],
+                  "passed": false,
+                  "score_pct": 50.0,
+                  "status": "needs_support",
+                  "strong_skills": [],
+                  "student_id": "0192f0a0-0000-7000-8000-0000000000cc",
+                  "weak_skills": [
+                    "Додавання дробів"
+                  ],
+                  "wrong_question_ids": [
+                    "0192f0a0-0000-7000-8000-000000000401"
+                  ]
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/AnalysisStudentOut"
+                }
+              }
+            },
+            "description": "Успішна відповідь"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Не автентифіковано"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Недостатньо прав"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Не знайдено"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Конфлікт стану"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Edit Student Feedback",
+        "tags": [
+          "test-analysis"
         ]
       }
     },

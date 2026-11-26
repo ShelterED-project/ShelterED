@@ -21,6 +21,7 @@ from app.core.errors import AppError
 from app.models.privacy import DataDeletionRequest
 from app.models.school import ClassMembership, ParentChild, User
 from app.schemas.privacy import DeletionRequestCreate, DeletionRequestOut
+from app.services import test_analysis as test_analysis_service
 from app.services.idempotency import id_conflict, integrity_errors
 
 logger = logging.getLogger(__name__)
@@ -180,6 +181,8 @@ async def confirm(
         student = await session.get(User, student_id)
         if student is not None and student.role == "student":
             req.student_id = None
+            # Учень у jsonb аналізів тестів: каскад БД його не прибере.
+            await test_analysis_service.forget_student(session, student.id)
             await session.flush()
             # Решту даних учня прибирає ON DELETE CASCADE у БД.
             await session.delete(student)

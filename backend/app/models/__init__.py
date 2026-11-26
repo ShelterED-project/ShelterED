@@ -11,6 +11,7 @@ from app.models import (
     school,
     stats,
     sync,
+    test_analysis,
     tutor,
     wellbeing,
 )
@@ -29,6 +30,7 @@ __all__ = [
     "school",
     "stats",
     "sync",
+    "test_analysis",
     "tutor",
     "wellbeing",
 ]
